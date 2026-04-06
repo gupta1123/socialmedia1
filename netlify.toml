@@ -1,6 +1,5 @@
 [build]
-  base = "apps/web"
-  command = "pnpm --filter @image-lab/web build"
+  command = "pnpm --filter @image-lab/contracts build && pnpm --filter @image-lab/web build"
   publish = "apps/web/.next"
 
 [build.environment]
