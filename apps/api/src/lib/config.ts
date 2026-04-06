@@ -32,7 +32,7 @@ const EnvSchema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
-  SUPABASE_JWT_SECRET: z.string().min(1),
+  SUPABASE_JWT_SECRET: z.string().min(1).optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default("creative-assets"),
   FAL_KEY: z.string().optional(),
   FAL_WEBHOOK_URL: z.string().url().optional(),

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
 import { jwtVerify } from "jose";
 import { env } from "../lib/config.js";
+import { supabaseAdmin } from "../lib/supabase.js";
 import type { AuthenticatedViewer } from "../lib/viewer.js";
 
 declare module "fastify" {
@@ -26,6 +27,19 @@ async function authPlugin(app: FastifyInstance) {
       const token = header.replace("Bearer ", "").trim();
 
       try {
+        const { data, error } = await supabaseAdmin.auth.getUser(token);
+
+        if (!error && data.user) {
+          request.viewer = data.user.email
+            ? { userId: data.user.id, email: data.user.email }
+            : { userId: data.user.id };
+          return;
+        }
+
+        if (!env.SUPABASE_JWT_SECRET) {
+          throw error ?? new Error("Unable to resolve session from Supabase");
+        }
+
         const secret = new TextEncoder().encode(env.SUPABASE_JWT_SECRET);
         const { payload } = await jwtVerify(token, secret);
 
