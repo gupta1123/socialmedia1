@@ -11,10 +11,24 @@ const optionalUrl = z.preprocess((value) => {
   return value;
 }, z.string().url().optional());
 
+const optionalUrlList = z.preprocess((value) => {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const urls = value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  return urls.length > 0 ? urls : undefined;
+}, z.array(z.string().url()).optional());
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(4000),
   API_ORIGIN: z.string().url().default("http://localhost:3000"),
+  API_ORIGINS: optionalUrlList,
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),

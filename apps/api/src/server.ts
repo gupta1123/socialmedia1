@@ -20,19 +20,36 @@ export async function buildApp() {
     logger: true
   });
 
+  const allowedOrigins = new Set([
+    env.API_ORIGIN,
+    ...(env.API_ORIGINS ?? []),
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+  ]);
+
+  const allowedOriginPatterns = [
+    /^https:\/\/[a-z0-9-]+\.netlify\.app$/i,
+    /^https:\/\/[a-z0-9-]+\.netlify\.live$/i
+  ];
+
   await app.register(sensible);
   await app.register(cors, {
     origin: (origin, cb) => {
-      const allowedOrigins = [
-        ...env.API_ORIGIN.split(",").map(o => o.trim()),
-        "http://localhost:3000",
-        "http://127.0.0.1:3000"
-      ];
-      if (!origin || allowedOrigins.some(o => origin.startsWith(o)) || allowedOrigins.includes("*")) {
+      if (!origin) {
         cb(null, true);
         return;
       }
-      cb(new Error("Not allowed by CORS"), false);
+
+      try {
+        const normalizedOrigin = new URL(origin).origin;
+        const isAllowed =
+          allowedOrigins.has(normalizedOrigin) ||
+          allowedOriginPatterns.some((pattern) => pattern.test(normalizedOrigin));
+
+        cb(null, isAllowed);
+      } catch {
+        cb(null, false);
+      }
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
