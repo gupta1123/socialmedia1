@@ -123,8 +123,21 @@ export async function getCreativeRunDetail(runId: string): Promise<CreativeRunDe
 
   const jobRows = jobs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   const outputs = await listOutputsByJobIds(jobRows.map((job) => job.id));
-  const seedOutputIds = outputs.filter((output) => output.kind === "style_seed").map((output) => output.id);
+  const latestStyleSeedJobId = getLatestStyleSeedJobId(jobRows);
+  const latestSeedOutputs = latestStyleSeedJobId
+    ? outputs
+        .filter((output) => output.kind === "style_seed" && output.job_id === latestStyleSeedJobId)
+        .sort((a, b) => a.output_index - b.output_index)
+    : [];
+  const seedOutputIds = latestSeedOutputs.map((output) => output.id);
   const templates = await listTemplatesByOutputIds(seedOutputIds);
+  const latestSeedTemplates = templates
+    .filter((template) => template.creative_output_id && seedOutputIds.includes(template.creative_output_id))
+    .sort((left, right) => {
+      const leftIndex = latestSeedOutputs.find((output) => output.id === left.creative_output_id)?.output_index ?? 0;
+      const rightIndex = latestSeedOutputs.find((output) => output.id === right.creative_output_id)?.output_index ?? 0;
+      return leftIndex - rightIndex;
+    });
   const run = buildRunSummary(promptPackage, brand?.name ?? "Brand", brief, jobs, outputs, templates);
   const orderedJobs = jobRows.map((job) => mapJobRow(job, promptPackage));
 
@@ -133,7 +146,7 @@ export async function getCreativeRunDetail(runId: string): Promise<CreativeRunDe
     brief,
     promptPackage: mapPromptPackageRow(promptPackage),
     jobs: orderedJobs,
-    seedTemplates: templates.map((template) => mapTemplateRow(template, outputs)),
+    seedTemplates: latestSeedTemplates.map((template) => mapTemplateRow(template, latestSeedOutputs)),
     finalOutputs: outputs
       .filter((output) => output.kind === "final")
       .sort((a, b) => a.output_index - b.output_index)
@@ -368,10 +381,19 @@ function buildRunSummary(
       ? resolved.format
       : brief.format;
   const latestJob = [...jobs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] ?? null;
-  const templatedSeedOutputIds = new Set(templates.map((template) => template.creative_output_id).filter(Boolean));
-  const seedTemplateCount = outputs.filter(
-    (output) => output.kind === "style_seed" && templatedSeedOutputIds.has(output.id)
-  ).length;
+  const latestStyleSeedJobId = getLatestStyleSeedJobId(jobs);
+  const latestSeedOutputIds = new Set(
+    outputs
+      .filter((output) => output.kind === "style_seed" && output.job_id === latestStyleSeedJobId)
+      .map((output) => output.id)
+  );
+  const templatedSeedOutputIds = new Set(
+    templates
+      .map((template) => template.creative_output_id)
+      .filter((outputId): outputId is string => Boolean(outputId))
+      .filter((outputId) => latestSeedOutputIds.has(outputId))
+  );
+  const seedTemplateCount = templatedSeedOutputIds.size;
   const finalOutputCount = outputs.filter((output) => output.kind === "final").length;
 
   return {
@@ -401,6 +423,12 @@ function buildRunSummary(
     seedTemplateCount,
     finalOutputCount
   };
+}
+
+function getLatestStyleSeedJobId(jobs: JobRow[]) {
+  return [...jobs]
+    .filter((job) => job.job_type === "style_seed")
+    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0]?.id ?? null;
 }
 
 function mapJobRow(row: JobRow, promptPackage: PromptPackageRow): CreativeJobRecord {
