@@ -1038,7 +1038,7 @@ function serializeSubmissionError(error: unknown) {
 
   if (dnsCode === "ENOTFOUND") {
     return {
-      message: "Fal API could not be reached from this machine. Check DNS, VPN, firewall, or internet access and try again.",
+      message: "The image generation service could not be reached from this machine. Check DNS, VPN, firewall, or internet access and try again.",
       statusCode: 503,
       code: dnsCode
     };
@@ -1052,7 +1052,7 @@ function serializeSubmissionError(error: unknown) {
   }
 
   return {
-    message: "Fal request failed",
+    message: "Image generation request failed",
     statusCode: statusCode ?? 500
   };
 }
