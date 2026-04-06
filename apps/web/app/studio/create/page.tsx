@@ -2485,7 +2485,7 @@ export default function CreatePage() {
                   rows={4}
                 />
                 <span className="create-hint">
-                  Short brief only. Brand, project, festival, and post-type rules are added automatically.
+                  Provide specific instructions. Brand, project, festival, and post-type rules are added automatically.
                 </span>
                 {promptTooShort ? (
                   <span className="create-field-warning">
