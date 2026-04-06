@@ -1,0 +1,11 @@
+[build]
+  base = "apps/web"
+  command = "pnpm --filter @image-lab/web build"
+  publish = "apps/web/.next"
+
+[build.environment]
+  NODE_VERSION = "22"
+  PNPM_VERSION = "10"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
