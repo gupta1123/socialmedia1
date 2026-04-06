@@ -1,0 +1,4 @@
+agno>=2.5.10
+openai>=1.70.0
+pydantic>=2.11.1
+

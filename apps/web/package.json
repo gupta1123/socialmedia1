@@ -1,0 +1,27 @@
+{
+  "name": "@image-lab/web",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit -p tsconfig.json --incremental false",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fontsource/poppins": "^5.2.7",
+    "@image-lab/contracts": "file:../../packages/contracts",
+    "@supabase/supabase-js": "^2.49.4",
+    "next": "^15.3.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.1"
+  }
+}

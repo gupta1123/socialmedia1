@@ -1,0 +1,21 @@
+{
+  "name": "brand-aware-image-lab",
+  "private": true,
+  "packageManager": "pnpm@10.6.5",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "pnpm --filter @image-lab/web dev",
+    "dev:api": "pnpm --filter @image-lab/api dev",
+    "build": "pnpm --filter @image-lab/contracts build && pnpm --filter @image-lab/api build && pnpm --filter @image-lab/web build",
+    "test": "pnpm --filter @image-lab/api test && pnpm --filter @image-lab/web test",
+    "typecheck": "pnpm --filter @image-lab/contracts typecheck && pnpm --filter @image-lab/api typecheck && pnpm --filter @image-lab/web typecheck",
+    "heroku-postbuild": "pnpm --filter @image-lab/contracts build && pnpm --filter @image-lab/api build",
+    "start": "pnpm --filter @image-lab/api start",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:reset": "supabase db reset"
+  }
+}

@@ -1,0 +1,747 @@
+import type {
+  CampaignDeliverablePlanRecord,
+  CampaignRecord,
+  BrandDetail,
+  BrandPersonaRecord,
+  BootstrapResponse,
+  CalendarItemRecord,
+  ChannelAccountRecord,
+  ContentPillarRecord,
+  CreateCampaignDeliverablePlanInput,
+  CreateCampaignInput,
+  CreateSeriesInput,
+  CreateCalendarItemInput,
+  CreateBrandInput,
+  CreateCreativeTemplateInput,
+  CreateDeliverableInput,
+  CreatePublicationInput,
+  CreateProjectInput,
+  CreativeJobRecord,
+  CreativeOutputRecord,
+  CreativeRunDetail,
+  CreativeRunSummary,
+  CreativeTemplateDetail,
+  CreativeTemplateRecord,
+  CreativeBrief,
+  DeliverableDetail,
+  DeliverableRecord,
+  FestivalRecord,
+  FeedbackRequest,
+  FeedbackResult,
+  FinalGenerationRequest,
+  CreatePostingWindowInput,
+  HomeOverview,
+  PlanOverview,
+  PostVersionRecord,
+  PostTypeRecord,
+  PostingWindowRecord,
+  PromptPackage,
+  ProjectDetail,
+  ProjectRecord,
+  PublicationRecord,
+  QueueEntry,
+  ReviewQueueEntry,
+  SeriesRecord,
+  StyleTemplateRecord,
+  ApprovalDecisionInput,
+  BrandAssetRecord,
+  UpdateCampaignDeliverablePlanInput,
+  UpdateCampaignInput,
+  UpdateBrandInput,
+  UpdateCalendarItemInput,
+  UpdateCreativeTemplateInput,
+  UpdateDeliverableInput,
+  UpdatePostingWindowInput,
+  UpdatePublicationInput,
+  UpdateProjectInput,
+  UpdateSeriesInput,
+  WorkspaceMemberRecord,
+  StyleSeedRequest
+} from "@image-lab/contracts";
+
+const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+export type BootstrapMode = "full" | "light";
+
+async function request<T>(path: string, token: string, init?: RequestInit) {
+  const response = await fetch(`${apiBase}${path}`, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(extractApiErrorMessage(text, response.status));
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const text = await response.text();
+  if (!text) {
+    return undefined as T;
+  }
+
+  return JSON.parse(text) as T;
+}
+
+function extractApiErrorMessage(text: string, status: number) {
+  if (!text) {
+    return `Request failed: ${status}`;
+  }
+
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    const normalized = normalizeApiErrorMessage(parsed);
+    if (normalized) {
+      return normalized;
+    }
+  } catch {
+    // Non-JSON error body; use raw text below.
+  }
+
+  return text;
+}
+
+function normalizeApiErrorMessage(value: unknown): string | null {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if ((trimmed.startsWith("[") && trimmed.endsWith("]")) || (trimmed.startsWith("{") && trimmed.endsWith("}"))) {
+      try {
+        return normalizeApiErrorMessage(JSON.parse(trimmed));
+      } catch {
+        return trimmed;
+      }
+    }
+
+    return trimmed;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const normalized = normalizeApiErrorMessage(item);
+      if (normalized) {
+        return normalized;
+      }
+    }
+    return null;
+  }
+
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    const issuePath = Array.isArray(record.path)
+      ? record.path.filter((part): part is string => typeof part === "string").join(".")
+      : null;
+    const issueMessage = typeof record.message === "string" ? record.message.trim() : null;
+
+    if (issuePath && issueMessage) {
+      return `${startCase(issuePath)}: ${issueMessage}`;
+    }
+
+    if (issueMessage) {
+      const nested = normalizeApiErrorMessage(issueMessage);
+      if (nested) {
+        return nested;
+      }
+    }
+
+    if (typeof record.error === "string" && record.error.trim().length > 0) {
+      return record.error.trim();
+    }
+
+    if (record.error) {
+      const normalized = normalizeApiErrorMessage(record.error);
+      if (normalized) {
+        return normalized;
+      }
+    }
+  }
+
+  return null;
+}
+
+function startCase(value: string) {
+  if (!value) {
+    return value;
+  }
+
+  return value
+    .split(".")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function withQuery(path: string, params: Record<string, string | undefined | null>) {
+  const search = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === "string" && value.length > 0) {
+      search.set(key, value);
+    }
+  }
+
+  const query = search.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+export function bootstrapSession(token: string, mode: BootstrapMode = "full", brandId?: string) {
+  const params = new URLSearchParams();
+  if (mode === "light") {
+    params.set("view", "light");
+  }
+  if (brandId) {
+    params.set("brandId", brandId);
+  }
+
+  const query = params.toString();
+  return request<BootstrapResponse>(`/api/session/bootstrap${query ? `?${query}` : ""}`, token);
+}
+
+export function createBrand(token: string, payload: CreateBrandInput) {
+  return request<{ id: string; currentProfileVersionId: string }>("/api/brands", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getBrandDetail(token: string, brandId: string) {
+  return request<BrandDetail>(`/api/brands/${brandId}`, token);
+}
+
+export function getBrandAssets(token: string, brandId: string) {
+  return request<BrandAssetRecord[]>(`/api/brands/${brandId}/assets`, token);
+}
+
+export function getProjects(token: string, filters?: { brandId?: string }) {
+  return request<ProjectRecord[]>(withQuery("/api/projects", { brandId: filters?.brandId }), token);
+}
+
+export function getProjectDetail(token: string, projectId: string) {
+  return request<ProjectDetail>(`/api/projects/${projectId}`, token);
+}
+
+export function createProject(token: string, payload: CreateProjectInput) {
+  return request<ProjectDetail>("/api/projects", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateProject(token: string, projectId: string, payload: UpdateProjectInput) {
+  return request<ProjectDetail>(`/api/projects/${projectId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getPostTypes(token: string) {
+  return request<PostTypeRecord[]>("/api/post-types", token);
+}
+
+export function getFestivals(token: string) {
+  return request<FestivalRecord[]>("/api/festivals", token);
+}
+
+export function getBrandPersonas(token: string, brandId?: string) {
+  return request<BrandPersonaRecord[]>(withQuery("/api/brand-personas", { brandId }), token);
+}
+
+export function getContentPillars(token: string, brandId?: string) {
+  return request<ContentPillarRecord[]>(withQuery("/api/content-pillars", { brandId }), token);
+}
+
+export function getChannelAccounts(token: string, brandId?: string) {
+  return request<ChannelAccountRecord[]>(withQuery("/api/channel-accounts", { brandId }), token);
+}
+
+export function getPostingWindows(token: string, brandId?: string) {
+  return request<PostingWindowRecord[]>(withQuery("/api/posting-windows", { brandId }), token);
+}
+
+export function createPostingWindow(token: string, payload: CreatePostingWindowInput) {
+  return request<PostingWindowRecord>("/api/posting-windows", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updatePostingWindow(token: string, postingWindowId: string, payload: UpdatePostingWindowInput) {
+  return request<PostingWindowRecord>(`/api/posting-windows/${postingWindowId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deletePostingWindow(token: string, postingWindowId: string) {
+  return request<void>(`/api/posting-windows/${postingWindowId}`, token, {
+    method: "DELETE"
+  });
+}
+
+export function getCampaigns(
+  token: string,
+  filters?: { brandId?: string; projectId?: string; status?: string }
+) {
+  return request<CampaignRecord[]>(
+    withQuery("/api/campaigns", {
+      brandId: filters?.brandId,
+      projectId: filters?.projectId,
+      status: filters?.status
+    }),
+    token
+  );
+}
+
+export function getCampaign(token: string, campaignId: string) {
+  return request<CampaignRecord>(`/api/campaigns/${campaignId}`, token);
+}
+
+export function createCampaign(token: string, payload: CreateCampaignInput) {
+  return request<CampaignRecord>("/api/campaigns", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateCampaign(token: string, campaignId: string, payload: UpdateCampaignInput) {
+  return request<CampaignRecord>(`/api/campaigns/${campaignId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getCampaignPlans(token: string, campaignId: string) {
+  return request<CampaignDeliverablePlanRecord[]>(`/api/campaigns/${campaignId}/plans`, token);
+}
+
+export function createCampaignPlan(
+  token: string,
+  campaignId: string,
+  payload: CreateCampaignDeliverablePlanInput
+) {
+  return request<CampaignDeliverablePlanRecord>(`/api/campaigns/${campaignId}/plans`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateCampaignPlan(
+  token: string,
+  campaignId: string,
+  planId: string,
+  payload: UpdateCampaignDeliverablePlanInput
+) {
+  return request<CampaignDeliverablePlanRecord>(`/api/campaigns/${campaignId}/plans/${planId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function materializeCampaignDeliverables(
+  token: string,
+  campaignId: string,
+  payload?: { projectId?: string; startAt?: string }
+) {
+  return request<DeliverableRecord[]>(`/api/campaigns/${campaignId}/materialize-deliverables`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload ?? {})
+  });
+}
+
+export function getDeliverables(
+  token: string,
+  filters?: {
+    brandId?: string;
+    projectId?: string;
+    campaignId?: string;
+    seriesId?: string;
+    ownerUserId?: string;
+    planningMode?: "campaign" | "series" | "one_off" | "always_on" | "ad_hoc";
+    status?: string;
+    statusIn?: string[];
+    scheduledFrom?: string;
+    scheduledTo?: string;
+    limit?: number;
+    includePreviews?: boolean;
+  }
+) {
+  return request<DeliverableRecord[]>(
+    withQuery("/api/deliverables", {
+      brandId: filters?.brandId,
+      projectId: filters?.projectId,
+      campaignId: filters?.campaignId,
+      seriesId: filters?.seriesId,
+      ownerUserId: filters?.ownerUserId,
+      planningMode: filters?.planningMode,
+      status: filters?.status,
+      statusIn: filters?.statusIn?.join(","),
+      scheduledFrom: filters?.scheduledFrom,
+      scheduledTo: filters?.scheduledTo,
+      limit: typeof filters?.limit === "number" ? String(filters.limit) : undefined,
+      includePreviews: filters?.includePreviews ? "1" : undefined
+    }),
+    token
+  );
+}
+
+export function getDeliverable(token: string, deliverableId: string) {
+  return request<DeliverableDetail>(`/api/deliverables/${deliverableId}`, token);
+}
+
+export function createDeliverable(token: string, payload: CreateDeliverableInput) {
+  return request<DeliverableRecord>("/api/deliverables", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateDeliverable(token: string, deliverableId: string, payload: UpdateDeliverableInput) {
+  return request<DeliverableRecord>(`/api/deliverables/${deliverableId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteDeliverable(token: string, deliverableId: string) {
+  return request<void>(`/api/deliverables/${deliverableId}`, token, {
+    method: "DELETE"
+  });
+}
+
+export function compileDeliverable(token: string, deliverableId: string) {
+  return request<PromptPackage>(`/api/deliverables/${deliverableId}/compile`, token, {
+    method: "POST"
+  });
+}
+
+export function getDeliverablePostVersions(token: string, deliverableId: string) {
+  return request<PostVersionRecord[]>(`/api/deliverables/${deliverableId}/post-versions`, token);
+}
+
+export function approvePostVersion(
+  token: string,
+  deliverableId: string,
+  postVersionId: string,
+  payload: ApprovalDecisionInput
+) {
+  return request<{ deliverable: DeliverableRecord; postVersion: PostVersionRecord }>(
+    `/api/deliverables/${deliverableId}/post-versions/${postVersionId}/approval`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export function getReviewQueue(token: string, filters?: { brandId?: string; deliverableId?: string }) {
+  return request<ReviewQueueEntry[]>(
+    withQuery("/api/review-queue", {
+      brandId: filters?.brandId,
+      deliverableId: filters?.deliverableId
+    }),
+    token
+  );
+}
+
+export function getSeries(
+  token: string,
+  filters?: { brandId?: string; projectId?: string; status?: "draft" | "active" | "paused" | "archived" }
+) {
+  return request<SeriesRecord[]>(
+    withQuery("/api/series", {
+      brandId: filters?.brandId,
+      projectId: filters?.projectId,
+      status: filters?.status
+    }),
+    token
+  );
+}
+
+export function getSeriesDetail(token: string, seriesId: string) {
+  return request<SeriesRecord>(`/api/series/${seriesId}`, token);
+}
+
+export function createSeries(token: string, payload: CreateSeriesInput) {
+  return request<SeriesRecord>("/api/series", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateSeries(token: string, seriesId: string, payload: UpdateSeriesInput) {
+  return request<SeriesRecord>(`/api/series/${seriesId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function materializeSeries(
+  token: string,
+  seriesId: string,
+  payload?: { startAt?: string; endAt?: string }
+) {
+  return request<DeliverableRecord[]>(`/api/series/${seriesId}/materialize`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload ?? {})
+  });
+}
+
+export function getHomeOverview(token: string, brandId?: string) {
+  return request<HomeOverview>(withQuery("/api/home", { brandId }), token);
+}
+
+export function getPlanOverview(token: string, brandId?: string) {
+  return request<PlanOverview>(withQuery("/api/plan/overview", { brandId }), token);
+}
+
+export function getQueue(
+  token: string,
+  filters?: {
+    scope?: "my" | "team" | "unassigned";
+    brandId?: string;
+    projectId?: string;
+    statusGroup?: "todo" | "in_progress" | "ready_to_ship" | "done" | "blocked";
+    planningMode?: "campaign" | "series" | "one_off" | "always_on" | "ad_hoc";
+    dueWindow?: "today" | "week" | "overdue";
+  }
+) {
+  return request<QueueEntry[]>(
+    withQuery("/api/queue", {
+      scope: filters?.scope,
+      brandId: filters?.brandId,
+      projectId: filters?.projectId,
+      statusGroup: filters?.statusGroup,
+      planningMode: filters?.planningMode,
+      dueWindow: filters?.dueWindow
+    }),
+    token
+  );
+}
+
+export function getWorkspaceMembers(token: string) {
+  return request<WorkspaceMemberRecord[]>("/api/workspace-members", token);
+}
+
+export function getPublications(
+  token: string,
+  filters?: { deliverableId?: string; status?: string }
+) {
+  return request<PublicationRecord[]>(
+    withQuery("/api/publications", {
+      deliverableId: filters?.deliverableId,
+      status: filters?.status
+    }),
+    token
+  );
+}
+
+export function createPublication(token: string, payload: CreatePublicationInput) {
+  return request<PublicationRecord>("/api/publications", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updatePublication(token: string, publicationId: string, payload: UpdatePublicationInput) {
+  return request<PublicationRecord>(`/api/publications/${publicationId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getPlanningTemplates(
+  token: string,
+  filters?: {
+    brandId?: string;
+    projectId?: string;
+    postTypeId?: string;
+    status?: "draft" | "approved" | "archived";
+  }
+) {
+  return request<CreativeTemplateRecord[]>(
+    withQuery("/api/templates", {
+      brandId: filters?.brandId,
+      projectId: filters?.projectId,
+      postTypeId: filters?.postTypeId,
+      status: filters?.status
+    }),
+    token
+  );
+}
+
+export function getPlanningTemplate(token: string, templateId: string) {
+  return request<CreativeTemplateDetail>(`/api/templates/${templateId}`, token);
+}
+
+export function createPlanningTemplate(token: string, payload: CreateCreativeTemplateInput) {
+  return request<CreativeTemplateDetail>("/api/templates", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updatePlanningTemplate(
+  token: string,
+  templateId: string,
+  payload: UpdateCreativeTemplateInput
+) {
+  return request<CreativeTemplateDetail>(`/api/templates/${templateId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getCalendarItems(
+  token: string,
+  filters?: {
+    brandId?: string;
+    projectId?: string;
+    status?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }
+) {
+  return request<CalendarItemRecord[]>(
+    withQuery("/api/calendar-items", {
+      brandId: filters?.brandId,
+      projectId: filters?.projectId,
+      status: filters?.status,
+      dateFrom: filters?.dateFrom,
+      dateTo: filters?.dateTo
+    }),
+    token
+  );
+}
+
+export function getCalendarItem(token: string, calendarItemId: string) {
+  return request<CalendarItemRecord>(`/api/calendar-items/${calendarItemId}`, token);
+}
+
+export function createCalendarItem(token: string, payload: CreateCalendarItemInput) {
+  return request<CalendarItemRecord>("/api/calendar-items", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateCalendarItem(
+  token: string,
+  calendarItemId: string,
+  payload: UpdateCalendarItemInput
+) {
+  return request<CalendarItemRecord>(`/api/calendar-items/${calendarItemId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateBrand(token: string, brandId: string, payload: UpdateBrandInput) {
+  return request<{ id: string; currentProfileVersionId: string }>(`/api/brands/${brandId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function uploadBrandAsset(
+  token: string,
+  brandId: string,
+  payload: { file: File; kind: string; label: string }
+) {
+  const body = new FormData();
+  body.append("file", payload.file);
+  body.append("kind", payload.kind);
+  body.append("label", payload.label);
+
+  return request<{ id: string; storagePath: string }>(`/api/brands/${brandId}/assets`, token, {
+    method: "POST",
+    body
+  });
+}
+
+export function compileCreative(token: string, payload: CreativeBrief) {
+  return request<PromptPackage>("/api/creative/compile", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function generateStyleSeeds(token: string, payload: StyleSeedRequest) {
+  return request<{ id: string; requestId: string | null }>("/api/creative/style-seeds", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function generateFinals(token: string, payload: FinalGenerationRequest) {
+  return request<{ id: string; requestId: string | null }>("/api/creative/finals", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getCreativeJob(token: string, jobId: string) {
+  return request<CreativeJobRecord>(`/api/creative/jobs/${jobId}`, token);
+}
+
+export function getCreativeRuns(token: string) {
+  return request<CreativeRunSummary[]>("/api/creative/runs", token);
+}
+
+export function getCreativeRun(token: string, runId: string) {
+  return request<CreativeRunDetail>(`/api/creative/runs/${runId}`, token);
+}
+
+export function getStyleTemplate(token: string, templateId: string) {
+  return request<StyleTemplateRecord>(`/api/creative/templates/${templateId}`, token);
+}
+
+export function getCreativeOutput(token: string, outputId: string) {
+  return request<CreativeOutputRecord>(`/api/creative/outputs/${outputId}`, token);
+}
+
+export function submitFeedback(token: string, outputId: string, payload: FeedbackRequest) {
+  return request<FeedbackResult>(`/api/creative/outputs/${outputId}/feedback`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}

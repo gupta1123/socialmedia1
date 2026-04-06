@@ -1,0 +1,1 @@
+-- Intentionally empty. Auth signup bootstraps workspaces via trigger.
