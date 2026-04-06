@@ -22,8 +22,21 @@ export async function buildApp() {
 
   await app.register(sensible);
   await app.register(cors, {
-    origin: [env.API_ORIGIN, "http://localhost:3000", "http://127.0.0.1:3000"],
-    credentials: true
+    origin: (origin, cb) => {
+      const allowedOrigins = [
+        ...env.API_ORIGIN.split(",").map(o => o.trim()),
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+      ];
+      if (!origin || allowedOrigins.some(o => origin.startsWith(o)) || allowedOrigins.includes("*")) {
+        cb(null, true);
+        return;
+      }
+      cb(new Error("Not allowed by CORS"), false);
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
   });
   await app.register(multipart);
   await registerAuth(app);
