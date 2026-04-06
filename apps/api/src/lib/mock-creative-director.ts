@@ -71,6 +71,7 @@ export function compilePromptPackageMock(input: Input) {
   const aspectRatio = deriveAspectRatio(input.brief.format);
   const chosenModel = "fal-ai/nano-banana";
   const templateType = input.brief.templateType;
+  const briefDirective = input.brief.prompt.trim();
   const seriesOutputKind = input.brief.seriesOutputKind ?? "single_image";
   const slideCount =
     typeof input.brief.slideCount === "number" && input.brief.slideCount >= 2
@@ -105,6 +106,12 @@ export function compilePromptPackageMock(input: Input) {
   const exactTextInstruction = input.brief.exactText
     ? `Include this exact on-image text without paraphrasing: "${input.brief.exactText}".`
     : "Avoid adding dense text overlays unless it improves the concept.";
+  const briefFirstClassInstruction = briefDirective
+    ? `User brief to honor exactly in spirit: ${briefDirective}. Treat explicit requests about lighting, time of day, atmosphere, mood, camera angle, framing, styling, or subject emphasis as first-class creative direction unless they conflict with compliance, factual project truth, or a required source image.`
+    : null;
+  const briefSeedVariationInstruction = briefDirective
+    ? `Let the explored directions materially reflect the user's brief rather than only the default post-type recipe. If the brief asks for a sunset, night scene, aerial, close-up, minimal treatment, cinematic mood, or any other visual shift, carry that into the seed directions.`
+    : null;
 
   const promptSummary = `Create a ${
     seriesOutputKind === "carousel"
@@ -131,6 +138,7 @@ export function compilePromptPackageMock(input: Input) {
       ? `This is a standalone festive greeting poster. Do not turn it into a property ad or pull in project sales facts unless the brief explicitly asks for that.`
       : null,
     `Goal: ${input.brief.goal}.`,
+    briefFirstClassInstruction,
     ...brandGuidance.seedClauses,
     ...festivalGuidance.seedClauses,
     ...projectGuidance.seedClauses,
@@ -157,6 +165,7 @@ export function compilePromptPackageMock(input: Input) {
       ? `Design a reusable carousel cover and layout language that can carry a ${slideCount ?? 5}-slide story with consistent typography, pacing, and safe zones.`
       : `Keep composition editable, with clear safe zones for brand copy and CTA.`,
     `The direction set should contain clearly different creative routes, not minor variations of the same image.`,
+    briefSeedVariationInstruction,
     safeZoneNotes.length > 0 ? `Safe-zone guidance: ${safeZoneNotes.join("; ")}.` : null,
     exactTextInstruction,
     input.referenceLabels.length > 0
@@ -179,6 +188,7 @@ export function compilePromptPackageMock(input: Input) {
         }.`
       : null,
     `Brief: ${input.brief.prompt}.`,
+    `Honor the user's explicit visual requests as first-class direction. Do not let the default post-type recipe flatten or override them unless they conflict with compliance, factual accuracy, or a required source image.`,
     input.postType ? `Post type: ${input.postType.name}.` : null,
     input.festival ? `Festival: ${input.festival.name}.` : null,
     isFestivalGreetingInput(input)

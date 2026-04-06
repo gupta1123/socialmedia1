@@ -331,4 +331,51 @@ describe("compilePromptPackageMock", () => {
       usesProjectImage: true
     });
   });
+
+  it("treats brief-specific visual directions as first-class input in seeds and finals", () => {
+    const output = compilePromptPackageMock({
+      brandName: "Northstar",
+      brandProfile: buildBaseBrandProfile(),
+      brief: {
+        brandId: crypto.randomUUID(),
+        createMode: "post",
+        channel: "instagram-feed",
+        format: "portrait",
+        goal: "Project hero reveal",
+        prompt: "Create a sunset view with a dramatic skyline and warm amber lighting",
+        referenceAssetIds: [],
+        templateType: "hero"
+      },
+      referenceLabels: ["Northstar tower hero"],
+      postType: {
+        code: "project-launch",
+        name: "Project launch",
+        config: {
+          defaultChannels: ["instagram-feed"],
+          allowedFormats: ["portrait", "square"],
+          recommendedTemplateTypes: ["hero", "announcement"],
+          requiredBriefFields: ["goal", "prompt"],
+          safeZoneGuidance: ["Reserve top and lower thirds for name and CTA"],
+          ctaStyle: "site-visit",
+          copyDensity: "balanced"
+        }
+      },
+      projectName: "Northstar Phase 2",
+      projectProfile: buildBaseProjectProfile({
+        constructionStatus: "Launch-ready premium tower",
+        latestUpdate: "New tower phase now open for launch communication"
+      })
+    });
+
+    expect(output.seedPrompt).toContain(
+      "User brief to honor exactly in spirit: Create a sunset view with a dramatic skyline and warm amber lighting."
+    );
+    expect(output.seedPrompt).toContain("Let the explored directions materially reflect the user's brief");
+    expect(output.finalPrompt).toContain(
+      "Brief: Create a sunset view with a dramatic skyline and warm amber lighting."
+    );
+    expect(output.finalPrompt).toContain(
+      "Honor the user's explicit visual requests as first-class direction."
+    );
+  });
 });

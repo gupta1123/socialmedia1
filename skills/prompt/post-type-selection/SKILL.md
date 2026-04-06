@@ -10,6 +10,7 @@ Use this skill whenever a post type is provided.
 ## Principles
 - Do not treat all posts as generic announcements.
 - The chosen post type defines the creative job to be done.
+- The post type provides the frame, but the user's brief still controls the specific scene, lighting, mood, and framing unless that would break compliance or factual accuracy.
 
 ## Mapping Guidance
 - `project-launch`: premium reveal, property-image / facade-led hero, strong name presence, sparse supporting copy, building image stays dominant.
