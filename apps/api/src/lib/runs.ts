@@ -124,6 +124,7 @@ export async function getCreativeRunDetail(runId: string): Promise<CreativeRunDe
   const jobRows = jobs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   const outputs = await listOutputsByJobIds(jobRows.map((job) => job.id));
   const latestStyleSeedJobId = getLatestStyleSeedJobId(jobRows);
+  const latestFinalJobId = getLatestFinalJobId(jobRows);
   const latestSeedOutputs = latestStyleSeedJobId
     ? outputs
         .filter((output) => output.kind === "style_seed" && output.job_id === latestStyleSeedJobId)
@@ -148,7 +149,7 @@ export async function getCreativeRunDetail(runId: string): Promise<CreativeRunDe
     jobs: orderedJobs,
     seedTemplates: latestSeedTemplates.map((template) => mapTemplateRow(template, latestSeedOutputs)),
     finalOutputs: outputs
-      .filter((output) => output.kind === "final")
+      .filter((output) => output.kind === "final" && output.job_id === latestFinalJobId)
       .sort((a, b) => a.output_index - b.output_index)
       .map((output) => mapOutputRow(output))
   };
@@ -382,6 +383,7 @@ function buildRunSummary(
       : brief.format;
   const latestJob = [...jobs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] ?? null;
   const latestStyleSeedJobId = getLatestStyleSeedJobId(jobs);
+  const latestFinalJobId = getLatestFinalJobId(jobs);
   const latestSeedOutputIds = new Set(
     outputs
       .filter((output) => output.kind === "style_seed" && output.job_id === latestStyleSeedJobId)
@@ -394,7 +396,7 @@ function buildRunSummary(
       .filter((outputId) => latestSeedOutputIds.has(outputId))
   );
   const seedTemplateCount = templatedSeedOutputIds.size;
-  const finalOutputCount = outputs.filter((output) => output.kind === "final").length;
+  const finalOutputCount = outputs.filter((output) => output.kind === "final" && output.job_id === latestFinalJobId).length;
 
   return {
     id: pkg.id,
@@ -428,6 +430,12 @@ function buildRunSummary(
 function getLatestStyleSeedJobId(jobs: JobRow[]) {
   return [...jobs]
     .filter((job) => job.job_type === "style_seed")
+    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0]?.id ?? null;
+}
+
+function getLatestFinalJobId(jobs: JobRow[]) {
+  return [...jobs]
+    .filter((job) => job.job_type === "final")
     .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0]?.id ?? null;
 }
 

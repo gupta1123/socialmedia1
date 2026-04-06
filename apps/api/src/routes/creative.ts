@@ -45,6 +45,7 @@ const MAX_SUPPORTING_REFERENCE_IMAGES = 2;
 type RoleAwareReferencePlan = {
   primaryAnchor: { role: "template" | "source_post"; label: string; storagePath: string } | null;
   sourcePost: { role: "source_post"; label: string; storagePath: string } | null;
+  projectAnchor: { role: "project_image"; label: string; storagePath: string } | null;
   references: Array<{ role: "reference"; label: string; storagePath: string }>;
 };
 
@@ -246,6 +247,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       brandAssets.filter((asset) => supportingReferenceAssetIds.includes(asset.id)),
       supportingReferenceAssetIds
     ).slice(0, MAX_SUPPORTING_REFERENCE_IMAGES);
+    const projectImageAssetIds = getPromptPackageProjectImageAssetIds(promptPackage);
+    const usesProjectImage = getPromptPackageUsesProjectImage(promptPackage);
     const reusableTemplate =
       promptPackage.creativeTemplateId
         ? await getReusableTemplate(promptPackage.creativeTemplateId).catch(() => null)
@@ -263,6 +266,14 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     if (sourceOutput && (sourceOutput.workspace_id !== promptPackage.workspaceId || sourceOutput.brand_id !== promptPackage.brandId)) {
       return reply.badRequest("Source post does not belong to the current workspace");
     }
+
+    const projectAnchorAsset =
+      usesProjectImage && projectImageAssetIds.length > 0
+        ? supportingReferenceAssets.find((asset) => projectImageAssetIds.includes(asset.id)) ?? null
+        : null;
+    const secondaryReferenceAssets = projectAnchorAsset
+      ? supportingReferenceAssets.filter((asset) => asset.id !== projectAnchorAsset.id)
+      : supportingReferenceAssets;
 
     const referencePlan: RoleAwareReferencePlan = {
       primaryAnchor:
@@ -287,7 +298,14 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
               storagePath: sourceOutput.storage_path
             }
           : null,
-      references: supportingReferenceAssets.map((asset) => ({
+      projectAnchor: projectAnchorAsset
+        ? {
+            role: "project_image" as const,
+            label: projectAnchorAsset.label,
+            storagePath: projectAnchorAsset.storagePath
+          }
+        : null,
+      references: secondaryReferenceAssets.map((asset) => ({
         role: "reference" as const,
         label: asset.label,
         storagePath: asset.storagePath
@@ -297,6 +315,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const seedReferenceCount =
       (referencePlan.primaryAnchor ? 1 : 0) +
       (referencePlan.sourcePost ? 1 : 0) +
+      (referencePlan.projectAnchor ? 1 : 0) +
       referencePlan.references.length;
     const seedPromptWithRoles =
       seedReferenceCount > 0
@@ -330,6 +349,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           primaryAnchorRole: referencePlan.primaryAnchor?.role ?? null,
           primaryAnchorLabel: referencePlan.primaryAnchor?.label ?? null,
           sourcePostIncluded: Boolean(referencePlan.sourcePost),
+          projectAnchorIncluded: Boolean(referencePlan.projectAnchor),
+          projectAnchorLabel: referencePlan.projectAnchor?.label ?? null,
           supportingReferenceLabels: referencePlan.references.map((reference) => reference.label)
         }
       },
@@ -351,6 +372,10 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
       if (referencePlan.sourcePost) {
         referenceUrls.push(await uploadStoragePathToFal(referencePlan.sourcePost.storagePath));
+      }
+
+      if (referencePlan.projectAnchor) {
+        referenceUrls.push(await uploadStoragePathToFal(referencePlan.projectAnchor.storagePath));
       }
 
       if (referencePlan.references.length > 0) {
@@ -449,6 +474,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       brandAssets.filter((asset) => supportingReferenceAssetIds.includes(asset.id)),
       supportingReferenceAssetIds
     ).slice(0, MAX_SUPPORTING_REFERENCE_IMAGES);
+    const projectImageAssetIds = getPromptPackageProjectImageAssetIds(promptPackage);
+    const usesProjectImage = getPromptPackageUsesProjectImage(promptPackage);
     const selectedTemplate = body.selectedTemplateId ? await getStyleTemplate(body.selectedTemplateId) : null;
     const reusableTemplate =
       !body.selectedTemplateId && promptPackage.creativeTemplateId
@@ -471,6 +498,14 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     if (sourceOutput && (sourceOutput.workspace_id !== promptPackage.workspaceId || sourceOutput.brand_id !== promptPackage.brandId)) {
       return reply.badRequest("Source post does not belong to the current workspace");
     }
+
+    const projectAnchorAsset =
+      usesProjectImage && projectImageAssetIds.length > 0
+        ? supportingReferenceAssets.find((asset) => projectImageAssetIds.includes(asset.id)) ?? null
+        : null;
+    const secondaryReferenceAssets = projectAnchorAsset
+      ? supportingReferenceAssets.filter((asset) => asset.id !== projectAnchorAsset.id)
+      : supportingReferenceAssets;
 
     const referencePlan: RoleAwareReferencePlan = {
       primaryAnchor:
@@ -502,7 +537,14 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
               storagePath: sourceOutput.storage_path
             }
           : null,
-      references: supportingReferenceAssets.map((asset) => ({
+      projectAnchor: projectAnchorAsset
+        ? {
+            role: "project_image" as const,
+            label: projectAnchorAsset.label,
+            storagePath: projectAnchorAsset.storagePath
+          }
+        : null,
+      references: secondaryReferenceAssets.map((asset) => ({
         role: "reference" as const,
         label: asset.label,
         storagePath: asset.storagePath
@@ -512,6 +554,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const expectedReferenceCount =
       (referencePlan.primaryAnchor ? 1 : 0) +
       (referencePlan.sourcePost ? 1 : 0) +
+      (referencePlan.projectAnchor ? 1 : 0) +
       referencePlan.references.length;
 
     if (expectedReferenceCount === 0) {
@@ -546,6 +589,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           primaryAnchorRole: referencePlan.primaryAnchor?.role ?? null,
           primaryAnchorLabel: referencePlan.primaryAnchor?.label ?? null,
           sourcePostIncluded: Boolean(referencePlan.sourcePost),
+          projectAnchorIncluded: Boolean(referencePlan.projectAnchor),
+          projectAnchorLabel: referencePlan.projectAnchor?.label ?? null,
           supportingReferenceLabels: referencePlan.references.map((reference) => reference.label)
         }
       },
@@ -567,6 +612,10 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
       if (referencePlan.sourcePost) {
         referenceUrls.push(await uploadStoragePathToFal(referencePlan.sourcePost.storagePath));
+      }
+
+      if (referencePlan.projectAnchor) {
+        referenceUrls.push(await uploadStoragePathToFal(referencePlan.projectAnchor.storagePath));
       }
 
       if (referencePlan.references.length > 0) {
@@ -955,8 +1004,15 @@ function buildRoleAwarePrompt(
     );
   }
 
+  if (plan.projectAnchor) {
+    const projectAnchorIndex = (plan.primaryAnchor ? 1 : 0) + (plan.sourcePost ? 1 : 0) + 1;
+    roleLines.push(
+      `Image ${projectAnchorIndex} is the actual project building reference (${plan.projectAnchor.label}). Preserve its tower identity, facade rhythm, massing, proportions, podium composition, balcony language, and overall silhouette. This image controls the truth of the building subject even when another image controls layout.`
+    );
+  }
+
   if (plan.references.length > 0) {
-    const startingIndex = (plan.primaryAnchor ? 1 : 0) + (plan.sourcePost ? 1 : 0) + 1;
+    const startingIndex = (plan.primaryAnchor ? 1 : 0) + (plan.sourcePost ? 1 : 0) + (plan.projectAnchor ? 1 : 0) + 1;
     const referenceLabels = plan.references
       .map((reference, index) => `Image ${startingIndex + index}: ${reference.label}`)
       .join("; ");
@@ -965,9 +1021,19 @@ function buildRoleAwarePrompt(
     );
   }
 
-  roleLines.push(
-    "When images conflict, follow the template or source anchor for structure first, then use supporting references for subject detail and realism."
-  );
+  if (plan.projectAnchor && plan.primaryAnchor?.role === "template") {
+    roleLines.push(
+      "When images conflict, use the template anchor for layout, spacing, hierarchy, and graphic system, but use the actual project image for the building subject, facade, proportions, and recognizable tower identity."
+    );
+  } else if (plan.projectAnchor) {
+    roleLines.push(
+      "When images conflict, preserve the actual project image for subject truth first, then use other references only for mood, realism, and finishing detail."
+    );
+  } else {
+    roleLines.push(
+      "When images conflict, follow the template or source anchor for structure first, then use supporting references for subject detail and realism."
+    );
+  }
 
   if (mode === "seed") {
     roleLines.push(
@@ -976,6 +1042,11 @@ function buildRoleAwarePrompt(
     roleLines.push(
       "Keep any on-canvas text extremely sparse. Do not include sample website text, page numbers, mock social handles, placeholder logos, or copied slogans from the input images."
     );
+    if (plan.projectAnchor) {
+      roleLines.push(
+        "Even during style exploration, keep the actual building recognizable. Do not drift into a different generic tower or invented property facade."
+      );
+    }
   } else {
     roleLines.push(
       "Treat any text, logos, URLs, page numbers, handles, and placeholder brand names visible in the input images as scaffolding only. Do not reproduce or remix them in the output."
@@ -989,6 +1060,11 @@ function buildRoleAwarePrompt(
     roleLines.push(
       "Only render new text that matches the requested concept. Never copy literal words from the input images unless the prompt explicitly asks for them."
     );
+    if (plan.projectAnchor) {
+      roleLines.push(
+        "Do not replace the supplied project tower or facade with a different generic building. Keep the property identity visibly recognizable."
+      );
+    }
   }
 
   roleLines.push("Keep the number of visual anchors low and synthesize them into one coherent output.");
@@ -1016,6 +1092,27 @@ function getPromptPackageCreateContextValue(
 
   const value = createContext?.[key];
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function getPromptPackageProjectImageAssetIds(promptPackage: { resolvedConstraints?: Record<string, unknown> | null | undefined }) {
+  const resolvedConstraints =
+    promptPackage.resolvedConstraints && typeof promptPackage.resolvedConstraints === "object"
+      ? promptPackage.resolvedConstraints
+      : {};
+  const value = resolvedConstraints.projectImageAssetIds;
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0) : [];
+}
+
+function getPromptPackageUsesProjectImage(promptPackage: { resolvedConstraints?: Record<string, unknown> | null | undefined }) {
+  const resolvedConstraints =
+    promptPackage.resolvedConstraints && typeof promptPackage.resolvedConstraints === "object"
+      ? promptPackage.resolvedConstraints
+      : {};
+  const postTypeGuidance =
+    resolvedConstraints.postTypeGuidance && typeof resolvedConstraints.postTypeGuidance === "object"
+      ? (resolvedConstraints.postTypeGuidance as Record<string, unknown>)
+      : null;
+  return postTypeGuidance?.usesProjectImage === true;
 }
 
 async function failJobSubmission(jobId: string, error: unknown) {

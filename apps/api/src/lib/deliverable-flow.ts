@@ -181,7 +181,11 @@ export async function compileDeliverablePromptPackage(params: {
     template_type: compiled.templateType ?? null,
     reference_strategy: compiled.referenceStrategy,
     reference_asset_ids: inferredReferenceAssetIds,
-    resolved_constraints: compiled.resolvedConstraints,
+    resolved_constraints: {
+      ...compiled.resolvedConstraints,
+      projectImageAssetIds: projectProfileVersion?.profile.actualProjectImageIds ?? [],
+      sampleFlatImageIds: projectProfileVersion?.profile.sampleFlatImageIds ?? []
+    },
     compiler_trace: {
       ...compiled.compilerTrace,
       createContext
@@ -219,7 +223,11 @@ export async function compileDeliverablePromptPackage(params: {
     templateType: compiled.templateType ?? undefined,
     referenceStrategy: compiled.referenceStrategy,
     referenceAssetIds: inferredReferenceAssetIds,
-    resolvedConstraints: compiled.resolvedConstraints,
+    resolvedConstraints: {
+      ...compiled.resolvedConstraints,
+      projectImageAssetIds: projectProfileVersion?.profile.actualProjectImageIds ?? [],
+      sampleFlatImageIds: projectProfileVersion?.profile.sampleFlatImageIds ?? []
+    },
     compilerTrace: {
       ...compiled.compilerTrace,
       createContext
