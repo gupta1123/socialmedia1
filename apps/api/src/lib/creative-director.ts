@@ -406,6 +406,10 @@ function isTransientAgnoError(error: unknown) {
 
   const message = error.message.toLowerCase();
   return (
+    message.includes("enoent") ||
+    message.includes("spawn python3") ||
+    message.includes("spawn python") ||
+    message.includes("agno dependencies are missing") ||
     message.includes("connection error") ||
     message.includes("api connection error") ||
     message.includes("temporarily unavailable") ||
