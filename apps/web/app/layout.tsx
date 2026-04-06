@@ -6,8 +6,8 @@ import "@fontsource/poppins/700.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Brand-Aware Image Lab",
-  description: "Editorial control room for brand-aware image generation."
+  title: "Briefly Social",
+  description: "Editorial control room for brand-aware social creation."
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

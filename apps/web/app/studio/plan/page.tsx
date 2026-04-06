@@ -199,24 +199,46 @@ export default function PlanPage() {
 
   return (
     <div className="page-stack plan-roadmap">
-      <section className="plan-roadmap-header">
-        <div className="plan-roadmap-properties" role="list" aria-label="Roadmap metrics">
-          <article className="plan-roadmap-property" role="listitem">
-            <span className="plan-roadmap-property-label">Active pushes</span>
+      <section className="work-home-hero">
+        <div className="work-home-signal">
+          <div className="work-signal-card is-ready">
+            <div className="work-signal-head">
+              <span>Active pushes</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>
+              </svg>
+            </div>
             <strong>{overview.activeCampaigns.length}</strong>
-          </article>
-          <article className="plan-roadmap-property" role="listitem">
-            <span className="plan-roadmap-property-label">Recurring series</span>
+          </div>
+          <div className="work-signal-card is-upcoming">
+            <div className="work-signal-head">
+              <span>Recurring series</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>
+              </svg>
+            </div>
             <strong>{overview.activeSeries.length}</strong>
-          </article>
-          <article className="plan-roadmap-property" role="listitem">
-            <span className="plan-roadmap-property-label">Open backlog</span>
+          </div>
+          <div className="work-signal-card is-urgent">
+            <div className="work-signal-head">
+              <span>Open backlog</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 6h16" />
+                <path d="M4 12h10" />
+                <path d="M4 18h13" />
+              </svg>
+            </div>
             <strong>{overview.unscheduledPostTasks.length}</strong>
-          </article>
-          <article className="plan-roadmap-property" role="listitem">
-            <span className="plan-roadmap-property-label">Next 30 days</span>
+          </div>
+          <div className="work-signal-card is-review">
+            <div className="work-signal-head">
+              <span>Next 30 days</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+            </div>
             <strong>{overview.upcomingPostTasks.length}</strong>
-          </article>
+          </div>
         </div>
       </section>
 
@@ -292,7 +314,6 @@ export default function PlanPage() {
                     <span className="plan-roadmap-token plan-roadmap-token-series">SR</span>
                     <div className="plan-roadmap-row-copy">
                       <strong>{series.name}</strong>
-                      <p>{series.description?.trim() || "Recurring content track"}</p>
                       <p className="plan-roadmap-series-detail">{describeSeriesReadiness(series)}</p>
                     </div>
                   </div>

@@ -1,6 +1,6 @@
-# Brand-Aware Image Lab
+# Briefly Social
 
-Brand-aware image generation lab for social teams. The stack is a `pnpm`-shaped monorepo with:
+Brand-aware social creation lab for marketing teams. The stack is a `pnpm`-shaped monorepo with:
 
 - `apps/web`: Next.js frontend for auth, brand setup, uploads, creative runs, and gallery.
 - `apps/api`: Fastify API for auth-aware orchestration, Supabase access, Fal job submission, and Agno prompt compilation.
@@ -31,7 +31,13 @@ Preferred:
 pnpm install
 ```
 
-If `pnpm` is not installed locally yet, `npm install` will also hydrate the workspace.
+If `pnpm` is not installed locally yet, `npm install` will also hydrate the workspace. The root `npm run ...` commands will try:
+
+1. local/global `pnpm`
+2. `corepack pnpm`
+3. `npx pnpm@10.6.5`
+
+so you do not need a global `pnpm` install just to start the apps.
 
 4. Run the apps in separate terminals:
 

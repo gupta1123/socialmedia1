@@ -31,6 +31,17 @@ function PromptSection({ label, content }: { label: string; content: string }) {
   );
 }
 
+function formatCreativeTypeLabel(value?: string | null) {
+  if (!value) {
+    return "Custom";
+  }
+
+  return value
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export default function RunDetailPage() {
   const params = useParams<{ runId: string }>();
   const {
@@ -395,8 +406,8 @@ export default function RunDetailPage() {
                 <strong>{placement?.formatLabel ?? detail.run.format}</strong>
               </div>
               <div className="property-item">
-                <span>Chosen model</span>
-                <strong>{detail.run.chosenModel}</strong>
+                <span>Creative type</span>
+                <strong>{formatCreativeTypeLabel(detail.run.templateType)}</strong>
               </div>
               <div className="property-item">
                 <span>Directions count</span>

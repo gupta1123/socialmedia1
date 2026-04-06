@@ -1030,6 +1030,7 @@ export default function CreatePage() {
     canCreateOptionsFromTemplateFamily ||
     hasFreshSelectedStyle;
   const canUseDeliverableInheritance = isPostMode && Boolean(selectedDeliverable);
+  const styleSourceReady = canUseDeliverableInheritance ? hasFreshSelectedStyle : canCreateOptionsDirectly;
   const requiresExplicitPostType =
     !canUseDeliverableInheritance && (isSeriesEpisodeMode || isCampaignAssetMode || isAdaptationMode);
   const hasRequiredPostType = Boolean(selectedPostType);
@@ -1158,22 +1159,28 @@ export default function CreatePage() {
       : []),
     {
       id: "style-source",
-      label: canCreateOptionsFromSourceOutput
-        ? "Source post selected"
-        : canCreateOptionsFromReferences
-          ? `${briefForm.selectedReferenceAssetIds.length} reference${briefForm.selectedReferenceAssetIds.length === 1 ? "" : "s"} selected`
-          : canCreateOptionsFromTemplateFamily
-            ? `Template family: ${getTemplateFamilyLabel(selectedReusableTemplate)}`
-          : hasFreshSelectedStyle
-            ? `Style anchor: ${latestStyleLabel ?? "selected"}`
-            : Boolean(latestSelectedStyleId) && isCompiledStale
-              ? "Explore styles again for this brief"
-            : isAdaptationMode
-              ? "Pick a source post"
-              : isFestiveGreeting
-                ? "Explore styles to create a festive poster"
-                : "Choose a template, references, or explore styles",
-      done: canCreateOptionsDirectly
+      label: canUseDeliverableInheritance
+        ? hasFreshSelectedStyle
+          ? `Direction: ${latestStyleLabel ?? "selected"}`
+          : Boolean(latestSelectedStyleId) && isCompiledStale
+            ? "Explore styles again for this task"
+            : "Explore styles to create options from this task"
+        : canCreateOptionsFromSourceOutput
+          ? "Source post selected"
+          : canCreateOptionsFromReferences
+            ? `${briefForm.selectedReferenceAssetIds.length} reference${briefForm.selectedReferenceAssetIds.length === 1 ? "" : "s"} selected`
+            : canCreateOptionsFromTemplateFamily
+              ? `Template family: ${getTemplateFamilyLabel(selectedReusableTemplate)}`
+              : hasFreshSelectedStyle
+                ? `Style anchor: ${latestStyleLabel ?? "selected"}`
+                : Boolean(latestSelectedStyleId) && isCompiledStale
+                  ? "Explore styles again for this brief"
+                  : isAdaptationMode
+                    ? "Pick a source post"
+                    : isFestiveGreeting
+                      ? "Explore styles to create a festive poster"
+                      : "Choose a template, references, or explore styles",
+      done: styleSourceReady
     }
   ], [
     briefForm.selectedReferenceAssetIds.length,
@@ -1198,17 +1205,28 @@ export default function CreatePage() {
     selectedFestival,
     selectedReusableTemplate,
     selectedSeries,
-    selectedSourceOutput
+    selectedSourceOutput,
+    styleSourceReady
   ]);
   const hasRequiredSourceContext = preflightItems[0]?.done ?? true;
 
   const allPreflightDone = preflightItems.every((item) => item.done);
   const incompletePreflightItems = preflightItems.filter((item) => !item.done);
+  const requiresStyleExplorationFirst =
+    canUseDeliverableInheritance
+      ? !hasFreshSelectedStyle
+      : !isAdaptationMode &&
+        !canCreateOptionsFromReferences &&
+        !canCreateOptionsFromSourceOutput &&
+        !canCreateOptionsFromTemplateFamily &&
+        !hasFreshSelectedStyle;
   const createDockStatus = allPreflightDone
     ? "Ready to create options"
-    : incompletePreflightItems.length === 1
-      ? "1 requirement left"
-      : `${incompletePreflightItems.length} requirements left`;
+    : requiresStyleExplorationFirst
+      ? "Explore styles first"
+      : incompletePreflightItems.length === 1
+        ? "1 requirement left"
+        : `${incompletePreflightItems.length} requirements left`;
 
   function rearmRunPolling() {
     completedRunRefreshRef.current = null;
@@ -2544,29 +2562,23 @@ export default function CreatePage() {
                     />
                   </label>
                   
-                  <div className="create-field-group-row">
-                    <label className="create-field-label">
-                      Creative family
-                      <select
-                        value={briefForm.templateType}
-                        onChange={(e) =>
-                          setBriefForm((s) => ({ ...s, templateType: e.target.value as CreativeBrief["templateType"] }))
-                        }
-                        className="create-field-select"
-                      >
-                        <option value="announcement">Announcement</option>
-                        <option value="hero">Hero</option>
-                        <option value="product-focus">Product</option>
-                        <option value="testimonial">Review</option>
-                        <option value="quote">Quote</option>
-                        <option value="offer">Offer</option>
-                      </select>
-                    </label>
-                    <label className="create-field-label" style={{ opacity: 0.5, pointerEvents: "none" }}>
-                      Variant level
-                      <input value="Standard" className="create-field-input" disabled />
-                    </label>
-                  </div>
+                  <label className="create-field-label">
+                    Creative family
+                    <select
+                      value={briefForm.templateType}
+                      onChange={(e) =>
+                        setBriefForm((s) => ({ ...s, templateType: e.target.value as CreativeBrief["templateType"] }))
+                      }
+                      className="create-field-select"
+                    >
+                      <option value="announcement">Announcement</option>
+                      <option value="hero">Hero</option>
+                      <option value="product-focus">Product</option>
+                      <option value="testimonial">Review</option>
+                      <option value="quote">Quote</option>
+                      <option value="offer">Offer</option>
+                    </select>
+                  </label>
 
                   <label className="create-field-label">
                     Offer / CTA
@@ -2781,7 +2793,7 @@ export default function CreatePage() {
               <span className="separator">/</span>
               <span>{compiledPlacement?.channelLabel}</span>
               <span className="separator">/</span>
-              <span>{promptPackage?.chosenModel}</span>
+              <span>{compiledPlacement?.formatLabel}</span>
             </div>
             <p className="create-run-prompt-text">{promptPackage?.promptSummary}</p>
           </div>
@@ -3071,7 +3083,7 @@ export default function CreatePage() {
               <button
                 className={`create-action-create ${allPreflightDone ? "" : "create-action-create-blocked"}`}
                 type="button"
-                disabled={isPending || !allPreflightDone}
+                disabled={isPending || !allPreflightDone || requiresStyleExplorationFirst}
                 onClick={() => void handleGenerateCandidates()}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -3080,6 +3092,8 @@ export default function CreatePage() {
                 <span>
                   {pendingAction === "generate-finals"
                     ? "Creating…"
+                    : requiresStyleExplorationFirst
+                      ? "Explore styles first"
                     : isAdaptationMode
                       ? "Adapt options"
                       : "Create options"}

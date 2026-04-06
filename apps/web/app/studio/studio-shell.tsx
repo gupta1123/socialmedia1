@@ -252,7 +252,7 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
       <aside className="workspace-sidebar">
         {/* Logo / Wordmark */}
         <div className="sidebar-brand">
-          {!shellCollapsed && <span className="sidebar-wordmark">socialcraft</span>}
+          {!shellCollapsed && <span className="sidebar-wordmark">Briefly Social</span>}
           <button
             className="sidebar-toggle"
             aria-label={shellCollapsed ? "Expand sidebar" : "Collapse sidebar"}

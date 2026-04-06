@@ -1,11 +1,60 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "../lib/supabase-browser";
 
 export default function HomePage() {
+  const router = useRouter();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+
+      if (data.session) {
+        router.replace("/studio");
+        return;
+      }
+
+      setReady(true);
+    });
+
+    const {
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        router.replace("/studio");
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [router]);
+
+  if (!ready) {
+    return (
+      <main className="shell">
+        <section className="hero-grid">
+          <div className="hero-copy">
+            <p className="eyebrow">Briefly Social</p>
+            <h1>Loading workspace…</h1>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="shell">
       <section className="hero-grid">
         <div className="hero-copy">
-          <p className="eyebrow">Brand-aware image generation</p>
+          <p className="eyebrow">Briefly Social</p>
           <h1>Creative ops without the prompt-box ceiling.</h1>
           <p className="lede">
             Build seeds, finals, and brand-specific references in one control room. The system keeps
@@ -13,10 +62,7 @@ export default function HomePage() {
           </p>
           <div className="hero-actions">
             <Link className="button button-primary" href="/login">
-              Enter Studio
-            </Link>
-            <Link className="button button-ghost" href="/studio">
-              View Workspace
+              Enter Briefly Social
             </Link>
           </div>
         </div>
@@ -34,4 +80,3 @@ export default function HomePage() {
     </main>
   );
 }
-

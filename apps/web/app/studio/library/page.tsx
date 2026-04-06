@@ -374,7 +374,7 @@ export default function LibraryPage() {
                     {referenceAssets.length > 0 ? <span className="panel-count">{referenceAssets.length} items</span> : null}
                   </div>
                   {referenceAssets.length > 0 ? (
-                    <div className="gallery-grid library-gallery-grid">
+                    <div className="gallery-grid library-gallery-grid library-media-grid">
                       {referenceAssets.map((asset) => (
                         <article className="review-card" key={asset.id} style={{ padding: "12px" }}>
                           <div className="creative-preview-frame" style={{ minHeight: "200px", padding: "8px" }}>
@@ -417,7 +417,7 @@ export default function LibraryPage() {
                     {productAssets.length > 0 ? <span className="panel-count">{productAssets.length} items</span> : null}
                   </div>
                   {productAssets.length > 0 ? (
-                    <div className="gallery-grid library-gallery-grid">
+                    <div className="gallery-grid library-gallery-grid library-media-grid">
                       {productAssets.map((asset) => (
                         <article className="review-card" key={asset.id} style={{ padding: "12px" }}>
                           <div className="creative-preview-frame" style={{ minHeight: "200px", padding: "8px" }}>
