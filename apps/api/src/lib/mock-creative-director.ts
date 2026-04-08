@@ -8,6 +8,7 @@ import type {
   ProjectProfile,
   PromptPackage
 } from "@image-lab/contracts";
+import { env } from "./config.js";
 import { buildBrandPromptGuidance } from "./brand-prompt-guidance.js";
 import { buildFestivalPromptGuidance } from "./festival-prompt-guidance.js";
 import { buildPostTypePromptGuidance } from "./post-type-prompt-guidance.js";
@@ -69,7 +70,10 @@ function isFestivalGreetingInput(input: Pick<Input, "festival" | "postType">) {
 
 export function compilePromptPackageMock(input: Input) {
   const aspectRatio = deriveAspectRatio(input.brief.format);
-  const chosenModel = "fal-ai/nano-banana";
+  const chosenModel =
+    env.IMAGE_GENERATION_PROVIDER === "openrouter"
+      ? env.OPENROUTER_FINAL_MODEL
+      : env.FAL_FINAL_MODEL;
   const templateType = input.brief.templateType;
   const briefDirective = input.brief.prompt.trim();
   const seriesOutputKind = input.brief.seriesOutputKind ?? "single_image";
@@ -164,7 +168,8 @@ export function compilePromptPackageMock(input: Input) {
     seriesOutputKind === "carousel"
       ? `Design a reusable carousel cover and layout language that can carry a ${slideCount ?? 5}-slide story with consistent typography, pacing, and safe zones.`
       : `Keep composition editable, with clear safe zones for brand copy and CTA.`,
-    `The direction set should contain clearly different creative routes, not minor variations of the same image.`,
+    `Across the batch of generated seed images, explore clearly different creative routes instead of minor variations of the same composition.`,
+    `Each generated seed image must contain exactly one poster or one coherent composition. Never make a grid, collage, contact sheet, artboard, mood board, or multiple alternate poster designs inside a single frame.`,
     briefSeedVariationInstruction,
     safeZoneNotes.length > 0 ? `Safe-zone guidance: ${safeZoneNotes.join("; ")}.` : null,
     exactTextInstruction,
@@ -213,6 +218,7 @@ export function compilePromptPackageMock(input: Input) {
     seriesOutputKind === "carousel"
       ? `This should feel like slide 1 of a premium carousel system with a clear headline zone, disciplined copy density, and a visual language that can extend across ${slideCount ?? 5} slides.`
       : `This should resolve as one finished post image, not a slide deck.`,
+    `Return exactly one finished design per generated image. Never present multiple alternate posters, tiled concepts, contact-sheet layouts, mood boards, or side-by-side design options in one frame.`,
     safeZoneNotes.length > 0 ? `Respect safe zones: ${safeZoneNotes.join("; ")}.` : null,
     exactTextInstruction,
     `Composition must feel native to ${input.brief.channel} and leave readable safe zones for cropping.`

@@ -24,6 +24,19 @@ const optionalUrlList = z.preprocess((value) => {
   return urls.length > 0 ? urls : undefined;
 }, z.array(z.string().url()).optional());
 
+const optionalCsvList = z.preprocess((value) => {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const entries = value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  return entries.length > 0 ? entries : undefined;
+}, z.array(z.string()).optional());
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(4000),
@@ -34,10 +47,19 @@ const EnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   SUPABASE_JWT_SECRET: z.string().min(1).optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default("creative-assets"),
+  IMAGE_GENERATION_PROVIDER: z.enum(["fal", "openrouter"]).default("fal"),
   FAL_KEY: z.string().optional(),
   FAL_WEBHOOK_URL: z.string().url().optional(),
   FAL_STYLE_SEED_MODEL: z.string().default("fal-ai/nano-banana"),
   FAL_FINAL_MODEL: z.string().default("fal-ai/nano-banana/edit"),
+  OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
+  OPENROUTER_STYLE_SEED_MODEL: z.string().default("google/gemini-2.5-flash-image"),
+  OPENROUTER_FINAL_MODEL: z.string().default("google/gemini-2.5-flash-image"),
+  OPENROUTER_IMAGE_MODALITIES: optionalCsvList,
+  OPENROUTER_IMAGE_SIZE: z.string().optional(),
+  OPENROUTER_HTTP_REFERER: optionalUrl,
+  OPENROUTER_X_TITLE: z.string().optional(),
   CREATIVE_DIRECTOR_MODE: z.enum(["auto", "mock", "agno"]).default("auto"),
   AGNO_PYTHON_BIN: z.string().default("python3"),
   AGNO_AGENT_SCRIPT: z.string().default("./agents/creative_director.py"),

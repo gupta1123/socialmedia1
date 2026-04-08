@@ -480,6 +480,12 @@ function normalizeAgnoResult(raw: CompilerResult, input: Input): CompilerResult 
     seedPrompt: appendMissingPromptClauses(raw.seedPrompt, seedClauses),
     finalPrompt: appendMissingPromptClauses(raw.finalPrompt, finalClauses),
     aspectRatio,
+    chosenModel:
+      typeof raw.chosenModel === "string" && raw.chosenModel.trim().length > 0
+        ? raw.chosenModel
+        : env.IMAGE_GENERATION_PROVIDER === "openrouter"
+          ? env.OPENROUTER_FINAL_MODEL
+          : env.FAL_FINAL_MODEL,
     referenceStrategy,
     templateType,
     resolvedConstraints: {

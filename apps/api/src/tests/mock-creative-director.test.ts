@@ -1,6 +1,11 @@
 import crypto from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { compilePromptPackageMock } from "../lib/mock-creative-director.js";
+
+process.env.SUPABASE_URL ??= "https://example.supabase.co";
+process.env.SUPABASE_ANON_KEY ??= "test-anon-key";
+process.env.SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
+
+const { compilePromptPackageMock } = await import("../lib/mock-creative-director.js");
 
 function buildBaseBrandProfile() {
   return {
@@ -132,12 +137,16 @@ describe("compilePromptPackageMock", () => {
     expect(output.seedPrompt).toContain("Festival context: Diwali");
     expect(output.seedPrompt).toContain("Do not assume or require input reference images for festive greetings");
     expect(output.seedPrompt).toContain("Main composition direction");
+    expect(output.seedPrompt).toContain("Each generated image must be one complete festive poster only");
+    expect(output.seedPrompt).toContain("Each generated seed image must contain exactly one poster or one coherent composition");
     expect(output.finalPrompt).toContain("Write this as a highly detailed poster-style image prompt");
     expect(output.finalPrompt).toContain("Festival: Diwali");
     expect(output.finalPrompt).toContain("Use references this way");
     expect(output.finalPrompt).toContain("Do not imitate these reference traits");
     expect(output.finalPrompt).toContain("Review checks to satisfy");
     expect(output.finalPrompt).toContain("Do not use project buildings, facades, amenities, brochures, floor plans, maps, or sales overlays");
+    expect(output.finalPrompt).toContain("Render exactly one festive poster composition per output");
+    expect(output.finalPrompt).toContain("Return exactly one finished design per generated image");
     expect(output.finalPrompt).toContain('render the exact brand name "Northstar" as plain text only');
     expect(output.finalPrompt).toContain("Do not render any logo, monogram, emblem, icon mark, brand symbol, or house icon");
     expect(output.finalPrompt).not.toContain("Starting price fact");

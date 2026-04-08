@@ -55,6 +55,12 @@ export async function createSignedUrl(path: string, expiresIn = 3600) {
 }
 
 export async function ingestRemoteImageToStorage(path: string, sourceUrl: string) {
+  if (sourceUrl.startsWith("data:")) {
+    const { buffer, contentType } = parseDataUrl(sourceUrl);
+    await uploadBufferToStorage(path, buffer, contentType, true);
+    return;
+  }
+
   const response = await fetch(sourceUrl);
 
   if (!response.ok) {
@@ -65,4 +71,24 @@ export async function ingestRemoteImageToStorage(path: string, sourceUrl: string
   const contentType = response.headers.get("content-type") ?? "image/png";
 
   await uploadBufferToStorage(path, buffer, contentType, true);
+}
+
+function parseDataUrl(sourceUrl: string) {
+  const match = sourceUrl.match(/^data:([^;,]+)?(?:;charset=[^;,]+)?;base64,(.+)$/);
+
+  if (!match) {
+    throw new Error("Invalid data URL image payload");
+  }
+
+  const contentType = match[1] ?? "image/png";
+  const encoded = match[2];
+
+  if (!encoded) {
+    throw new Error("Invalid data URL image payload");
+  }
+
+  return {
+    contentType,
+    buffer: Buffer.from(encoded, "base64")
+  };
 }

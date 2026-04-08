@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import {
+  type CreativeJobRecord,
   CreativeRunDetailSchema,
   CreativeRunSummarySchema,
   CreativeBriefSchema,
@@ -31,8 +32,8 @@ import {
 import { createSignedUrl } from "../lib/storage.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { randomId } from "../lib/utils.js";
-import { submitFinalGeneration, submitStyleSeedGeneration, uploadStoragePathToFal } from "../lib/fal.js";
-import { getSignedPreview, refreshJobOutputs } from "../lib/job-sync.js";
+import { getFinalProviderModel, getStyleSeedProviderModel, resolveImageGenerationProvider, submitFinalGeneration, submitStyleSeedGeneration } from "../lib/image-provider.js";
+import { getSignedPreview, persistCompletedJobImages, refreshJobOutputs } from "../lib/job-sync.js";
 import { env } from "../lib/config.js";
 import {
   compileDeliverablePromptPackage,
@@ -321,8 +322,31 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       seedReferenceCount > 0
         ? buildRoleAwarePrompt(promptPackage.seedPrompt, referencePlan, "seed")
         : promptPackage.seedPrompt;
-    const seedProviderModel = seedReferenceCount > 0 ? env.FAL_FINAL_MODEL : env.FAL_STYLE_SEED_MODEL;
+    const seedProvider = resolveImageGenerationProvider();
+    const seedProviderModel = getStyleSeedProviderModel(seedReferenceCount);
     const jobId = randomId();
+    const referenceStoragePaths = collectReferenceStoragePaths(referencePlan);
+    const styleSeedJob: CreativeJobRecord = {
+      id: jobId,
+      workspaceId: promptPackage.workspaceId,
+      brandId: promptPackage.brandId,
+      deliverableId: promptPackage.deliverableId,
+      projectId: promptPackage.projectId,
+      postTypeId: promptPackage.postTypeId,
+      creativeTemplateId: promptPackage.creativeTemplateId,
+      calendarItemId: promptPackage.calendarItemId,
+      promptPackageId: promptPackage.id,
+      selectedTemplateId: null,
+      jobType: "style_seed" as const,
+      status: "queued" as const,
+      provider: seedProvider,
+      providerModel: seedProviderModel,
+      providerRequestId: null,
+      requestedCount: body.count,
+      briefContext: null,
+      outputs: [],
+      error: null
+    };
 
     const { error } = await supabaseAdmin.from("creative_jobs").insert({
       id: jobId,
@@ -337,7 +361,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       selected_template_id: null,
       job_type: "style_seed",
       status: "queued",
-      provider: "fal",
+      provider: seedProvider,
       provider_model: seedProviderModel,
       requested_count: body.count,
       request_payload: {
@@ -361,83 +385,76 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       throw error;
     }
 
-    let requestInfo: { request_id?: string } | null = null;
+    let requestInfo: { request_id: string } | null = null;
 
-    try {
-      const referenceUrls: string[] = [];
+    if (seedProvider === "openrouter") {
+      requestInfo = { request_id: `openrouter-style-seed-${jobId}` };
 
-      if (referencePlan.primaryAnchor) {
-        referenceUrls.push(await uploadStoragePathToFal(referencePlan.primaryAnchor.storagePath));
+      const { error: styleJobUpdateError } = await supabaseAdmin
+        .from("creative_jobs")
+        .update({
+          provider_request_id: requestInfo.request_id,
+          status: "processing",
+          submitted_at: new Date().toISOString()
+        })
+        .eq("id", jobId);
+
+      if (styleJobUpdateError) {
+        const serialized = await failJobSubmission(jobId, styleJobUpdateError);
+        return reply.code(503).send({
+          statusCode: 503,
+          error: "Service Unavailable",
+          message: serialized.message
+        });
       }
 
-      if (referencePlan.sourcePost) {
-        referenceUrls.push(await uploadStoragePathToFal(referencePlan.sourcePost.storagePath));
-      }
-
-      if (referencePlan.projectAnchor) {
-        referenceUrls.push(await uploadStoragePathToFal(referencePlan.projectAnchor.storagePath));
-      }
-
-      if (referencePlan.references.length > 0) {
-        const uploadedReferences = await Promise.all(
-          referencePlan.references.map((reference) => uploadStoragePathToFal(reference.storagePath))
+      void runImmediateProviderJob({
+        job: {
+          ...styleSeedJob,
+          providerRequestId: requestInfo.request_id,
+          status: "processing"
+        },
+        prompt: seedPromptWithRoles,
+        aspectRatio: promptPackage.aspectRatio,
+        referenceStoragePaths,
+        mode: "seed"
+      });
+    } else {
+      try {
+        requestInfo = await submitStyleSeedGeneration(
+          styleSeedJob,
+          {
+            prompt: seedPromptWithRoles,
+            aspectRatio: promptPackage.aspectRatio
+          },
+          referenceStoragePaths
         );
-        referenceUrls.push(...uploadedReferences);
+      } catch (submissionError) {
+        const serialized = await failJobSubmission(jobId, submissionError);
+        return reply.code(503).send({
+          statusCode: 503,
+          error: "Service Unavailable",
+          message: serialized.message
+        });
       }
 
-      requestInfo = await submitStyleSeedGeneration(
-        {
-          id: jobId,
-          workspaceId: promptPackage.workspaceId,
-          brandId: promptPackage.brandId,
-          deliverableId: promptPackage.deliverableId,
-          projectId: promptPackage.projectId,
-          postTypeId: promptPackage.postTypeId,
-          creativeTemplateId: promptPackage.creativeTemplateId,
-          calendarItemId: promptPackage.calendarItemId,
-          promptPackageId: promptPackage.id,
-          selectedTemplateId: null,
-          jobType: "style_seed",
-          status: "queued",
-          provider: "fal",
-          providerModel: "fal-ai/nano-banana",
-          providerRequestId: null,
-          requestedCount: body.count,
-          briefContext: null,
-          outputs: [],
-          error: null
-        },
-        {
-          prompt: seedPromptWithRoles,
-          aspectRatio: promptPackage.aspectRatio
-        },
-        referenceUrls
-      );
-    } catch (submissionError) {
-      const serialized = await failJobSubmission(jobId, submissionError);
-      return reply.code(503).send({
-        statusCode: 503,
-        error: "Service Unavailable",
-        message: serialized.message
-      });
-    }
+      const { error: styleJobUpdateError } = await supabaseAdmin
+        .from("creative_jobs")
+        .update({
+          provider_request_id: requestInfo?.request_id ?? null,
+          status: "processing",
+          submitted_at: new Date().toISOString()
+        })
+        .eq("id", jobId);
 
-    const { error: styleJobUpdateError } = await supabaseAdmin
-      .from("creative_jobs")
-      .update({
-        provider_request_id: requestInfo?.request_id ?? null,
-        status: "processing",
-        submitted_at: new Date().toISOString()
-      })
-      .eq("id", jobId);
-
-    if (styleJobUpdateError) {
-      const serialized = await failJobSubmission(jobId, styleJobUpdateError);
-      return reply.code(503).send({
-        statusCode: 503,
-        error: "Service Unavailable",
-        message: serialized.message
-      });
+      if (styleJobUpdateError) {
+        const serialized = await failJobSubmission(jobId, styleJobUpdateError);
+        return reply.code(503).send({
+          statusCode: 503,
+          error: "Service Unavailable",
+          message: serialized.message
+        });
+      }
     }
 
     if (promptPackage.deliverableId) {
@@ -562,6 +579,30 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     }
 
     const finalPromptWithRoles = buildRoleAwarePrompt(promptPackage.finalPrompt, referencePlan, "final");
+    const finalProvider = resolveImageGenerationProvider();
+    const finalProviderModel = getFinalProviderModel();
+    const referenceStoragePaths = collectReferenceStoragePaths(referencePlan);
+    const finalJobRecord: CreativeJobRecord = {
+      id: jobId,
+      workspaceId: promptPackage.workspaceId,
+      brandId: promptPackage.brandId,
+      deliverableId: promptPackage.deliverableId,
+      projectId: promptPackage.projectId,
+      postTypeId: promptPackage.postTypeId,
+      creativeTemplateId: promptPackage.creativeTemplateId,
+      calendarItemId: promptPackage.calendarItemId,
+      promptPackageId: promptPackage.id,
+      selectedTemplateId: body.selectedTemplateId ?? null,
+      jobType: "final" as const,
+      status: "queued" as const,
+      provider: finalProvider,
+      providerModel: finalProviderModel,
+      providerRequestId: null,
+      requestedCount: body.count,
+      briefContext: null,
+      outputs: [],
+      error: null
+    };
 
     const { error } = await supabaseAdmin.from("creative_jobs").insert({
       id: jobId,
@@ -576,8 +617,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       selected_template_id: body.selectedTemplateId ?? null,
       job_type: "final",
       status: "queued",
-      provider: "fal",
-      provider_model: "fal-ai/nano-banana/edit",
+      provider: finalProvider,
+      provider_model: finalProviderModel,
       requested_count: body.count,
       request_payload: {
         prompt: finalPromptWithRoles,
@@ -601,83 +642,76 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       throw error;
     }
 
-    let requestInfo: { request_id?: string } | null = null;
+    let requestInfo: { request_id: string } | null = null;
 
-    try {
-      const referenceUrls: string[] = [];
+    if (finalProvider === "openrouter") {
+      requestInfo = { request_id: `openrouter-final-${jobId}` };
 
-      if (referencePlan.primaryAnchor) {
-        referenceUrls.push(await uploadStoragePathToFal(referencePlan.primaryAnchor.storagePath));
+      const { error: finalJobUpdateError } = await supabaseAdmin
+        .from("creative_jobs")
+        .update({
+          provider_request_id: requestInfo.request_id,
+          status: "processing",
+          submitted_at: new Date().toISOString()
+        })
+        .eq("id", jobId);
+
+      if (finalJobUpdateError) {
+        const serialized = await failJobSubmission(jobId, finalJobUpdateError);
+        return reply.code(503).send({
+          statusCode: 503,
+          error: "Service Unavailable",
+          message: serialized.message
+        });
       }
 
-      if (referencePlan.sourcePost) {
-        referenceUrls.push(await uploadStoragePathToFal(referencePlan.sourcePost.storagePath));
-      }
-
-      if (referencePlan.projectAnchor) {
-        referenceUrls.push(await uploadStoragePathToFal(referencePlan.projectAnchor.storagePath));
-      }
-
-      if (referencePlan.references.length > 0) {
-        const uploadedReferences = await Promise.all(
-          referencePlan.references.map((reference) => uploadStoragePathToFal(reference.storagePath))
+      void runImmediateProviderJob({
+        job: {
+          ...finalJobRecord,
+          providerRequestId: requestInfo.request_id,
+          status: "processing"
+        },
+        prompt: finalPromptWithRoles,
+        aspectRatio: promptPackage.aspectRatio,
+        referenceStoragePaths,
+        mode: "final"
+      });
+    } else {
+      try {
+        requestInfo = await submitFinalGeneration(
+          finalJobRecord,
+          {
+            prompt: finalPromptWithRoles,
+            aspectRatio: promptPackage.aspectRatio
+          },
+          referenceStoragePaths
         );
-        referenceUrls.push(...uploadedReferences);
+      } catch (submissionError) {
+        const serialized = await failJobSubmission(jobId, submissionError);
+        return reply.code(503).send({
+          statusCode: 503,
+          error: "Service Unavailable",
+          message: serialized.message
+        });
       }
 
-      requestInfo = await submitFinalGeneration(
-        {
-          id: jobId,
-          workspaceId: promptPackage.workspaceId,
-          brandId: promptPackage.brandId,
-          deliverableId: promptPackage.deliverableId,
-          projectId: promptPackage.projectId,
-          postTypeId: promptPackage.postTypeId,
-          creativeTemplateId: promptPackage.creativeTemplateId,
-          calendarItemId: promptPackage.calendarItemId,
-          promptPackageId: promptPackage.id,
-          selectedTemplateId: body.selectedTemplateId ?? null,
-          jobType: "final",
-          status: "queued",
-          provider: "fal",
-          providerModel: "fal-ai/nano-banana/edit",
-          providerRequestId: null,
-          requestedCount: body.count,
-          briefContext: null,
-          outputs: [],
-          error: null
-        },
-        {
-          prompt: finalPromptWithRoles,
-          aspectRatio: promptPackage.aspectRatio
-        },
-        referenceUrls
-      );
-    } catch (submissionError) {
-      const serialized = await failJobSubmission(jobId, submissionError);
-      return reply.code(503).send({
-        statusCode: 503,
-        error: "Service Unavailable",
-        message: serialized.message
-      });
-    }
+      const { error: finalJobUpdateError } = await supabaseAdmin
+        .from("creative_jobs")
+        .update({
+          provider_request_id: requestInfo?.request_id ?? null,
+          status: "processing",
+          submitted_at: new Date().toISOString()
+        })
+        .eq("id", jobId);
 
-    const { error: finalJobUpdateError } = await supabaseAdmin
-      .from("creative_jobs")
-      .update({
-        provider_request_id: requestInfo?.request_id ?? null,
-        status: "processing",
-        submitted_at: new Date().toISOString()
-      })
-      .eq("id", jobId);
-
-    if (finalJobUpdateError) {
-      const serialized = await failJobSubmission(jobId, finalJobUpdateError);
-      return reply.code(503).send({
-        statusCode: 503,
-        error: "Service Unavailable",
-        message: serialized.message
-      });
+      if (finalJobUpdateError) {
+        const serialized = await failJobSubmission(jobId, finalJobUpdateError);
+        return reply.code(503).send({
+          statusCode: 503,
+          error: "Service Unavailable",
+          message: serialized.message
+        });
+      }
     }
 
     if (promptPackage.deliverableId) {
@@ -1040,6 +1074,9 @@ function buildRoleAwarePrompt(
       "This is a style exploration image. Prioritize composition, mood, pacing, and graphic language over dense copy."
     );
     roleLines.push(
+      "Each output image must contain one complete concept only. Do not return a contact sheet, multi-panel board, tiled grid, collage of alternatives, or several poster variations inside a single frame."
+    );
+    roleLines.push(
       "Keep any on-canvas text extremely sparse. Do not include sample website text, page numbers, mock social handles, placeholder logos, or copied slogans from the input images."
     );
     if (plan.projectAnchor) {
@@ -1048,6 +1085,9 @@ function buildRoleAwarePrompt(
       );
     }
   } else {
+    roleLines.push(
+      "Return one finished design per output image. Never create multiple alternate posters, tiled mini-designs, contact sheets, mood boards, or side-by-side concepts inside the same frame."
+    );
     roleLines.push(
       "Treat any text, logos, URLs, page numbers, handles, and placeholder brand names visible in the input images as scaffolding only. Do not reproduce or remix them in the output."
     );
@@ -1070,6 +1110,89 @@ function buildRoleAwarePrompt(
   roleLines.push("Keep the number of visual anchors low and synthesize them into one coherent output.");
 
   return `${basePrompt} ${roleLines.join(" ")}`.trim();
+}
+
+function collectReferenceStoragePaths(plan: RoleAwareReferencePlan) {
+  return [
+    plan.primaryAnchor?.storagePath,
+    plan.sourcePost?.storagePath,
+    plan.projectAnchor?.storagePath,
+    ...plan.references.map((reference) => reference.storagePath)
+  ].filter((value): value is string => typeof value === "string" && value.length > 0);
+}
+
+async function runImmediateProviderJob({
+  job,
+  prompt,
+  aspectRatio,
+  referenceStoragePaths,
+  mode
+}: {
+  job: CreativeJobRecord;
+  prompt: string;
+  aspectRatio: string;
+  referenceStoragePaths: string[];
+  mode: "seed" | "final";
+}) {
+  try {
+    const result =
+      mode === "seed"
+        ? await submitStyleSeedGeneration(
+            job,
+            {
+              prompt,
+              aspectRatio
+            },
+            referenceStoragePaths
+          )
+        : await submitFinalGeneration(
+            job,
+            {
+              prompt,
+              aspectRatio
+            },
+            referenceStoragePaths
+          );
+
+    if (!result.images || result.images.length === 0) {
+      throw new Error("Image generation completed but returned no images");
+    }
+
+    await persistCompletedJobImages(
+      {
+        id: job.id,
+        workspace_id: job.workspaceId,
+        brand_id: job.brandId,
+        deliverable_id: job.deliverableId,
+        project_id: job.projectId,
+        post_type_id: job.postTypeId,
+        creative_template_id: job.creativeTemplateId,
+        calendar_item_id: job.calendarItemId,
+        prompt_package_id: job.promptPackageId,
+        selected_template_id: job.selectedTemplateId,
+        job_type: job.jobType,
+        status: "completed",
+        provider: job.provider,
+        provider_model: result.providerModel,
+        provider_request_id: result.request_id ?? job.providerRequestId,
+        requested_count: job.requestedCount,
+        error_json: null
+      },
+      result.images
+    );
+
+    await supabaseAdmin
+      .from("creative_jobs")
+      .update({
+        provider_request_id: result.request_id ?? job.providerRequestId,
+        provider_model: result.providerModel,
+        status: "completed",
+        completed_at: new Date().toISOString()
+      })
+      .eq("id", job.id);
+  } catch (error) {
+    await failJobSubmission(job.id, error);
+  }
 }
 
 function isCompilerConnectionError(message: string) {

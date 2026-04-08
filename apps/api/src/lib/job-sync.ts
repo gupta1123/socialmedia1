@@ -56,6 +56,10 @@ export async function refreshJobOutputs(jobId: string) {
     return row;
   }
 
+  if (row.provider !== "fal") {
+    return row;
+  }
+
   if (row.status === "completed" && (existingOutputs.data ?? []).length > 0) {
     return row;
   }
@@ -135,83 +139,7 @@ export async function refreshJobOutputs(jobId: string) {
     }
 
     if ((existingOutputs.data ?? []).length === 0) {
-      const outputs = await Promise.all(
-        images.map(async (image, index) => {
-          const outputId = randomId();
-          const storagePath = buildStoragePath({
-            workspaceId: row.workspace_id,
-            brandId: row.brand_id,
-            section: "outputs",
-            id: row.id,
-            fileName: `${outputId}.png`
-          });
-
-          await ingestRemoteImageToStorage(storagePath, image.url);
-
-          return {
-            id: outputId,
-            workspace_id: row.workspace_id,
-            brand_id: row.brand_id,
-            deliverable_id: row.deliverable_id,
-            project_id: row.project_id,
-            post_type_id: row.post_type_id,
-            creative_template_id: row.creative_template_id,
-            calendar_item_id: row.calendar_item_id,
-            job_id: row.id,
-            post_version_id: null,
-            kind: row.job_type,
-            storage_path: storagePath,
-            provider_url: image.url,
-            output_index: index,
-            created_by: null
-          };
-        })
-      );
-
-      if (outputs.length > 0) {
-        const { error: outputError } = await supabaseAdmin.from("creative_outputs").insert(outputs);
-        if (outputError) {
-          throw outputError;
-        }
-
-        if (row.job_type === "style_seed") {
-          const templates = outputs.map((output, index) => ({
-            id: randomId(),
-            workspace_id: output.workspace_id,
-            brand_id: output.brand_id,
-            deliverable_id: output.deliverable_id,
-            project_id: output.project_id,
-            post_type_id: output.post_type_id,
-            creative_template_id: output.creative_template_id,
-            calendar_item_id: output.calendar_item_id,
-            source: "generated",
-            label: `Seed ${index + 1}`,
-            storage_path: output.storage_path,
-            creative_output_id: output.id,
-            created_by: null
-          }));
-          const { error: templateError } = await supabaseAdmin.from("style_templates").insert(templates);
-          if (templateError) {
-            throw templateError;
-          }
-        } else {
-          await Promise.all(outputs.map((output) => ensurePostVersionForOutput(output.id).catch(() => null)));
-
-          if (row.deliverable_id) {
-            await supabaseAdmin
-              .from("deliverables")
-              .update({ status: "review" })
-              .eq("id", row.deliverable_id);
-          }
-
-          if (row.calendar_item_id) {
-            await supabaseAdmin
-              .from("calendar_items")
-              .update({ status: "review" })
-              .eq("id", row.calendar_item_id);
-          }
-        }
-      }
+      await persistCompletedJobImages(row, images);
     }
 
     const { error: updateError } = await supabaseAdmin
@@ -240,6 +168,109 @@ export async function refreshJobOutputs(jobId: string) {
   }
 
   return row;
+}
+
+type PersistableJobRow = {
+  id: string;
+  workspace_id: string;
+  brand_id: string;
+  deliverable_id: string | null;
+  project_id: string | null;
+  post_type_id: string | null;
+  creative_template_id: string | null;
+  calendar_item_id: string | null;
+  prompt_package_id: string;
+  selected_template_id: string | null;
+  job_type: "style_seed" | "final";
+  status: "queued" | "processing" | "completed" | "failed" | "cancelled";
+  provider: string;
+  provider_model: string;
+  provider_request_id: string | null;
+  requested_count: number;
+  error_json: Record<string, unknown> | null;
+};
+
+export async function persistCompletedJobImages(row: PersistableJobRow, images: FalImage[]) {
+  const outputs = await Promise.all(
+    images.map(async (image, index) => {
+      const outputId = randomId();
+      const storagePath = buildStoragePath({
+        workspaceId: row.workspace_id,
+        brandId: row.brand_id,
+        section: "outputs",
+        id: row.id,
+        fileName: `${outputId}.png`
+      });
+
+      await ingestRemoteImageToStorage(storagePath, image.url);
+
+      return {
+        id: outputId,
+        workspace_id: row.workspace_id,
+        brand_id: row.brand_id,
+        deliverable_id: row.deliverable_id,
+        project_id: row.project_id,
+        post_type_id: row.post_type_id,
+        creative_template_id: row.creative_template_id,
+        calendar_item_id: row.calendar_item_id,
+        job_id: row.id,
+        post_version_id: null,
+        kind: row.job_type,
+        storage_path: storagePath,
+        provider_url: image.url,
+        output_index: index,
+        created_by: null
+      };
+    })
+  );
+
+  if (outputs.length === 0) {
+    return;
+  }
+
+  const { error: outputError } = await supabaseAdmin.from("creative_outputs").insert(outputs);
+  if (outputError) {
+    throw outputError;
+  }
+
+  if (row.job_type === "style_seed") {
+    const templates = outputs.map((output, index) => ({
+      id: randomId(),
+      workspace_id: output.workspace_id,
+      brand_id: output.brand_id,
+      deliverable_id: output.deliverable_id,
+      project_id: output.project_id,
+      post_type_id: output.post_type_id,
+      creative_template_id: output.creative_template_id,
+      calendar_item_id: output.calendar_item_id,
+      source: "generated",
+      label: `Seed ${index + 1}`,
+      storage_path: output.storage_path,
+      creative_output_id: output.id,
+      created_by: null
+    }));
+    const { error: templateError } = await supabaseAdmin.from("style_templates").insert(templates);
+    if (templateError) {
+      throw templateError;
+    }
+    return;
+  }
+
+  await Promise.all(outputs.map((output) => ensurePostVersionForOutput(output.id).catch(() => null)));
+
+  if (row.deliverable_id) {
+    await supabaseAdmin
+      .from("deliverables")
+      .update({ status: "review" })
+      .eq("id", row.deliverable_id);
+  }
+
+  if (row.calendar_item_id) {
+    await supabaseAdmin
+      .from("calendar_items")
+      .update({ status: "review" })
+      .eq("id", row.calendar_item_id);
+  }
 }
 
 export async function getSignedPreview(storagePath: string) {
