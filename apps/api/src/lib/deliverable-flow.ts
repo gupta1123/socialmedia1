@@ -53,6 +53,14 @@ export async function compileDeliverablePromptPackage(params: {
     : null;
   const festival = festivalId ? await getFestival(festivalId).catch(() => null) : null;
   const isFestiveGreeting = postType.code === "festive-greeting" && Boolean(festival);
+  const selectedBrandLogoAsset =
+    params.briefOverride?.includeBrandLogo
+      ? allAssets.find((asset) => asset.kind === "logo") ?? null
+      : null;
+  const selectedReraQrAsset =
+    params.briefOverride?.includeReraQr
+      ? allAssets.find((asset) => asset.kind === "rera_qr") ?? null
+      : null;
 
   const inferredReferenceAssetIds = dedupeStrings([
     ...(params.briefOverride?.referenceAssetIds ?? []),
@@ -158,7 +166,9 @@ export async function compileDeliverablePromptPackage(params: {
     brief_json: {
       ...brief,
       referenceAssetIds: params.briefOverride?.referenceAssetIds ?? [],
-      resolvedReferenceAssetIds: inferredReferenceAssetIds
+      resolvedReferenceAssetIds: inferredReferenceAssetIds,
+      resolvedBrandLogoAssetId: selectedBrandLogoAsset?.id ?? null,
+      resolvedReraQrAssetId: selectedReraQrAsset?.id ?? null
     },
     created_by: params.viewerUserId
   });
@@ -184,7 +194,13 @@ export async function compileDeliverablePromptPackage(params: {
     resolved_constraints: {
       ...compiled.resolvedConstraints,
       projectImageAssetIds: projectProfileVersion?.profile.actualProjectImageIds ?? [],
-      sampleFlatImageIds: projectProfileVersion?.profile.sampleFlatImageIds ?? []
+      sampleFlatImageIds: projectProfileVersion?.profile.sampleFlatImageIds ?? [],
+      includeBrandLogo: params.briefOverride?.includeBrandLogo ?? false,
+      includeReraQr: params.briefOverride?.includeReraQr ?? false,
+      brandLogoAssetId: selectedBrandLogoAsset?.id ?? null,
+      brandLogoLabel: selectedBrandLogoAsset?.label ?? null,
+      reraQrAssetId: selectedReraQrAsset?.id ?? null,
+      reraQrLabel: selectedReraQrAsset?.label ?? null
     },
     compiler_trace: {
       ...compiled.compilerTrace,
@@ -226,7 +242,13 @@ export async function compileDeliverablePromptPackage(params: {
     resolvedConstraints: {
       ...compiled.resolvedConstraints,
       projectImageAssetIds: projectProfileVersion?.profile.actualProjectImageIds ?? [],
-      sampleFlatImageIds: projectProfileVersion?.profile.sampleFlatImageIds ?? []
+      sampleFlatImageIds: projectProfileVersion?.profile.sampleFlatImageIds ?? [],
+      includeBrandLogo: params.briefOverride?.includeBrandLogo ?? false,
+      includeReraQr: params.briefOverride?.includeReraQr ?? false,
+      brandLogoAssetId: selectedBrandLogoAsset?.id ?? null,
+      brandLogoLabel: selectedBrandLogoAsset?.label ?? null,
+      reraQrAssetId: selectedReraQrAsset?.id ?? null,
+      reraQrLabel: selectedReraQrAsset?.label ?? null
     },
     compilerTrace: {
       ...compiled.compilerTrace,
@@ -592,6 +614,8 @@ function buildCreativeBrief(params: {
         ? params.deliverable.sourceJson.exactText
         : undefined),
     referenceAssetIds: params.briefOverride?.referenceAssetIds ?? [],
+    includeBrandLogo: params.briefOverride?.includeBrandLogo ?? false,
+    includeReraQr: params.briefOverride?.includeReraQr ?? false,
     templateType: params.briefOverride?.templateType
   };
 }

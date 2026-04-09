@@ -47,6 +47,8 @@ type RoleAwareReferencePlan = {
   primaryAnchor: { role: "template" | "source_post"; label: string; storagePath: string } | null;
   sourcePost: { role: "source_post"; label: string; storagePath: string } | null;
   projectAnchor: { role: "project_image"; label: string; storagePath: string } | null;
+  brandLogo: { role: "brand_logo"; label: string; storagePath: string } | null;
+  complianceQr: { role: "rera_qr"; label: string; storagePath: string } | null;
   references: Array<{ role: "reference"; label: string; storagePath: string }>;
 };
 
@@ -250,6 +252,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     ).slice(0, MAX_SUPPORTING_REFERENCE_IMAGES);
     const projectImageAssetIds = getPromptPackageProjectImageAssetIds(promptPackage);
     const usesProjectImage = getPromptPackageUsesProjectImage(promptPackage);
+    const brandLogoAssetId = getPromptPackageResolvedAssetId(promptPackage, "brandLogoAssetId");
+    const reraQrAssetId = getPromptPackageResolvedAssetId(promptPackage, "reraQrAssetId");
     const reusableTemplate =
       promptPackage.creativeTemplateId
         ? await getReusableTemplate(promptPackage.creativeTemplateId).catch(() => null)
@@ -275,6 +279,10 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const secondaryReferenceAssets = projectAnchorAsset
       ? supportingReferenceAssets.filter((asset) => asset.id !== projectAnchorAsset.id)
       : supportingReferenceAssets;
+    const brandLogoAsset =
+      brandLogoAssetId ? brandAssets.find((asset) => asset.id === brandLogoAssetId) ?? null : null;
+    const complianceQrAsset =
+      reraQrAssetId ? brandAssets.find((asset) => asset.id === reraQrAssetId) ?? null : null;
 
     const referencePlan: RoleAwareReferencePlan = {
       primaryAnchor:
@@ -306,6 +314,20 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
             storagePath: projectAnchorAsset.storagePath
           }
         : null,
+      brandLogo: brandLogoAsset
+        ? {
+            role: "brand_logo" as const,
+            label: brandLogoAsset.label,
+            storagePath: brandLogoAsset.storagePath
+          }
+        : null,
+      complianceQr: complianceQrAsset
+        ? {
+            role: "rera_qr" as const,
+            label: complianceQrAsset.label,
+            storagePath: complianceQrAsset.storagePath
+          }
+        : null,
       references: secondaryReferenceAssets.map((asset) => ({
         role: "reference" as const,
         label: asset.label,
@@ -317,6 +339,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       (referencePlan.primaryAnchor ? 1 : 0) +
       (referencePlan.sourcePost ? 1 : 0) +
       (referencePlan.projectAnchor ? 1 : 0) +
+      (referencePlan.brandLogo ? 1 : 0) +
+      (referencePlan.complianceQr ? 1 : 0) +
       referencePlan.references.length;
     const seedPromptWithRoles =
       seedReferenceCount > 0
@@ -375,6 +399,10 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           sourcePostIncluded: Boolean(referencePlan.sourcePost),
           projectAnchorIncluded: Boolean(referencePlan.projectAnchor),
           projectAnchorLabel: referencePlan.projectAnchor?.label ?? null,
+          brandLogoIncluded: Boolean(referencePlan.brandLogo),
+          brandLogoLabel: referencePlan.brandLogo?.label ?? null,
+          complianceQrIncluded: Boolean(referencePlan.complianceQr),
+          complianceQrLabel: referencePlan.complianceQr?.label ?? null,
           supportingReferenceLabels: referencePlan.references.map((reference) => reference.label)
         }
       },
@@ -493,6 +521,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     ).slice(0, MAX_SUPPORTING_REFERENCE_IMAGES);
     const projectImageAssetIds = getPromptPackageProjectImageAssetIds(promptPackage);
     const usesProjectImage = getPromptPackageUsesProjectImage(promptPackage);
+    const brandLogoAssetId = getPromptPackageResolvedAssetId(promptPackage, "brandLogoAssetId");
+    const reraQrAssetId = getPromptPackageResolvedAssetId(promptPackage, "reraQrAssetId");
     const selectedTemplate = body.selectedTemplateId ? await getStyleTemplate(body.selectedTemplateId) : null;
     const reusableTemplate =
       !body.selectedTemplateId && promptPackage.creativeTemplateId
@@ -523,6 +553,10 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const secondaryReferenceAssets = projectAnchorAsset
       ? supportingReferenceAssets.filter((asset) => asset.id !== projectAnchorAsset.id)
       : supportingReferenceAssets;
+    const brandLogoAsset =
+      brandLogoAssetId ? brandAssets.find((asset) => asset.id === brandLogoAssetId) ?? null : null;
+    const complianceQrAsset =
+      reraQrAssetId ? brandAssets.find((asset) => asset.id === reraQrAssetId) ?? null : null;
 
     const referencePlan: RoleAwareReferencePlan = {
       primaryAnchor:
@@ -561,6 +595,20 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
             storagePath: projectAnchorAsset.storagePath
           }
         : null,
+      brandLogo: brandLogoAsset
+        ? {
+            role: "brand_logo" as const,
+            label: brandLogoAsset.label,
+            storagePath: brandLogoAsset.storagePath
+          }
+        : null,
+      complianceQr: complianceQrAsset
+        ? {
+            role: "rera_qr" as const,
+            label: complianceQrAsset.label,
+            storagePath: complianceQrAsset.storagePath
+          }
+        : null,
       references: secondaryReferenceAssets.map((asset) => ({
         role: "reference" as const,
         label: asset.label,
@@ -572,6 +620,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       (referencePlan.primaryAnchor ? 1 : 0) +
       (referencePlan.sourcePost ? 1 : 0) +
       (referencePlan.projectAnchor ? 1 : 0) +
+      (referencePlan.brandLogo ? 1 : 0) +
+      (referencePlan.complianceQr ? 1 : 0) +
       referencePlan.references.length;
 
     if (expectedReferenceCount === 0) {
@@ -1045,8 +1095,37 @@ function buildRoleAwarePrompt(
     );
   }
 
+  if (plan.brandLogo) {
+    const logoIndex =
+      (plan.primaryAnchor ? 1 : 0) +
+      (plan.sourcePost ? 1 : 0) +
+      (plan.projectAnchor ? 1 : 0) +
+      1;
+    roleLines.push(
+      `Image ${logoIndex} is the supplied brand logo (${plan.brandLogo.label}). Use it exactly as provided as a small footer or signature element when logo placement is needed. Match the exact lockup, shape, colors, and spacing from this reference. Do not redraw, stylize, simplify, distort, or invent a replacement logo. If you cannot preserve it faithfully, leave the zone blank instead of inventing a substitute.`
+    );
+  }
+
+  if (plan.complianceQr) {
+    const qrIndex =
+      (plan.primaryAnchor ? 1 : 0) +
+      (plan.sourcePost ? 1 : 0) +
+      (plan.projectAnchor ? 1 : 0) +
+      (plan.brandLogo ? 1 : 0) +
+      1;
+    roleLines.push(
+      `Image ${qrIndex} is the supplied RERA QR (${plan.complianceQr.label}). Use it exactly as provided as a small compliance element when QR placement is needed. Match the exact QR matrix from this reference. Keep it flat, unobstructed, high-contrast, and legible. Do not stylize, repaint, crop aggressively, distort, or decorate the QR. If you cannot preserve it faithfully, leave the zone blank instead of inventing a fake QR.`
+    );
+  }
+
   if (plan.references.length > 0) {
-    const startingIndex = (plan.primaryAnchor ? 1 : 0) + (plan.sourcePost ? 1 : 0) + (plan.projectAnchor ? 1 : 0) + 1;
+    const startingIndex =
+      (plan.primaryAnchor ? 1 : 0) +
+      (plan.sourcePost ? 1 : 0) +
+      (plan.projectAnchor ? 1 : 0) +
+      (plan.brandLogo ? 1 : 0) +
+      (plan.complianceQr ? 1 : 0) +
+      1;
     const referenceLabels = plan.references
       .map((reference, index) => `Image ${startingIndex + index}: ${reference.label}`)
       .join("; ");
@@ -1066,6 +1145,22 @@ function buildRoleAwarePrompt(
   } else {
     roleLines.push(
       "When images conflict, follow the template or source anchor for structure first, then use supporting references for subject detail and realism."
+    );
+  }
+
+  if (plan.brandLogo) {
+    roleLines.push(
+      mode === "seed"
+        ? "During style exploration, either place the supplied logo exactly as provided or keep its reserved area blank. Never generate a mock logo, substitute emblem, or placeholder footer mark."
+        : "If the logo cannot be rendered cleanly, keep it small and simple rather than inventing a distorted or incorrect logo mark."
+    );
+  }
+
+  if (plan.complianceQr) {
+    roleLines.push(
+      mode === "seed"
+        ? "During style exploration, either place the supplied RERA QR exactly as provided or keep its reserved area blank. Never generate a fake QR, barcode, badge, or placeholder compliance block."
+        : "Treat the RERA QR as a compliance artifact, not decoration. Keep a quiet surrounding area so it remains scannable."
     );
   }
 
@@ -1089,7 +1184,7 @@ function buildRoleAwarePrompt(
       "Return one finished design per output image. Never create multiple alternate posters, tiled mini-designs, contact sheets, mood boards, or side-by-side concepts inside the same frame."
     );
     roleLines.push(
-      "Treat any text, logos, URLs, page numbers, handles, and placeholder brand names visible in the input images as scaffolding only. Do not reproduce or remix them in the output."
+      "Treat any text, logos, URLs, page numbers, handles, and placeholder brand names visible in the template, source-post, project, or supporting reference images as scaffolding only. Do not reproduce or remix them in the output. The only exceptions are the dedicated supplied brand logo and dedicated supplied RERA QR reference images, which must be used exactly as provided when enabled."
     );
     roleLines.push(
       "Do not include sample website text, pagination markers, mock social handles, placeholder logos, or copied slogans from the reference images."
@@ -1098,7 +1193,7 @@ function buildRoleAwarePrompt(
       "Keep on-canvas typography minimal, clean, and legible. If supporting copy cannot be rendered cleanly, omit it instead of generating garbled text."
     );
     roleLines.push(
-      "Only render new text that matches the requested concept. Never copy literal words from the input images unless the prompt explicitly asks for them."
+      "Only render new text that matches the requested concept. Never copy literal words from the input images unless the prompt explicitly asks for them or they are part of the dedicated supplied brand logo / compliance reference assets."
     );
     if (plan.projectAnchor) {
       roleLines.push(
@@ -1117,6 +1212,8 @@ function collectReferenceStoragePaths(plan: RoleAwareReferencePlan) {
     plan.primaryAnchor?.storagePath,
     plan.sourcePost?.storagePath,
     plan.projectAnchor?.storagePath,
+    plan.brandLogo?.storagePath,
+    plan.complianceQr?.storagePath,
     ...plan.references.map((reference) => reference.storagePath)
   ].filter((value): value is string => typeof value === "string" && value.length > 0);
 }
@@ -1224,6 +1321,18 @@ function getPromptPackageProjectImageAssetIds(promptPackage: { resolvedConstrain
       : {};
   const value = resolvedConstraints.projectImageAssetIds;
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0) : [];
+}
+
+function getPromptPackageResolvedAssetId(
+  promptPackage: { resolvedConstraints?: Record<string, unknown> | null | undefined },
+  key: "brandLogoAssetId" | "reraQrAssetId"
+) {
+  const resolvedConstraints =
+    promptPackage.resolvedConstraints && typeof promptPackage.resolvedConstraints === "object"
+      ? promptPackage.resolvedConstraints
+      : {};
+  const value = resolvedConstraints[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function getPromptPackageUsesProjectImage(promptPackage: { resolvedConstraints?: Record<string, unknown> | null | undefined }) {

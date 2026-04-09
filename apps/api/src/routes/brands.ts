@@ -182,34 +182,65 @@ export async function registerBrandRoutes(app: FastifyInstance) {
     const brand = await getBrand((request.params as { brandId: string }).brandId);
     await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
 
-    const file = await request.file();
-    if (!file) {
+    let filePart:
+      | {
+          filename: string;
+          mimetype: string;
+          toBuffer: () => Promise<Buffer>;
+        }
+      | null = null;
+    let labelValue: string | null = null;
+    let kindValue: string | null = null;
+
+    for await (const part of request.parts()) {
+      if (part.type === "file") {
+        if (!filePart) {
+          filePart = {
+            filename: part.filename,
+            mimetype: part.mimetype,
+            toBuffer: () => part.toBuffer()
+          };
+        } else {
+          await part.toBuffer();
+        }
+        continue;
+      }
+
+      if (part.fieldname === "kind") {
+        kindValue = typeof part.value === "string" ? part.value : String(part.value ?? "");
+      }
+
+      if (part.fieldname === "label") {
+        labelValue = typeof part.value === "string" ? part.value : String(part.value ?? "");
+      }
+    }
+
+    if (!filePart) {
       return reply.badRequest("File upload is required");
     }
 
-    const kindField = Array.isArray(file.fields.kind) ? file.fields.kind[0] : file.fields.kind;
-    const labelField = Array.isArray(file.fields.label) ? file.fields.label[0] : file.fields.label;
-    const kindValue =
-      kindField && "value" in kindField && typeof kindField.value !== "undefined"
-        ? String(kindField.value)
-        : "reference";
-    const labelValue =
-      labelField && "value" in labelField && typeof labelField.value !== "undefined"
-        ? String(labelField.value)
-        : file.filename;
-    const kind = AssetKindSchema.parse(kindValue);
-    const label = labelValue;
-    const buffer = await file.toBuffer();
+    const kind = AssetKindSchema.parse(kindValue?.trim() || "reference");
+    const label = labelValue?.trim() || filePart.filename;
+    const buffer = await filePart.toBuffer();
     const assetId = randomId();
     const storagePath = buildStoragePath({
       workspaceId: brand.workspaceId,
       brandId: brand.id,
-      section: "references",
+      section:
+        kind === "logo"
+          ? "logos"
+          : kind === "rera_qr"
+            ? "compliance"
+            : kind === "product"
+              ? "product"
+              : kind === "inspiration"
+                ? "inspiration"
+                : "references",
       id: assetId,
-      fileName: file.filename
+      fileName: filePart.filename
     });
 
-    await uploadBufferToStorage(storagePath, buffer, file.mimetype);
+    await uploadBufferToStorage(storagePath, buffer, filePart.mimetype);
 
     const { error } = await supabaseAdmin.from("brand_assets").insert({
       id: assetId,
@@ -217,8 +248,8 @@ export async function registerBrandRoutes(app: FastifyInstance) {
       brand_id: brand.id,
       kind,
       label,
-      file_name: file.filename,
-      mime_type: file.mimetype,
+      file_name: filePart.filename,
+      mime_type: filePart.mimetype,
       storage_path: storagePath,
       created_by: viewer.userId
     });

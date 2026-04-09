@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const WorkspaceRoleSchema = z.enum(["owner", "admin", "editor", "viewer"]);
-export const AssetKindSchema = z.enum(["reference", "logo", "product", "inspiration"]);
+export const AssetKindSchema = z.enum(["reference", "logo", "product", "inspiration", "rera_qr"]);
 export const ProjectStageSchema = z.enum(["pre_launch", "launch", "under_construction", "near_possession", "delivered"]);
 export const ProjectStatusSchema = z.enum(["active", "archived"]);
 export const FestivalCategorySchema = z.enum(["national", "religious", "cultural", "seasonal", "observance"]);
@@ -641,6 +641,8 @@ export const CreativeBriefSchema = z.object({
   offer: z.string().optional(),
   exactText: z.string().optional(),
   referenceAssetIds: z.array(z.string().uuid()).default([]),
+  includeBrandLogo: z.boolean().default(false),
+  includeReraQr: z.boolean().default(false),
   templateType: TemplateTypeSchema.optional()
 });
 
@@ -722,6 +724,7 @@ export const BrandDetailSchema = z.object({
     total: z.number().int(),
     reference: z.number().int(),
     logo: z.number().int(),
+    reraQr: z.number().int(),
     product: z.number().int(),
     inspiration: z.number().int()
   })

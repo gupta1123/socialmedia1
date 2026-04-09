@@ -110,6 +110,18 @@ export function compilePromptPackageMock(input: Input) {
   const exactTextInstruction = input.brief.exactText
     ? `Include this exact on-image text without paraphrasing: "${input.brief.exactText}".`
     : "Avoid adding dense text overlays unless it improves the concept.";
+  const brandLogoSeedInstruction = input.brief.includeBrandLogo
+    ? "If a supplied brand logo reference is attached, use that exact logo as a small footer or signature element. Match the exact lockup, shape, colors, and spacing from the supplied logo reference. If the logo is not shown cleanly, keep a restrained blank footer or signature zone instead. During style exploration, never render an invented logo, monogram, emblem, footer mark, or placeholder brand symbol."
+    : null;
+  const reraQrSeedInstruction = input.brief.includeReraQr
+    ? "If a supplied RERA QR reference is attached, use that exact QR as a small compliance element. Match the exact QR matrix from the supplied reference. If the QR is not shown cleanly, keep a small blank compliance-safe corner or footer zone instead. During style exploration, never render an invented QR code, barcode, compliance badge, seal, or placeholder block."
+    : null;
+  const brandLogoFinalInstruction = input.brief.includeBrandLogo
+    ? "Include the supplied brand logo exactly as provided. Treat it as a small footer or signature element. Match the exact lockup, shape, colors, and spacing from the supplied logo reference. Do not redraw, reinterpret, stylize, or invent a new logo mark. If you cannot preserve it faithfully, leave the zone blank instead of generating a substitute."
+    : null;
+  const reraQrFinalInstruction = input.brief.includeReraQr
+    ? "Include the supplied RERA QR exactly as provided as a small compliance element. Match the exact QR matrix from the supplied reference. Keep it flat, unobstructed, high-contrast, and legible. Do not stylize, repaint, distort, or decorate the QR. If you cannot preserve it faithfully, leave the zone blank instead of inventing a fake QR."
+    : null;
   const briefFirstClassInstruction = briefDirective
     ? `User brief to honor exactly in spirit: ${briefDirective}. Treat explicit requests about lighting, time of day, atmosphere, mood, camera angle, framing, styling, or subject emphasis as first-class creative direction unless they conflict with compliance, factual project truth, or a required source image.`
     : null;
@@ -155,6 +167,8 @@ export function compilePromptPackageMock(input: Input) {
     carouselRecipe.length > 0 && seriesOutputKind === "carousel"
       ? `Carousel system recipe: ${carouselRecipe.join("; ")}.`
       : null,
+    brandLogoSeedInstruction,
+    reraQrSeedInstruction,
     input.series?.description ? `Series concept: ${input.series.description}.` : null,
     input.deliverableSnapshot?.campaign?.keyMessage
       ? `Campaign message: ${input.deliverableSnapshot.campaign.keyMessage}.`
@@ -208,6 +222,8 @@ export function compilePromptPackageMock(input: Input) {
     ...festivalGuidance.finalClauses,
     ...projectGuidance.finalClauses,
     ...postTypeGuidance.finalClauses,
+    brandLogoFinalInstruction,
+    reraQrFinalInstruction,
     templateFamily ? `Anchor the output in the ${templateFamily} template family.` : null,
     carouselRecipe.length > 0 && seriesOutputKind === "carousel"
       ? `Use this carousel recipe: ${carouselRecipe.join("; ")}.`
@@ -250,6 +266,8 @@ export function compilePromptPackageMock(input: Input) {
       postTypeCode: input.postType?.code ?? null,
       festival: festivalGuidance.manifest,
       postTypeGuidance: postTypeGuidance.manifest,
+      includeBrandLogo: input.brief.includeBrandLogo,
+      includeReraQr: input.brief.includeReraQr,
       templateName: input.template?.name ?? null,
       templateFamily,
       calendarTitle: input.calendarItem?.title ?? null,

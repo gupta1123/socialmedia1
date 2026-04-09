@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 try:
     from agno.agent import Agent
-    from agno.models.openai import OpenAIChat
+    from agno.models.openai import OpenAIResponses
 except ImportError as exc:  # pragma: no cover - exercised only when deps missing
     raise SystemExit(f"Agno dependencies are missing: {exc}") from exc
 
@@ -49,27 +49,65 @@ Return only valid JSON with this exact shape:
 Do not wrap the JSON in markdown fences.
 """.strip()
 
+EXPECTED_OUTPUT_INSTRUCTION = """
+Return a distilled prompt package, not a manifest dump.
+
+- seedPrompt: a compact style-exploration prompt that keeps only the highest-signal visual controls.
+- finalPrompt: a compact final-render prompt that keeps only what the image model truly needs.
+- Use the full brand, project, post type, festival, and compliance context internally, but do not restate all of it in the prompt text.
+- Only include facts that materially affect composition, subject truth, exact copy, legal/compliance rendering, or required reference handling.
+- Avoid repeating the same brand/project idea in multiple phrasings.
+- Do not echo field labels like a report unless they improve clarity for the image model.
+""".strip()
+
+SKILL_FIRST_WORKFLOW_INSTRUCTION = """
+When skills are available, use them as the primary source of detailed prompt-method guidance.
+
+Required workflow before you produce the final JSON:
+- Always call `get_skill_instructions("brief-to-image-spec")`
+- Always call `get_skill_instructions("post-type-selection")`
+- Always call `get_skill_instructions("brand-style-translation")`
+- Always call `get_skill_instructions("claim-safety")`
+- Always call `get_skill_instructions("platform-safe-layout")`
+- Always call `get_skill_instructions("real-estate-copy-zones")`
+- If project context exists, call `get_skill_instructions("project-context-resolution")`
+- If festival context exists, call `get_skill_instructions("festive-greeting-composition")`
+- If references or uploaded brand assets are relevant, call `get_skill_instructions("reference-selection")`
+- If a reusable template is relevant, call `get_skill_instructions("template-prompt-composition")`
+- When shaping the seedPrompt, call `get_skill_instructions("seed-template-design")`
+- Only call `get_skill_instructions("model-routing")` if the image-model choice is ambiguous
+
+Do not skip these skill loads just because the request already contains manifests. The manifests carry facts; the skills carry the working method.
+Never invent a new skill name. Only call exact skill names that appear in the loaded skills list.
+For festival-specific work, the valid festival skill in this workspace is `festive-greeting-composition`.
+Do not paste tool JSON into the answer. Synthesize the skill guidance into the prompt package.
+""".strip()
+
 
 def build_agent() -> Agent:
     skills_dir = Path(__file__).resolve().parents[3] / "skills" / "prompt"
     base_url = os.getenv("OPENAI_BASE_URL")
-    kwargs: dict[str, Any] = {
-        "id": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+    skill_first_mode = os.getenv("AGNO_SKILL_FIRST_MODE", "0") == "1"
+    model_kwargs: dict[str, Any] = {
+        "id": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         "timeout": float(os.getenv("AGNO_OPENAI_TIMEOUT_SEC", "20")),
         "max_retries": int(os.getenv("AGNO_OPENAI_MAX_RETRIES", "1")),
     }
 
     if base_url:
-        kwargs["base_url"] = base_url
+        model_kwargs["base_url"] = base_url
 
     instructions = [
         "You are the Creative Director for a brand-aware social image lab.",
         "Use local skills to transform brand, project, post type, template, and calendar context into a model-ready prompt package.",
         "Output only structured data matching the requested schema.",
         "Prefer strong, brand-specific image directions over generic SaaS imagery.",
-        "Use the brand identity, voice system, visual system, compliance rules, and reference canon as first-class controls, not as background trivia.",
+        "Keep prompts lean. Only include brand and project facts that materially affect composition, copy truth, compliance, or recognizable subject identity.",
+        "Do not dump every available manifest field into the prompt. Prefer a smaller set of high-signal constraints over exhaustive catalogs of facts.",
         "Treat brief.prompt as a first-class creative control, not filler text.",
         "If the brief specifies visual conditions such as sunset, night, dawn, moody, minimal, close-up, aerial, wide, dramatic, calm, or editorial, preserve those conditions in both seedPrompt and finalPrompt unless they conflict with compliance, factual project truth, or a required source image.",
+        "If brief.includeBrandLogo is true, treat the supplied logo reference as an exact asset. In the seedPrompt, either use that exact logo or keep its area blank, but never invent a placeholder mark. In the finalPrompt, require the supplied logo to be used exactly as provided without redrawing or inventing a mark.",
+        "If brief.includeReraQr is true, treat the supplied RERA QR reference as an exact compliance asset. In the seedPrompt, either use that exact QR or keep its area blank, but never invent a placeholder QR. In the finalPrompt, require the supplied RERA QR to be placed exactly as provided, flat and legible, without stylizing it.",
         "During style exploration, restate the user's creative intent clearly enough that the seed directions materially change when the brief changes.",
         "Do not rely on rigid keyword extraction or trivial heuristics. Interpret the brief semantically and translate it into concrete image direction.",
         "Use the project prompt manifest as the deterministic summary of project facts, approved claims, location facts, and image-usage constraints.",
@@ -80,12 +118,14 @@ def build_agent() -> Agent:
         "Use brand_prompt_manifest as the deterministic summary of brand controls. Do not omit its usage notes, anti-reference notes, banned terms, or review checks when they are present.",
         "Use festival_prompt_manifest when present. Keep the creative specific to that festival instead of drifting into a generic seasonal greeting.",
         "For festive greetings, write a detailed poster-style image prompt with explicit background, symbolic arrangement, typography placement, decorative accents, style treatment, and a short negative prompt.",
+        "For festive greetings, enforce a single-poster outcome per image. Never ask for a board of greeting concepts, a grid of mini-posters, a contact sheet, or multiple alternate layouts inside one output.",
         "For festive greetings, do not pull in project renders, amenities, location facts, pricing, or sales language unless the brief explicitly asks for a project-linked festive post.",
         "Do not require uploaded references for festive greetings by default. Prompt-led composition is valid there.",
         "For construction updates, write a detailed project-image-led progress poster prompt with a real construction photo as the hero element, disciplined headline hierarchy, a premium progress-data treatment, and footer trust cues.",
         "For project launches, write a detailed property-image hero prompt with the supplied building image as the dominant visual, refined overlays, minimal supporting copy, and a premium launch-poster composition.",
         "Do not reuse one fixed sample prompt for every construction update or project launch. Keep the same level of detail, but vary the composition family, supporting copy structure, and panel treatment according to the brief and project facts.",
-        "When planning direction exploration, favor materially different creative routes rather than minor sampled variations of the same composition.",
+        "When planning direction exploration, favor materially different creative routes across the batch rather than minor sampled variations of the same composition.",
+        "Each generated image should resolve as one complete design only. Do not describe or imply a contact sheet, multi-panel board, tiled grid, mood board, artboard, or several alternate posters inside one frame.",
         "If exact text is provided, preserve it exactly and plan safe zones around it.",
         "Treat reusable templates as image-plus-prompt direction packs, not as rigid layouts.",
         "Treat references and reusable templates as style anchors for mood, composition discipline, material language, and typography restraint, not as exact images to replicate.",
@@ -95,10 +135,19 @@ def build_agent() -> Agent:
         OUTPUT_FORMAT_INSTRUCTION,
     ]
 
+    if skill_first_mode:
+        instructions.extend(
+            [
+                "Use the available skills as the primary place to resolve post-type recipes, reference strategy, layout guidance, and compliance method.",
+                SKILL_FIRST_WORKFLOW_INSTRUCTION,
+            ]
+        )
+
     agent_kwargs: dict[str, Any] = {
         "name": "Creative Director",
-        "model": OpenAIChat(**kwargs),
+        "model": OpenAIResponses(**model_kwargs),
         "instructions": instructions,
+        "expected_output": EXPECTED_OUTPUT_INSTRUCTION,
         "markdown": False,
     }
 

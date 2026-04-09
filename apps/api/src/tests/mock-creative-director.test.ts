@@ -110,6 +110,8 @@ describe("compilePromptPackageMock", () => {
         goal: "Launch announcement",
         prompt: "Create a launch visual for the new product line",
         referenceAssetIds: [],
+        includeBrandLogo: false,
+        includeReraQr: false,
         templateType: "announcement"
       },
       referenceLabels: [],
@@ -181,6 +183,8 @@ describe("compilePromptPackageMock", () => {
         goal: "Construction progress update",
         prompt: "Show the latest site progress with a premium trustworthy feel",
         referenceAssetIds: [],
+        includeBrandLogo: false,
+        includeReraQr: false,
         templateType: "announcement"
       },
       referenceLabels: ["Northstar Phase 2 construction hero"],
@@ -223,6 +227,8 @@ describe("compilePromptPackageMock", () => {
         goal: "Project hero reveal",
         prompt: "Create a premium property-image launch reveal for the new tower",
         referenceAssetIds: [],
+        includeBrandLogo: false,
+        includeReraQr: false,
         templateType: "hero"
       },
       referenceLabels: ["Northstar tower hero"],
@@ -268,6 +274,8 @@ describe("compilePromptPackageMock", () => {
         goal: "Amenity spotlight",
         prompt: "Create an amenity spotlight for the Sky lounge with a premium lifestyle feel",
         referenceAssetIds: [],
+        includeBrandLogo: false,
+        includeReraQr: false,
         templateType: "product-focus"
       },
       referenceLabels: ["Northstar tower hero"],
@@ -311,6 +319,8 @@ describe("compilePromptPackageMock", () => {
         goal: "Site visit invite",
         prompt: "Invite buyers to book a site visit this weekend",
         referenceAssetIds: [],
+        includeBrandLogo: false,
+        includeReraQr: false,
         templateType: "offer",
         exactText: "Site visits now open"
       },
@@ -353,6 +363,8 @@ describe("compilePromptPackageMock", () => {
         goal: "Project hero reveal",
         prompt: "Create a sunset view with a dramatic skyline and warm amber lighting",
         referenceAssetIds: [],
+        includeBrandLogo: false,
+        includeReraQr: false,
         templateType: "hero"
       },
       referenceLabels: ["Northstar tower hero"],

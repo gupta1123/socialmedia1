@@ -292,10 +292,11 @@ export async function getBrandAssetCounts(brandId: string) {
     return count ?? 0;
   };
 
-  const [total, reference, logo, product, inspiration] = await Promise.all([
+  const [total, reference, logo, reraQr, product, inspiration] = await Promise.all([
     countByKind(),
     countByKind("reference"),
     countByKind("logo"),
+    countByKind("rera_qr"),
     countByKind("product"),
     countByKind("inspiration")
   ]);
@@ -304,6 +305,7 @@ export async function getBrandAssetCounts(brandId: string) {
     total,
     reference,
     logo,
+    reraQr,
     product,
     inspiration
   };

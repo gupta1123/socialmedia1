@@ -457,13 +457,15 @@ function normalizeAgnoResult(raw: CompilerResult, input: Input): CompilerResult 
     ...brandGuidance.seedClauses,
     ...festivalGuidance.seedClauses,
     ...projectGuidance.seedClauses,
-    ...postTypeGuidance.seedClauses
+    ...postTypeGuidance.seedClauses,
+    ...buildAssetUsageSeedClauses(input.brief)
   ];
   const finalClauses = [
     ...brandGuidance.finalClauses,
     ...festivalGuidance.finalClauses,
     ...projectGuidance.finalClauses,
-    ...postTypeGuidance.finalClauses
+    ...postTypeGuidance.finalClauses,
+    ...buildAssetUsageFinalClauses(input.brief)
   ];
   const referenceStrategy = normalizeReferenceStrategy(raw.referenceStrategy, input);
   const templateType = normalizeTemplateType(raw.templateType, input);
@@ -517,7 +519,15 @@ function normalizeAgnoResult(raw: CompilerResult, input: Input): CompilerResult 
       postTypeGuidance:
         "postTypeGuidance" in normalizedResolvedConstraints && normalizedResolvedConstraints.postTypeGuidance
           ? normalizedResolvedConstraints.postTypeGuidance
-          : postTypeGuidance.manifest
+          : postTypeGuidance.manifest,
+      includeBrandLogo:
+        "includeBrandLogo" in normalizedResolvedConstraints
+          ? normalizedResolvedConstraints.includeBrandLogo
+          : input.brief.includeBrandLogo,
+      includeReraQr:
+        "includeReraQr" in normalizedResolvedConstraints
+          ? normalizedResolvedConstraints.includeReraQr
+          : input.brief.includeReraQr
     },
     compilerTrace: {
       ...normalizedCompilerTrace,
@@ -605,14 +615,38 @@ function buildAgentPayload(input: Input): AgentPayload {
         ...brandGuidance.seedClauses,
         ...festivalGuidance.seedClauses,
         ...projectGuidance.seedClauses,
-        ...postTypeGuidance.seedClauses
+        ...postTypeGuidance.seedClauses,
+        ...buildAssetUsageSeedClauses(input.brief)
       ],
       finalClauses: [
         ...brandGuidance.finalClauses,
         ...festivalGuidance.finalClauses,
         ...projectGuidance.finalClauses,
-        ...postTypeGuidance.finalClauses
+        ...postTypeGuidance.finalClauses,
+        ...buildAssetUsageFinalClauses(input.brief)
       ]
     }
   };
+}
+
+function buildAssetUsageSeedClauses(brief: CreativeBrief) {
+  return [
+    brief.includeBrandLogo
+      ? "If a supplied brand logo reference is attached, use that exact logo as a small footer or signature element. Match the exact lockup, shape, colors, and spacing from the supplied logo reference. If it is not shown cleanly, keep a restrained footer or signature zone blank instead. Never invent a substitute logo, emblem, badge, or placeholder mark."
+      : null,
+    brief.includeReraQr
+      ? "If a supplied RERA QR reference is attached, use that exact QR as a small compliance element. Match the exact QR matrix from the supplied reference. If it is not shown cleanly, keep a small compliance-safe corner or footer zone blank instead. Never invent a substitute QR, barcode, badge, or placeholder block."
+      : null
+  ].filter((value): value is string => Boolean(value));
+}
+
+function buildAssetUsageFinalClauses(brief: CreativeBrief) {
+  return [
+    brief.includeBrandLogo
+      ? "Include the supplied brand logo exactly as provided. Treat it as a small footer or signature element. Match the exact lockup, shape, colors, and spacing from the supplied logo reference. Do not redraw, reinterpret, stylize, or invent a new logo mark. If you cannot preserve it faithfully, leave the zone blank instead of generating a substitute."
+      : null,
+    brief.includeReraQr
+      ? "Include the supplied RERA QR exactly as provided as a small compliance element. Match the exact QR matrix from the supplied reference. Keep it flat, unobstructed, high-contrast, and legible. Do not stylize, repaint, distort, or decorate the QR. If you cannot preserve it faithfully, leave the zone blank instead of inventing a fake QR."
+      : null
+  ].filter((value): value is string => Boolean(value));
 }

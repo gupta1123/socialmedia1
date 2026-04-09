@@ -36,7 +36,7 @@ export function sanitizeFileName(fileName: string) {
 export function buildStoragePath(input: {
   workspaceId: string;
   brandId: string;
-  section: "references" | "templates" | "outputs";
+  section: "references" | "logos" | "compliance" | "product" | "inspiration" | "templates" | "outputs";
   id: string;
   fileName: string;
 }) {
@@ -46,4 +46,3 @@ export function buildStoragePath(input: {
 export function dedupeStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
-
