@@ -186,7 +186,7 @@ export async function registerBrandRoutes(app: FastifyInstance) {
       | {
           filename: string;
           mimetype: string;
-          toBuffer: () => Promise<Buffer>;
+          buffer: Buffer;
         }
       | null = null;
     let labelValue: string | null = null;
@@ -194,14 +194,14 @@ export async function registerBrandRoutes(app: FastifyInstance) {
 
     for await (const part of request.parts()) {
       if (part.type === "file") {
+        const buffer = await part.toBuffer();
+
         if (!filePart) {
           filePart = {
             filename: part.filename,
             mimetype: part.mimetype,
-            toBuffer: () => part.toBuffer()
+            buffer
           };
-        } else {
-          await part.toBuffer();
         }
         continue;
       }
@@ -221,7 +221,7 @@ export async function registerBrandRoutes(app: FastifyInstance) {
 
     const kind = AssetKindSchema.parse(kindValue?.trim() || "reference");
     const label = labelValue?.trim() || filePart.filename;
-    const buffer = await filePart.toBuffer();
+    const buffer = filePart.buffer;
     const assetId = randomId();
     const storagePath = buildStoragePath({
       workspaceId: brand.workspaceId,
