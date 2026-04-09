@@ -7,7 +7,6 @@ import type {
   CreateDeliverableInput,
   CreativeChannel,
   CreativeFormat,
-  CreativeTemplateRecord,
   DeliverablePriority,
   DeliverableRecord,
   DeliverableStatus,
@@ -24,11 +23,12 @@ import {
   getCampaigns,
   getDeliverables,
   getPostingWindows,
-  getPlanningTemplates,
+  getPlanningTemplateOptions,
   getPostTypes,
   getProjects,
   getWorkspaceMembers,
-  updateDeliverable
+  updateDeliverable,
+  type PlanningTemplateOption
 } from "../../../lib/api";
 import { mapCreativeFormatToContentFormat } from "../../../lib/deliverable-helpers";
 import { getAllowedFormats, getDefaultFormat, getPlacementSpec } from "../../../lib/placement-specs";
@@ -95,7 +95,7 @@ export default function CalendarPage() {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignRecord[]>([]);
   const [postTypes, setPostTypes] = useState<PostTypeRecord[]>([]);
-  const [templates, setTemplates] = useState<CreativeTemplateRecord[]>([]);
+  const [templates, setTemplates] = useState<PlanningTemplateOption[]>([]);
   const [postingWindows, setPostingWindows] = useState<PostingWindowRecord[]>([]);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -265,7 +265,7 @@ export default function CalendarPage() {
     setEditorDataLoading(true);
     try {
       const [templateRecords, postingWindowRecords, memberRecords] = await Promise.all([
-        getPlanningTemplates(sessionToken, { brandId: activeBrandId }),
+        getPlanningTemplateOptions(sessionToken, { brandId: activeBrandId }),
         getPostingWindows(sessionToken, activeBrandId),
         getWorkspaceMembers(sessionToken)
       ]);

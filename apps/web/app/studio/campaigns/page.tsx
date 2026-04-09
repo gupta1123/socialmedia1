@@ -11,7 +11,6 @@ import type {
   CreateCampaignDeliverablePlanInput,
   CreativeChannel,
   CreativeFormat,
-  CreativeTemplateRecord,
   ObjectiveCode,
   PostTypeRecord,
   ProjectRecord
@@ -22,10 +21,11 @@ import {
   getCampaignPlans,
   getCampaigns,
   getChannelAccounts,
-  getPlanningTemplates,
+  getPlanningTemplateOptions,
   getPostTypes,
   getProjects,
-  materializeCampaignDeliverables
+  materializeCampaignDeliverables,
+  type PlanningTemplateOption
 } from "../../../lib/api";
 import { DataTable } from "../data-table";
 import { mapCreativeFormatToContentFormat } from "../../../lib/deliverable-helpers";
@@ -101,7 +101,7 @@ export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<CampaignRecord[]>([]);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [postTypes, setPostTypes] = useState<PostTypeRecord[]>([]);
-  const [templates, setTemplates] = useState<CreativeTemplateRecord[]>([]);
+  const [templates, setTemplates] = useState<PlanningTemplateOption[]>([]);
   const [channelAccounts, setChannelAccounts] = useState<ChannelAccountRecord[]>([]);
   const [plansByCampaign, setPlansByCampaign] = useState<Record<string, CampaignDeliverablePlanRecord[]>>({});
   const [loading, setLoading] = useState(true);
@@ -144,9 +144,9 @@ export default function CampaignsPage() {
         setLoading(true);
         const [campaignRecords, projectRecords, postTypeRecords, templateRecords, accountRecords] = await Promise.all([
           getCampaigns(token, { brandId }),
-          getProjects(token),
+          getProjects(token, { brandId }),
           getPostTypes(token),
-          getPlanningTemplates(token, { brandId }),
+          getPlanningTemplateOptions(token, { brandId }),
           getChannelAccounts(token, brandId)
         ]);
 

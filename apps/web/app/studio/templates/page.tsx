@@ -108,7 +108,7 @@ export default function TemplatesPage() {
         setLoading(true);
         const [templateRecords, projectRecords, postTypeRecords] = await Promise.all([
           getPlanningTemplates(token, brandId ? { brandId } : undefined),
-          getProjects(token),
+          getProjects(token, brandId ? { brandId } : undefined),
           getPostTypes(token)
         ]);
 

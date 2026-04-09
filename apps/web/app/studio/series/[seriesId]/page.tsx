@@ -7,7 +7,6 @@ import type {
   ChannelAccountRecord,
   CreativeChannel,
   ContentFormat,
-  CreativeTemplateRecord,
   PostTypeRecord,
   ProjectRecord,
   SeriesRecord,
@@ -16,11 +15,12 @@ import type {
 import {
   getChannelAccounts,
   getDeliverables,
-  getPlanningTemplates,
+  getPlanningTemplateOptions,
   getPostTypes,
   getProjects,
   getSeriesDetail,
   materializeSeries,
+  type PlanningTemplateOption,
   updateSeries
 } from "../../../../lib/api";
 import { deriveCreativeFormatFromDeliverable } from "../../../../lib/deliverable-helpers";
@@ -77,7 +77,7 @@ export default function SeriesDetailPage() {
   const [form, setForm] = useState<SeriesEditorState | null>(null);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [postTypes, setPostTypes] = useState<PostTypeRecord[]>([]);
-  const [templates, setTemplates] = useState<CreativeTemplateRecord[]>([]);
+  const [templates, setTemplates] = useState<PlanningTemplateOption[]>([]);
   const [channels, setChannels] = useState<ChannelAccountRecord[]>([]);
   const [deliverables, setDeliverables] = useState<SeriesDeliverablePreview[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,7 +98,7 @@ export default function SeriesDetailPage() {
       const [projectRecords, postTypeRecords, templateRecords, channelRecords, deliverableRecords] = await Promise.all([
         getProjects(sessionToken, { brandId: record.brandId }),
         getPostTypes(sessionToken),
-        getPlanningTemplates(sessionToken, { brandId: record.brandId }),
+        getPlanningTemplateOptions(sessionToken, { brandId: record.brandId }),
         getChannelAccounts(sessionToken, record.brandId),
         getDeliverables(sessionToken, { seriesId: record.id, includePreviews: true, limit: 24 })
       ]);

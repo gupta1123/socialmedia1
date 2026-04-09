@@ -61,31 +61,164 @@ import type {
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 export type BootstrapMode = "full" | "light";
+export type PlanningTemplateOption = {
+  id: string;
+  workspaceId: string;
+  brandId: string;
+  projectId: string | null;
+  postTypeId: string | null;
+  name: string;
+  status: CreativeTemplateRecord["status"];
+  channel: CreativeTemplateRecord["channel"];
+  format: CreativeTemplateRecord["format"];
+};
+const responseCache = new Map<string, { data: unknown; expiresAt: number }>();
+const inflightRequests = new Map<string, Promise<unknown>>();
+
+function getCacheTtlMs(path: string) {
+  if (path.startsWith("/api/session/bootstrap") && path.includes("view=light")) {
+    return 20_000;
+  }
+
+  if (path.startsWith("/api/home")) {
+    return 10_000;
+  }
+
+  if (path.startsWith("/api/plan/overview")) {
+    return 10_000;
+  }
+
+  if (path.startsWith("/api/queue")) {
+    return 8_000;
+  }
+
+  if (path.startsWith("/api/workspace-members")) {
+    return 20_000;
+  }
+
+  if (path.startsWith("/api/brands/") && !path.includes("/assets")) {
+    return 10_000;
+  }
+
+  if (path.startsWith("/api/brands/") && path.includes("/assets")) {
+    return 12_000;
+  }
+
+  if (path.startsWith("/api/projects")) {
+    return 20_000;
+  }
+
+  if (path.startsWith("/api/post-types")) {
+    return 60_000;
+  }
+
+  if (path.startsWith("/api/festivals")) {
+    return 60_000;
+  }
+
+  if (path.startsWith("/api/campaigns")) {
+    return 12_000;
+  }
+
+  if (path.startsWith("/api/series")) {
+    return 12_000;
+  }
+
+  if (path.startsWith("/api/templates")) {
+    return 12_000;
+  }
+
+  if (path.startsWith("/api/deliverables")) {
+    return 8_000;
+  }
+
+  if (path.startsWith("/api/review-queue")) {
+    return 8_000;
+  }
+
+  if (path.startsWith("/api/channel-accounts")) {
+    return 20_000;
+  }
+
+  if (path.startsWith("/api/posting-windows")) {
+    return 20_000;
+  }
+
+  return 0;
+}
+
+function clearResponseCache() {
+  responseCache.clear();
+  inflightRequests.clear();
+}
 
 async function request<T>(path: string, token: string, init?: RequestInit) {
-  const response = await fetch(`${apiBase}${path}`, {
-    ...init,
-    headers: {
-      ...(init?.headers ?? {}),
-      Authorization: `Bearer ${token}`
+  const method = (init?.method ?? "GET").toUpperCase();
+  const cacheTtlMs = method === "GET" ? getCacheTtlMs(path) : 0;
+  const cacheKey = cacheTtlMs > 0 ? `${token}:${path}` : null;
+
+  if (method !== "GET") {
+    clearResponseCache();
+  } else if (cacheKey) {
+    const cached = responseCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data as T;
     }
+
+    const inflight = inflightRequests.get(cacheKey);
+    if (inflight) {
+      return inflight as Promise<T>;
+    }
+  }
+
+  const execute = async () => {
+    const response = await fetch(`${apiBase}${path}`, {
+      ...init,
+      headers: {
+        ...(init?.headers ?? {}),
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(extractApiErrorMessage(text, response.status));
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    const text = await response.text();
+    if (!text) {
+      return undefined as T;
+    }
+
+    return JSON.parse(text) as T;
+  };
+
+  const requestPromise = execute().then((data) => {
+    if (cacheKey && cacheTtlMs > 0) {
+      responseCache.set(cacheKey, {
+        data,
+        expiresAt: Date.now() + cacheTtlMs
+      });
+    }
+
+    return data;
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(extractApiErrorMessage(text, response.status));
+  if (cacheKey) {
+    inflightRequests.set(cacheKey, requestPromise);
   }
 
-  if (response.status === 204) {
-    return undefined as T;
+  try {
+    return await requestPromise;
+  } finally {
+    if (cacheKey) {
+      inflightRequests.delete(cacheKey);
+    }
   }
-
-  const text = await response.text();
-  if (!text) {
-    return undefined as T;
-  }
-
-  return JSON.parse(text) as T;
 }
 
 function extractApiErrorMessage(text: string, status: number) {
@@ -595,6 +728,27 @@ export function getPlanningTemplates(
       projectId: filters?.projectId,
       postTypeId: filters?.postTypeId,
       status: filters?.status
+    }),
+    token
+  );
+}
+
+export function getPlanningTemplateOptions(
+  token: string,
+  filters?: {
+    brandId?: string;
+    projectId?: string;
+    postTypeId?: string;
+    status?: "draft" | "approved" | "archived";
+  }
+) {
+  return request<PlanningTemplateOption[]>(
+    withQuery("/api/templates", {
+      brandId: filters?.brandId,
+      projectId: filters?.projectId,
+      postTypeId: filters?.postTypeId,
+      status: filters?.status,
+      view: "picker"
     }),
     token
   );

@@ -22,7 +22,7 @@ import {
   getChannelAccounts,
   getDeliverable,
   getPostingWindows,
-  getPlanningTemplates,
+  getPlanningTemplateOptions,
   getPostTypes,
   getProjects,
   getWorkspaceMembers,
@@ -121,18 +121,18 @@ export default function DeliverableDetailPage() {
         memberRecords
       ] =
         await Promise.all([
-          getProjects(sessionToken),
+          getProjects(sessionToken, { brandId: record.deliverable.brandId }),
           getCampaigns(sessionToken, { brandId: record.deliverable.brandId }),
           getBrandPersonas(sessionToken, record.deliverable.brandId),
           getPostTypes(sessionToken),
-          getPlanningTemplates(sessionToken, { brandId: record.deliverable.brandId }),
+          getPlanningTemplateOptions(sessionToken, { brandId: record.deliverable.brandId }),
           getChannelAccounts(sessionToken, record.deliverable.brandId),
           getPostingWindows(sessionToken, record.deliverable.brandId),
           getWorkspaceMembers(sessionToken)
         ]);
 
       setDetail(record);
-      setProjects(projectRecords.filter((project) => project.brandId === record.deliverable.brandId));
+      setProjects(projectRecords);
       setCampaigns(campaignRecords.map((campaign) => ({ id: campaign.id, name: campaign.name })));
       setPersonas(personaRecords.map((persona) => ({ id: persona.id, name: persona.name })));
       setPostTypes(postTypeRecords);

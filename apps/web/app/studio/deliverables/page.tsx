@@ -19,7 +19,7 @@ import {
   createDeliverable,
   getCampaigns,
   getDeliverables,
-  getPlanningTemplates,
+  getPlanningTemplateOptions,
   getPostTypes,
   getProjects,
   getWorkspaceMembers
@@ -150,10 +150,10 @@ export default function DeliverablesPage() {
               ...(projectFilter ? { projectId: projectFilter } : {}),
               ...(campaignFilter ? { campaignId: campaignFilter } : {})
             }),
-            getProjects(token),
+            getProjects(token, { brandId }),
             getCampaigns(token, { brandId }),
             getPostTypes(token),
-            getPlanningTemplates(token, { brandId }),
+            getPlanningTemplateOptions(token, { brandId }),
             getWorkspaceMembers(token)
           ]);
 
@@ -169,14 +169,7 @@ export default function DeliverablesPage() {
           );
           setPostTypes(postTypeRecords);
           setWorkspaceMembers(memberRecords);
-          setTemplates(
-            templateRecords.map((template) => ({
-              id: template.id,
-              name: template.name,
-              projectId: template.projectId,
-              postTypeId: template.postTypeId
-            }))
-          );
+          setTemplates(templateRecords);
           setError(null);
         }
       } catch (loadError) {

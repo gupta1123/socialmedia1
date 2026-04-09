@@ -881,11 +881,18 @@ textarea {
 }
 
 .sidebar-user-anchor {
+  appearance: none;
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   padding: 8px 10px;
+  border: 0;
   border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  box-shadow: none;
   cursor: pointer;
   transition: background 100ms;
 }
@@ -7071,6 +7078,165 @@ textarea {
   margin: 0;
   font-size: 0.8rem;
   color: var(--ink-soft);
+}
+
+.dark .plan-roadmap-platter {
+  background:
+    linear-gradient(180deg, rgba(23, 23, 28, 0.96), rgba(17, 17, 21, 0.98));
+  border-color: rgba(255, 255, 255, 0.07);
+  box-shadow:
+    0 18px 32px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.dark .plan-roadmap-row,
+.dark .plan-roadmap-series-row {
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+
+.dark .plan-roadmap-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.dark .plan-roadmap-empty-dashed {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.dark .series-setup-summary {
+  background:
+    linear-gradient(180deg, rgba(24, 24, 29, 0.96), rgba(18, 18, 22, 0.98));
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .plan-roadmap-action-button {
+  border-color: rgba(255, 255, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(36, 36, 42, 0.98), rgba(24, 24, 29, 0.98));
+  color: color-mix(in srgb, var(--ink-soft) 90%, white 10%);
+  box-shadow:
+    0 10px 20px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.dark .plan-roadmap-action-button:hover {
+  background:
+    linear-gradient(180deg, rgba(40, 40, 47, 0.98), rgba(27, 27, 33, 0.98));
+  border-color: color-mix(in srgb, var(--signal) 34%, rgba(255, 255, 255, 0.14));
+  color: var(--ink);
+  box-shadow:
+    0 14px 28px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.dark .plan-roadmap-action-button-primary {
+  color: color-mix(in srgb, var(--signal) 72%, white 28%);
+  border-color: color-mix(in srgb, var(--signal) 38%, rgba(255, 255, 255, 0.1));
+  background:
+    radial-gradient(circle at top, rgba(255, 214, 139, 0.16), transparent 58%),
+    linear-gradient(180deg, rgba(48, 35, 14, 0.9), rgba(34, 25, 12, 0.96));
+}
+
+.dark .plan-roadmap-action-button-primary:hover {
+  color: color-mix(in srgb, var(--signal) 82%, white 18%);
+  border-color: color-mix(in srgb, var(--signal) 52%, rgba(255, 255, 255, 0.12));
+  background:
+    radial-gradient(circle at top, rgba(255, 214, 139, 0.22), transparent 56%),
+    linear-gradient(180deg, rgba(58, 42, 18, 0.94), rgba(40, 29, 14, 0.98));
+}
+
+.dark .plan-roadmap-upcoming-card {
+  background:
+    linear-gradient(180deg, rgba(23, 23, 28, 0.96), rgba(16, 16, 20, 0.98));
+  border-color: rgba(255, 255, 255, 0.07);
+  box-shadow:
+    0 18px 34px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.dark .plan-roadmap-upcoming-card:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 22px 40px rgba(0, 0, 0, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.dark .plan-roadmap-upcoming-media {
+  border-color: rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at top, rgba(44, 44, 53, 0.72), transparent 60%),
+    linear-gradient(135deg, rgba(24, 24, 29, 0.98), rgba(16, 16, 20, 0.98));
+}
+
+.dark .plan-roadmap-upcoming-fallback {
+  background:
+    radial-gradient(circle at top, rgba(49, 49, 58, 0.74), transparent 54%),
+    linear-gradient(135deg, rgba(29, 29, 35, 0.98), rgba(19, 19, 24, 0.98));
+}
+
+.dark .plan-roadmap-token-campaign {
+  background: rgba(96, 165, 250, 0.12);
+  color: #b8d4ff;
+  border-color: rgba(96, 165, 250, 0.22);
+}
+
+.dark .plan-roadmap-token-series {
+  background: rgba(167, 139, 250, 0.12);
+  color: #dccbff;
+  border-color: rgba(167, 139, 250, 0.22);
+}
+
+.dark .plan-roadmap-token-instagram {
+  background: rgba(244, 114, 182, 0.12);
+  color: #ffbfdc;
+  border-color: rgba(244, 114, 182, 0.22);
+}
+
+.dark .plan-roadmap-token-linkedin {
+  background: rgba(96, 165, 250, 0.12);
+  color: #b8d4ff;
+  border-color: rgba(96, 165, 250, 0.22);
+}
+
+.dark .plan-roadmap-token-orange {
+  background: rgba(251, 146, 60, 0.12);
+  color: #ffd1a6;
+  border-color: rgba(251, 146, 60, 0.22);
+}
+
+.dark .plan-roadmap-token-neutral {
+  background: rgba(255, 255, 255, 0.05);
+  color: #d4d4d8;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .plan-roadmap-badge-green {
+  background: rgba(74, 222, 128, 0.14);
+  color: #9ee6b0;
+}
+
+.dark .plan-roadmap-badge-orange {
+  background: rgba(245, 158, 11, 0.14);
+  color: #f5c97e;
+}
+
+.dark .plan-roadmap-badge-blue {
+  background: rgba(96, 165, 250, 0.14);
+  color: #a5c8ff;
+}
+
+.dark .plan-roadmap-badge-gray {
+  background: rgba(161, 161, 170, 0.12);
+  color: #d4d4d8;
+}
+
+.dark .plan-roadmap-badge-purple {
+  background: rgba(167, 139, 250, 0.14);
+  color: #d4c0ff;
+}
+
+.dark .plan-roadmap-badge-red {
+  background: rgba(248, 113, 113, 0.14);
+  color: #ffb0b0;
 }
 
 .work-list,

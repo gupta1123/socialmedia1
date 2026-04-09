@@ -10,7 +10,6 @@ import type {
   CreateCampaignDeliverablePlanInput,
   CreativeChannel,
   CreativeFormat,
-  CreativeTemplateRecord,
   ObjectiveCode,
   PostTypeRecord,
   ProjectRecord,
@@ -24,11 +23,12 @@ import {
   getCampaignPlans,
   getChannelAccounts,
   getDeliverables,
-  getPlanningTemplates,
+  getPlanningTemplateOptions,
   getPostTypes,
   getProjects,
   getWorkspaceMembers,
   materializeCampaignDeliverables,
+  type PlanningTemplateOption,
   updateCampaign,
   updateCampaignPlan
 } from "../../../../lib/api";
@@ -103,7 +103,7 @@ export default function CampaignDetailPage() {
   const [plans, setPlans] = useState<CampaignDeliverablePlanRecord[]>([]);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [postTypes, setPostTypes] = useState<PostTypeRecord[]>([]);
-  const [templates, setTemplates] = useState<CreativeTemplateRecord[]>([]);
+  const [templates, setTemplates] = useState<PlanningTemplateOption[]>([]);
   const [accounts, setAccounts] = useState<ChannelAccountRecord[]>([]);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRecord[]>([]);
   const [personas, setPersonas] = useState<Array<{ id: string; name: string }>>([]);
@@ -132,9 +132,9 @@ export default function CampaignDetailPage() {
       const [planRecords, projectRecords, postTypeRecords, templateRecords, accountRecords, personaRecords, deliverableRecords, memberRecords] =
         await Promise.all([
           getCampaignPlans(sessionToken, record.id),
-          getProjects(sessionToken),
+          getProjects(sessionToken, { brandId: record.brandId }),
           getPostTypes(sessionToken),
-          getPlanningTemplates(sessionToken, { brandId: record.brandId }),
+          getPlanningTemplateOptions(sessionToken, { brandId: record.brandId }),
           getChannelAccounts(sessionToken, record.brandId),
           getBrandPersonas(sessionToken, record.brandId),
           getDeliverables(sessionToken, { campaignId: record.id, includePreviews: true }),
@@ -143,7 +143,7 @@ export default function CampaignDetailPage() {
 
       setCampaign(record);
       setPlans(planRecords);
-      setProjects(projectRecords.filter((project) => project.brandId === record.brandId));
+      setProjects(projectRecords);
       setPostTypes(postTypeRecords);
       setTemplates(templateRecords);
       setAccounts(accountRecords);
