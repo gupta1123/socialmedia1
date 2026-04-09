@@ -13,6 +13,12 @@ import type {
 } from "@image-lab/contracts";
 import { supabaseAdmin } from "./supabase.js";
 import type { AuthenticatedViewer } from "./viewer.js";
+import { getOrPopulateRuntimeCache } from "./runtime-cache.js";
+
+const PRIMARY_WORKSPACE_TTL_MS = 30_000;
+const WORKSPACE_ROLE_TTL_MS = 30_000;
+const WORKSPACE_BRANDS_TTL_MS = 30_000;
+const BRAND_ASSET_COUNTS_TTL_MS = 15_000;
 
 type MembershipRow = {
   workspace_id: string;
@@ -109,30 +115,32 @@ type OutputRow = {
 };
 
 export async function getPrimaryWorkspace(viewer: AuthenticatedViewer): Promise<WorkspaceSummary | null> {
-  const { data, error } = await supabaseAdmin
-    .from("workspace_memberships")
-    .select("workspace_id, role, workspaces(id, name, slug)")
-    .eq("user_id", viewer.userId)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+  return getOrPopulateRuntimeCache(`primary-workspace:${viewer.userId}`, PRIMARY_WORKSPACE_TTL_MS, async () => {
+    const { data, error } = await supabaseAdmin
+      .from("workspace_memberships")
+      .select("workspace_id, role, workspaces(id, name, slug)")
+      .eq("user_id", viewer.userId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
 
-  if (error) {
-    throw error;
-  }
+    if (error) {
+      throw error;
+    }
 
-  const row = data as MembershipRow | null;
+    const row = data as MembershipRow | null;
 
-  if (!row?.workspaces) {
-    return null;
-  }
+    if (!row?.workspaces) {
+      return null;
+    }
 
-  return {
-    id: row.workspaces.id,
-    name: row.workspaces.name,
-    slug: row.workspaces.slug,
-    role: row.role
-  };
+    return {
+      id: row.workspaces.id,
+      name: row.workspaces.name,
+      slug: row.workspaces.slug,
+      role: row.role
+    };
+  });
 }
 
 export async function assertWorkspaceRole(
@@ -141,47 +149,56 @@ export async function assertWorkspaceRole(
   allowedRoles: WorkspaceRole[],
   logger?: FastifyBaseLogger
 ) {
-  const { data, error } = await supabaseAdmin
-    .from("workspace_memberships")
-    .select("role")
-    .eq("user_id", viewer.userId)
-    .eq("workspace_id", workspaceId)
-    .maybeSingle();
+  const role = await getOrPopulateRuntimeCache(
+    `workspace-role:${viewer.userId}:${workspaceId}`,
+    WORKSPACE_ROLE_TTL_MS,
+    async () => {
+      const { data, error } = await supabaseAdmin
+        .from("workspace_memberships")
+        .select("role")
+        .eq("user_id", viewer.userId)
+        .eq("workspace_id", workspaceId)
+        .maybeSingle();
 
-  if (error) {
-    logger?.error(error, "membership lookup failed");
-    throw error;
-  }
+      if (error) {
+        logger?.error(error, "membership lookup failed");
+        throw error;
+      }
 
-  const row = data as { role: WorkspaceRole } | null;
+      const row = data as { role: WorkspaceRole } | null;
+      return row?.role ?? null;
+    }
+  );
 
-  if (!row || !allowedRoles.includes(row.role)) {
+  if (!role || !allowedRoles.includes(role)) {
     throw new Error("You do not have access to this workspace");
   }
 
-  return row.role;
+  return role;
 }
 
 export async function listWorkspaceBrands(workspaceId: string): Promise<BrandRecord[]> {
-  const { data, error } = await supabaseAdmin
-    .from("brands")
-    .select("id, workspace_id, name, slug, description, current_profile_version_id")
-    .eq("workspace_id", workspaceId)
-    .order("created_at", { ascending: true })
-    .returns<BrandRow[]>();
+  return getOrPopulateRuntimeCache(`workspace-brands:${workspaceId}`, WORKSPACE_BRANDS_TTL_MS, async () => {
+    const { data, error } = await supabaseAdmin
+      .from("brands")
+      .select("id, workspace_id, name, slug, description, current_profile_version_id")
+      .eq("workspace_id", workspaceId)
+      .order("created_at", { ascending: true })
+      .returns<BrandRow[]>();
 
-  if (error) {
-    throw error;
-  }
+    if (error) {
+      throw error;
+    }
 
-  return (data ?? []).map((brand) => ({
-    id: brand.id,
-    workspaceId: brand.workspace_id,
-    name: brand.name,
-    slug: brand.slug,
-    description: brand.description,
-    currentProfileVersionId: brand.current_profile_version_id
-  }));
+    return (data ?? []).map((brand) => ({
+      id: brand.id,
+      workspaceId: brand.workspace_id,
+      name: brand.name,
+      slug: brand.slug,
+      description: brand.description,
+      currentProfileVersionId: brand.current_profile_version_id
+    }));
+  });
 }
 
 export async function getBrand(brandId: string) {
@@ -273,42 +290,49 @@ export async function listBrandAssets(brandId: string): Promise<BrandAssetRecord
 }
 
 export async function getBrandAssetCounts(brandId: string) {
-  const countByKind = async (kind?: BrandAssetRecord["kind"]) => {
-    const query = supabaseAdmin
+  return getOrPopulateRuntimeCache(`brand-asset-counts:${brandId}`, BRAND_ASSET_COUNTS_TTL_MS, async () => {
+    const { data, error } = await supabaseAdmin
       .from("brand_assets")
-      .select("id", { count: "exact", head: true })
-      .eq("brand_id", brandId);
-
-    if (kind) {
-      query.eq("kind", kind);
-    }
-
-    const { count, error } = await query;
+      .select("kind")
+      .eq("brand_id", brandId)
+      .returns<Array<Pick<AssetRow, "kind">>>();
 
     if (error) {
       throw error;
     }
 
-    return count ?? 0;
-  };
+    const counts = {
+      total: 0,
+      reference: 0,
+      logo: 0,
+      reraQr: 0,
+      product: 0,
+      inspiration: 0
+    };
 
-  const [total, reference, logo, reraQr, product, inspiration] = await Promise.all([
-    countByKind(),
-    countByKind("reference"),
-    countByKind("logo"),
-    countByKind("rera_qr"),
-    countByKind("product"),
-    countByKind("inspiration")
-  ]);
+    for (const row of data ?? []) {
+      counts.total += 1;
+      switch (row.kind) {
+        case "reference":
+          counts.reference += 1;
+          break;
+        case "logo":
+          counts.logo += 1;
+          break;
+        case "rera_qr":
+          counts.reraQr += 1;
+          break;
+        case "product":
+          counts.product += 1;
+          break;
+        case "inspiration":
+          counts.inspiration += 1;
+          break;
+      }
+    }
 
-  return {
-    total,
-    reference,
-    logo,
-    reraQr,
-    product,
-    inspiration
-  };
+    return counts;
+  });
 }
 
 export async function listWorkspaceAssets(workspaceId: string, brandId?: string): Promise<BrandAssetRecord[]> {

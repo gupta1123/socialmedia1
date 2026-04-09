@@ -11,6 +11,7 @@ import {
 import { supabaseAdmin } from "../lib/supabase.js";
 import { createSignedUrl, uploadBufferToStorage } from "../lib/storage.js";
 import { buildStoragePath, randomId, slugify } from "../lib/utils.js";
+import { invalidateRuntimeCache } from "../lib/runtime-cache.js";
 
 export async function registerBrandRoutes(app: FastifyInstance) {
   app.get("/api/brands/:brandId", { preHandler: app.authenticate }, async (request, reply) => {
@@ -111,6 +112,8 @@ export async function registerBrandRoutes(app: FastifyInstance) {
       throw updateError;
     }
 
+    invalidateRuntimeCache(`workspace-brands:${workspace.id}`);
+
     return { id: brandId, currentProfileVersionId: profileId };
   });
 
@@ -168,6 +171,8 @@ export async function registerBrandRoutes(app: FastifyInstance) {
     if (updateError) {
       throw updateError;
     }
+
+    invalidateRuntimeCache(`workspace-brands:${brand.workspaceId}`);
 
     return { id: brand.id, currentProfileVersionId: profileId };
   });
@@ -257,6 +262,8 @@ export async function registerBrandRoutes(app: FastifyInstance) {
     if (error) {
       throw error;
     }
+
+    invalidateRuntimeCache(`brand-asset-counts:${brand.id}`);
 
     return { id: assetId, storagePath };
   });

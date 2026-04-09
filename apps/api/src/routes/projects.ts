@@ -4,6 +4,7 @@ import { assertWorkspaceRole, getBrand, getPrimaryWorkspace } from "../lib/repos
 import { getActiveProjectProfile, getProject, listWorkspaceProjects } from "../lib/planning-repository.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { randomId, slugify } from "../lib/utils.js";
+import { invalidateRuntimeCache } from "../lib/runtime-cache.js";
 
 export async function registerProjectRoutes(app: FastifyInstance) {
   app.get("/api/projects", { preHandler: app.authenticate }, async (request, reply) => {
@@ -21,9 +22,8 @@ export async function registerProjectRoutes(app: FastifyInstance) {
 
     await assertWorkspaceRole(viewer, workspace.id, ["owner", "admin", "editor", "viewer"], request.log);
     const query = request.query as { brandId?: string };
-    const projects = await listWorkspaceProjects(workspace.id);
-    const visibleProjects = query.brandId ? projects.filter((project) => project.brandId === query.brandId) : projects;
-    return visibleProjects.map((project) => ProjectSchema.parse(project));
+    const projects = await listWorkspaceProjects(workspace.id, query.brandId);
+    return projects.map((project) => ProjectSchema.parse(project));
   });
 
   app.get("/api/projects/:projectId", { preHandler: app.authenticate }, async (request, reply) => {
@@ -111,6 +111,8 @@ export async function registerProjectRoutes(app: FastifyInstance) {
       throw updateError;
     }
 
+    invalidateProjectCaches(workspace.id, brand.id);
+
     const project = await getProject(projectId);
     const activeProfile = await getActiveProjectProfile(projectId);
 
@@ -178,9 +180,21 @@ export async function registerProjectRoutes(app: FastifyInstance) {
       throw updateError;
     }
 
+    invalidateProjectCaches(project.workspaceId, project.brandId);
+
     return ProjectDetailSchema.parse({
       project: await getProject(project.id),
       activeProfile: await getActiveProjectProfile(project.id)
     });
   });
+}
+
+function invalidateProjectCaches(workspaceId: string, brandId: string) {
+  invalidateRuntimeCache(`workspace-projects:${workspaceId}:`);
+  invalidateRuntimeCache(`home-overview:${workspaceId}:`);
+  invalidateRuntimeCache(`plan-overview:${workspaceId}:`);
+  invalidateRuntimeCache(`queue:${workspaceId}:`);
+  invalidateRuntimeCache(`workspace-brands:${workspaceId}`);
+  invalidateRuntimeCache(`workspace-templates:${workspaceId}:${brandId}:`);
+  invalidateRuntimeCache(`workspace-template-options:${workspaceId}:${brandId}:`);
 }

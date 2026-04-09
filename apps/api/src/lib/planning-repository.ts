@@ -10,6 +10,12 @@ import type {
   ProjectRecord
 } from "@image-lab/contracts";
 import { supabaseAdmin } from "./supabase.js";
+import { getOrPopulateRuntimeCache } from "./runtime-cache.js";
+
+const WORKSPACE_PROJECTS_TTL_MS = 20_000;
+const WORKSPACE_FESTIVALS_TTL_MS = 60_000;
+const WORKSPACE_POST_TYPES_TTL_MS = 60_000;
+const WORKSPACE_TEMPLATE_LIST_TTL_MS = 12_000;
 
 type ProjectRow = {
   id: string;
@@ -102,19 +108,30 @@ type CalendarItemRow = {
   notes_json: Record<string, unknown> | null;
 };
 
-export async function listWorkspaceProjects(workspaceId: string): Promise<ProjectRecord[]> {
-  const { data, error } = await supabaseAdmin
-    .from("projects")
-    .select("id, workspace_id, brand_id, name, slug, city, micro_location, project_type, stage, status, description, current_profile_version_id")
-    .eq("workspace_id", workspaceId)
-    .order("created_at", { ascending: false })
-    .returns<ProjectRow[]>();
+export async function listWorkspaceProjects(workspaceId: string, brandId?: string): Promise<ProjectRecord[]> {
+  return getOrPopulateRuntimeCache(
+    `workspace-projects:${workspaceId}:${brandId ?? "all"}`,
+    WORKSPACE_PROJECTS_TTL_MS,
+    async () => {
+      let query = supabaseAdmin
+        .from("projects")
+        .select("id, workspace_id, brand_id, name, slug, city, micro_location, project_type, stage, status, description, current_profile_version_id")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false });
 
-  if (error) {
-    throw error;
-  }
+      if (brandId) {
+        query = query.eq("brand_id", brandId);
+      }
 
-  return (data ?? []).map(mapProjectRow);
+      const { data, error } = await query.returns<ProjectRow[]>();
+
+      if (error) {
+        throw error;
+      }
+
+      return (data ?? []).map(mapProjectRow);
+    }
+  );
 }
 
 export async function getProject(projectId: string): Promise<ProjectRecord> {
@@ -174,21 +191,23 @@ export async function getActiveProjectProfile(projectId: string): Promise<Projec
 }
 
 export async function listWorkspaceFestivals(workspaceId: string): Promise<FestivalRecord[]> {
-  const { data, error } = await supabaseAdmin
-    .from("festivals")
-    .select("id, workspace_id, code, name, category, community, regions_json, meaning, date_label, next_occurs_on, active, sort_order")
-    .or(`workspace_id.is.null,workspace_id.eq.${workspaceId}`)
-    .eq("active", true)
-    .order("sort_order", { ascending: true })
-    .order("next_occurs_on", { ascending: true, nullsFirst: false })
-    .order("name", { ascending: true })
-    .returns<FestivalRow[]>();
+  return getOrPopulateRuntimeCache(`workspace-festivals:${workspaceId}`, WORKSPACE_FESTIVALS_TTL_MS, async () => {
+    const { data, error } = await supabaseAdmin
+      .from("festivals")
+      .select("id, workspace_id, code, name, category, community, regions_json, meaning, date_label, next_occurs_on, active, sort_order")
+      .or(`workspace_id.is.null,workspace_id.eq.${workspaceId}`)
+      .eq("active", true)
+      .order("sort_order", { ascending: true })
+      .order("next_occurs_on", { ascending: true, nullsFirst: false })
+      .order("name", { ascending: true })
+      .returns<FestivalRow[]>();
 
-  if (error) {
-    throw error;
-  }
+    if (error) {
+      throw error;
+    }
 
-  return (data ?? []).map(mapFestivalRow);
+    return (data ?? []).map(mapFestivalRow);
+  });
 }
 
 export async function getFestival(festivalId: string): Promise<FestivalRecord> {
@@ -212,20 +231,22 @@ export async function getFestival(festivalId: string): Promise<FestivalRecord> {
 }
 
 export async function listWorkspacePostTypes(workspaceId: string): Promise<PostTypeRecord[]> {
-  const { data, error } = await supabaseAdmin
-    .from("post_types")
-    .select("id, workspace_id, code, name, description, config_json, is_system, active")
-    .or(`workspace_id.is.null,workspace_id.eq.${workspaceId}`)
-    .eq("active", true)
-    .order("is_system", { ascending: false })
-    .order("name", { ascending: true })
-    .returns<PostTypeRow[]>();
+  return getOrPopulateRuntimeCache(`workspace-post-types:${workspaceId}`, WORKSPACE_POST_TYPES_TTL_MS, async () => {
+    const { data, error } = await supabaseAdmin
+      .from("post_types")
+      .select("id, workspace_id, code, name, description, config_json, is_system, active")
+      .or(`workspace_id.is.null,workspace_id.eq.${workspaceId}`)
+      .eq("active", true)
+      .order("is_system", { ascending: false })
+      .order("name", { ascending: true })
+      .returns<PostTypeRow[]>();
 
-  if (error) {
-    throw error;
-  }
+    if (error) {
+      throw error;
+    }
 
-  return (data ?? []).map(mapPostTypeRow);
+    return (data ?? []).map(mapPostTypeRow);
+  });
 }
 
 export async function getPostType(postTypeId: string): Promise<PostTypeRecord> {
@@ -257,35 +278,99 @@ export async function listWorkspaceCreativeTemplates(
     status?: CreativeTemplateRecord["status"];
   }
 ): Promise<CreativeTemplateRecord[]> {
-  let query = supabaseAdmin
-    .from("creative_templates")
-    .select("id, workspace_id, brand_id, project_id, post_type_id, name, status, channel, format, base_prompt, preview_storage_path, created_from_output_id, template_json")
-    .eq("workspace_id", workspaceId)
-    .order("created_at", { ascending: false });
+  return getOrPopulateRuntimeCache(
+    `workspace-templates:${workspaceId}:${filters?.brandId ?? "all"}:${filters?.projectId ?? "all"}:${filters?.postTypeId ?? "all"}:${filters?.status ?? "all"}`,
+    WORKSPACE_TEMPLATE_LIST_TTL_MS,
+    async () => {
+      let query = supabaseAdmin
+        .from("creative_templates")
+        .select("id, workspace_id, brand_id, project_id, post_type_id, name, status, channel, format, base_prompt, preview_storage_path, created_from_output_id, template_json")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false });
 
-  if (filters?.brandId) {
-    query = query.eq("brand_id", filters.brandId);
+      if (filters?.brandId) {
+        query = query.eq("brand_id", filters.brandId);
+      }
+
+      if (filters?.projectId) {
+        query = query.eq("project_id", filters.projectId);
+      }
+
+      if (filters?.postTypeId) {
+        query = query.eq("post_type_id", filters.postTypeId);
+      }
+
+      if (filters?.status) {
+        query = query.eq("status", filters.status);
+      }
+
+      const { data, error } = await query.returns<CreativeTemplateRow[]>();
+
+      if (error) {
+        throw error;
+      }
+
+      return (data ?? []).map(mapCreativeTemplateRow);
+    }
+  );
+}
+
+export async function listWorkspaceCreativeTemplateOptions(
+  workspaceId: string,
+  filters?: {
+    brandId?: string;
+    projectId?: string;
+    postTypeId?: string;
+    status?: CreativeTemplateRecord["status"];
   }
+) {
+  return getOrPopulateRuntimeCache(
+    `workspace-template-options:${workspaceId}:${filters?.brandId ?? "all"}:${filters?.projectId ?? "all"}:${filters?.postTypeId ?? "all"}:${filters?.status ?? "all"}`,
+    WORKSPACE_TEMPLATE_LIST_TTL_MS,
+    async () => {
+      let query = supabaseAdmin
+        .from("creative_templates")
+        .select("id, workspace_id, brand_id, project_id, post_type_id, name, status, channel, format")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false });
 
-  if (filters?.projectId) {
-    query = query.eq("project_id", filters.projectId);
-  }
+      if (filters?.brandId) {
+        query = query.eq("brand_id", filters.brandId);
+      }
 
-  if (filters?.postTypeId) {
-    query = query.eq("post_type_id", filters.postTypeId);
-  }
+      if (filters?.projectId) {
+        query = query.eq("project_id", filters.projectId);
+      }
 
-  if (filters?.status) {
-    query = query.eq("status", filters.status);
-  }
+      if (filters?.postTypeId) {
+        query = query.eq("post_type_id", filters.postTypeId);
+      }
 
-  const { data, error } = await query.returns<CreativeTemplateRow[]>();
+      if (filters?.status) {
+        query = query.eq("status", filters.status);
+      }
 
-  if (error) {
-    throw error;
-  }
+      const { data, error } = await query.returns<
+        Array<Pick<CreativeTemplateRow, "id" | "workspace_id" | "brand_id" | "project_id" | "post_type_id" | "name" | "status" | "channel" | "format">>
+      >();
 
-  return (data ?? []).map(mapCreativeTemplateRow);
+      if (error) {
+        throw error;
+      }
+
+      return (data ?? []).map((template) => ({
+        id: template.id,
+        workspaceId: template.workspace_id,
+        brandId: template.brand_id,
+        projectId: template.project_id,
+        postTypeId: template.post_type_id,
+        name: template.name,
+        status: template.status,
+        channel: template.channel,
+        format: template.format
+      }));
+    }
+  );
 }
 
 export async function getCreativeTemplate(templateId: string): Promise<CreativeTemplateRecord> {

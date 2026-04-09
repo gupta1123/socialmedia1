@@ -24,6 +24,12 @@ import type {
 import { supabaseAdmin } from "./supabase.js";
 import { createSignedUrl } from "./storage.js";
 import { deriveLegacyCreativeFormat, mapDeliverableStatusToCalendarStatus } from "./deliverable-utils.js";
+import { getOrPopulateRuntimeCache } from "./runtime-cache.js";
+
+const WORKSPACE_MEMBERS_TTL_MS = 30_000;
+const HOME_OVERVIEW_TTL_MS = 5_000;
+const PLAN_OVERVIEW_TTL_MS = 5_000;
+const QUEUE_TTL_MS = 5_000;
 
 type BrandPersonaRow = {
   id: string;
@@ -864,124 +870,130 @@ export async function buildDeliverableSnapshot(deliverableId: string) {
 }
 
 export async function listWorkspaceMembers(workspaceId: string): Promise<WorkspaceMemberRecord[]> {
-  const { data: memberships, error: membershipError } = await supabaseAdmin
-    .from("workspace_memberships")
-    .select("workspace_id, user_id, role")
-    .eq("workspace_id", workspaceId)
-    .returns<WorkspaceMembershipRow[]>();
+  return getOrPopulateRuntimeCache(`workspace-members:${workspaceId}`, WORKSPACE_MEMBERS_TTL_MS, async () => {
+    const { data: memberships, error: membershipError } = await supabaseAdmin
+      .from("workspace_memberships")
+      .select("workspace_id, user_id, role")
+      .eq("workspace_id", workspaceId)
+      .returns<WorkspaceMembershipRow[]>();
 
-  if (membershipError) throw membershipError;
+    if (membershipError) throw membershipError;
 
-  const userIds = Array.from(new Set((memberships ?? []).map((membership) => membership.user_id)));
-  if (userIds.length === 0) {
-    return [];
-  }
+    const userIds = Array.from(new Set((memberships ?? []).map((membership) => membership.user_id)));
+    if (userIds.length === 0) {
+      return [];
+    }
 
-  const { data: profiles, error: profileError } = await supabaseAdmin
-    .from("profiles")
-    .select("id, email, display_name")
-    .in("id", userIds)
-    .returns<ProfileRow[]>();
+    const { data: profiles, error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .select("id, email, display_name")
+      .in("id", userIds)
+      .returns<ProfileRow[]>();
 
-  if (profileError) throw profileError;
+    if (profileError) throw profileError;
 
-  const profileMap = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+    const profileMap = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
 
-  return (memberships ?? [])
-    .map((membership) => {
-      const profile = profileMap.get(membership.user_id);
-      if (!profile) return null;
-      return {
-        id: membership.user_id,
-        workspaceId: membership.workspace_id,
-        email: profile.email,
-        displayName: profile.display_name,
-        role: membership.role
-      } satisfies WorkspaceMemberRecord;
-    })
-    .filter((member): member is WorkspaceMemberRecord => Boolean(member));
+    return (memberships ?? [])
+      .map((membership) => {
+        const profile = profileMap.get(membership.user_id);
+        if (!profile) return null;
+        return {
+          id: membership.user_id,
+          workspaceId: membership.workspace_id,
+          email: profile.email,
+          displayName: profile.display_name,
+          role: membership.role
+        } satisfies WorkspaceMemberRecord;
+      })
+      .filter((member): member is WorkspaceMemberRecord => Boolean(member));
+  });
 }
 
 export async function getHomeOverview(workspaceId: string, brandId?: string): Promise<HomeOverview> {
-  const now = new Date();
-  const dayStart = startOfDay(now);
-  const dayEnd = addDays(dayStart, 1);
-  const weekEnd = new Date(now);
-  weekEnd.setDate(weekEnd.getDate() + 7);
+  return getOrPopulateRuntimeCache(`home-overview:${workspaceId}:${brandId ?? "all"}`, HOME_OVERVIEW_TTL_MS, async () => {
+    const now = new Date();
+    const dayStart = startOfDay(now);
+    const dayEnd = addDays(dayStart, 1);
+    const weekEnd = new Date(now);
+    weekEnd.setDate(weekEnd.getDate() + 7);
 
-  const [dueToday, needsReview, approvedNotScheduled, thisWeek, blocked] = await Promise.all([
-    fetchDeliverableSectionWithCustomQuery(
-      supabaseAdmin
-        .from("deliverables")
-        .select(DELIVERABLE_SELECT, { count: "exact" })
-        .eq("workspace_id", workspaceId)
-        .or(
-          `and(due_at.gte.${dayStart.toISOString()},due_at.lt.${dayEnd.toISOString()}),and(due_at.is.null,scheduled_for.gte.${dayStart.toISOString()},scheduled_for.lt.${dayEnd.toISOString()})`
-        )
-        .not("status", "in", "(published,archived)")
-        .order("scheduled_for", { ascending: true }),
-      brandId
-    ),
-    fetchDeliverableSection(workspaceId, {
-      ...(brandId ? { brandId } : {}),
-      status: "review"
-    }),
-    fetchDeliverableSection(workspaceId, {
-      ...(brandId ? { brandId } : {}),
-      status: "approved"
-    }),
-    fetchDeliverableSection(workspaceId, {
-      ...(brandId ? { brandId } : {}),
-      statusIn: ["approved", "scheduled", "published"],
-      scheduledFrom: now.toISOString(),
-      scheduledTo: weekEnd.toISOString()
-    }),
-    fetchDeliverableSection(workspaceId, {
-      ...(brandId ? { brandId } : {}),
-      status: "blocked"
-    })
-  ]);
+    const [dueToday, needsReview, approvedNotScheduled, thisWeek, blocked] = await Promise.all([
+      fetchDeliverableSectionWithCustomQuery(
+        supabaseAdmin
+          .from("deliverables")
+          .select(DELIVERABLE_SELECT, { count: "exact" })
+          .eq("workspace_id", workspaceId)
+          .or(
+            `and(due_at.gte.${dayStart.toISOString()},due_at.lt.${dayEnd.toISOString()}),and(due_at.is.null,scheduled_for.gte.${dayStart.toISOString()},scheduled_for.lt.${dayEnd.toISOString()})`
+          )
+          .not("status", "in", "(published,archived)")
+          .order("scheduled_for", { ascending: true }),
+        brandId
+      ),
+      fetchDeliverableSection(workspaceId, {
+        ...(brandId ? { brandId } : {}),
+        status: "review"
+      }),
+      fetchDeliverableSection(workspaceId, {
+        ...(brandId ? { brandId } : {}),
+        status: "approved"
+      }),
+      fetchDeliverableSection(workspaceId, {
+        ...(brandId ? { brandId } : {}),
+        statusIn: ["approved", "scheduled", "published"],
+        scheduledFrom: now.toISOString(),
+        scheduledTo: weekEnd.toISOString()
+      }),
+      fetchDeliverableSection(workspaceId, {
+        ...(brandId ? { brandId } : {}),
+        status: "blocked"
+      })
+    ]);
 
-  return {
-    dueToday,
-    needsReview,
-    approvedNotScheduled,
-    thisWeek,
-    blocked
-  };
+    return {
+      dueToday,
+      needsReview,
+      approvedNotScheduled,
+      thisWeek,
+      blocked
+    };
+  });
 }
 
 export async function getPlanOverview(workspaceId: string, brandId?: string): Promise<PlanOverview> {
-  const [campaigns, series, unscheduledPostTasks, upcomingPostTasks] = await Promise.all([
-    listCampaigns(workspaceId, { ...(brandId ? { brandId } : {}), status: "active" }),
-    listSeries(workspaceId, { ...(brandId ? { brandId } : {}), status: "active" }),
-    listDeliverables(workspaceId, {
-      ...(brandId ? { brandId } : {}),
-      statusIn: ["planned", "brief_ready", "generating", "review", "approved", "blocked"],
-      limit: 12
-    }),
-    listDeliverables(workspaceId, {
-      ...(brandId ? { brandId } : {}),
-      statusIn: ["planned", "brief_ready", "generating", "review", "approved", "scheduled", "published", "blocked"],
-      scheduledFrom: new Date().toISOString(),
-      scheduledTo: addDays(new Date(), 30).toISOString(),
-      limit: 18
-    })
-  ]);
+  return getOrPopulateRuntimeCache(`plan-overview:${workspaceId}:${brandId ?? "all"}`, PLAN_OVERVIEW_TTL_MS, async () => {
+    const [campaigns, series, unscheduledPostTasks, upcomingPostTasks] = await Promise.all([
+      listCampaigns(workspaceId, { ...(brandId ? { brandId } : {}), status: "active" }),
+      listSeries(workspaceId, { ...(brandId ? { brandId } : {}), status: "active" }),
+      listDeliverables(workspaceId, {
+        ...(brandId ? { brandId } : {}),
+        statusIn: ["planned", "brief_ready", "generating", "review", "approved", "blocked"],
+        limit: 12
+      }),
+      listDeliverables(workspaceId, {
+        ...(brandId ? { brandId } : {}),
+        statusIn: ["planned", "brief_ready", "generating", "review", "approved", "scheduled", "published", "blocked"],
+        scheduledFrom: new Date().toISOString(),
+        scheduledTo: addDays(new Date(), 30).toISOString(),
+        limit: 18
+      })
+    ]);
 
-  return {
-    activeCampaigns: campaigns,
-    activeSeries: series,
-    unscheduledPostTasks: unscheduledPostTasks
-      .filter((deliverable) => !["scheduled", "published", "archived"].includes(deliverable.status))
-      .sort((left, right) => new Date(left.dueAt ?? left.scheduledFor).getTime() - new Date(right.dueAt ?? right.scheduledFor).getTime())
-      .slice(0, 12),
-    upcomingPostTasks: await attachDeliverablePreviews(
-      upcomingPostTasks
+    return {
+      activeCampaigns: campaigns,
+      activeSeries: series,
+      unscheduledPostTasks: unscheduledPostTasks
+        .filter((deliverable) => !["scheduled", "published", "archived"].includes(deliverable.status))
         .sort((left, right) => new Date(left.dueAt ?? left.scheduledFor).getTime() - new Date(right.dueAt ?? right.scheduledFor).getTime())
-        .slice(0, 18)
-    )
-  };
+        .slice(0, 12),
+      upcomingPostTasks: await attachDeliverablePreviews(
+        upcomingPostTasks
+          .sort((left, right) => new Date(left.dueAt ?? left.scheduledFor).getTime() - new Date(right.dueAt ?? right.scheduledFor).getTime())
+          .slice(0, 18)
+      )
+    };
+  });
 }
 
 export async function listQueueEntries(
@@ -996,57 +1008,74 @@ export async function listQueueEntries(
     dueWindow?: "today" | "week" | "overdue";
   }
 ): Promise<QueueEntry[]> {
-  const statusIn = filters?.statusGroup
-    ? QUEUE_STATUS_GROUPS[filters.statusGroup]
-    : ["planned", "brief_ready", "generating", "review", "approved", "scheduled", "blocked"] satisfies DeliverableRecord["status"][];
+  return getOrPopulateRuntimeCache(
+    `queue:${workspaceId}:${viewerUserId}:${serializeQueueFilters(filters)}`,
+    QUEUE_TTL_MS,
+    async () => {
+      const statusIn = filters?.statusGroup
+        ? QUEUE_STATUS_GROUPS[filters.statusGroup]
+        : ["planned", "brief_ready", "generating", "review", "approved", "scheduled", "blocked"] satisfies DeliverableRecord["status"][];
 
-  let deliverables = await listDeliverables(workspaceId, {
-    ...(filters?.brandId ? { brandId: filters.brandId } : {}),
-    ...(filters?.projectId ? { projectId: filters.projectId } : {}),
-    ...(filters?.planningMode ? { planningMode: filters.planningMode } : {}),
-    ...(filters?.scope === "my" ? { ownerUserId: viewerUserId } : {}),
-    ...(filters?.scope === "unassigned" ? { ownerUserId: "unassigned" } : {}),
-    statusIn
-  });
+      let deliverables = await listDeliverables(workspaceId, {
+        ...(filters?.brandId ? { brandId: filters.brandId } : {}),
+        ...(filters?.projectId ? { projectId: filters.projectId } : {}),
+        ...(filters?.planningMode ? { planningMode: filters.planningMode } : {}),
+        ...(filters?.scope === "my" ? { ownerUserId: viewerUserId } : {}),
+        ...(filters?.scope === "unassigned" ? { ownerUserId: "unassigned" } : {}),
+        statusIn
+      });
 
-  if (filters?.dueWindow) {
-    const now = new Date();
-    const today = dateKey(now);
-    const weekEnd = new Date(now);
-    weekEnd.setDate(weekEnd.getDate() + 7);
+      if (filters?.dueWindow) {
+        const now = new Date();
+        const today = dateKey(now);
+        const weekEnd = new Date(now);
+        weekEnd.setDate(weekEnd.getDate() + 7);
 
-    deliverables = deliverables.filter((deliverable) => {
-      const dueBasis = new Date(deliverable.dueAt ?? deliverable.scheduledFor);
-      if (filters.dueWindow === "today") return dateKey(dueBasis) === today;
-      if (filters.dueWindow === "overdue") return dueBasis < now;
-      return dueBasis >= now && dueBasis <= weekEnd;
-    });
-  }
+        deliverables = deliverables.filter((deliverable) => {
+          const dueBasis = new Date(deliverable.dueAt ?? deliverable.scheduledFor);
+          if (filters.dueWindow === "today") return dateKey(dueBasis) === today;
+          if (filters.dueWindow === "overdue") return dueBasis < now;
+          return dueBasis >= now && dueBasis <= weekEnd;
+        });
+      }
 
-  const [members, projectMap, campaignMap, seriesMap] = await Promise.all([
-    listWorkspaceMembers(workspaceId),
-    listProjectNames(deliverables.map((deliverable) => deliverable.projectId)),
-    loadCampaignMap(workspaceId, deliverables.map((deliverable) => deliverable.campaignId).filter(Boolean) as string[]),
-    loadSeriesMap(workspaceId, deliverables.map((deliverable) => deliverable.seriesId).filter(Boolean) as string[])
-  ]);
+      if (deliverables.length === 0) {
+        return [];
+      }
 
-  const memberMap = new Map(members.map((member) => [member.id, member]));
+      const ownerIds = Array.from(
+        new Set(deliverables.map((deliverable) => deliverable.ownerUserId).filter((value): value is string => Boolean(value)))
+      );
+      const projectIds = deliverables.map((deliverable) => deliverable.projectId);
+      const campaignIds = deliverables.map((deliverable) => deliverable.campaignId).filter(Boolean) as string[];
+      const seriesIds = deliverables.map((deliverable) => deliverable.seriesId).filter(Boolean) as string[];
 
-  return deliverables
-    .sort((left, right) => {
-      const leftDate = new Date(left.dueAt ?? left.scheduledFor).getTime();
-      const rightDate = new Date(right.dueAt ?? right.scheduledFor).getTime();
-      return leftDate - rightDate;
-    })
-    .map((deliverable) => ({
-      deliverable,
-      assignee: deliverable.ownerUserId ? memberMap.get(deliverable.ownerUserId) ?? null : null,
-      campaign: deliverable.campaignId ? campaignMap.get(deliverable.campaignId) ?? null : null,
-      series: deliverable.seriesId ? seriesMap.get(deliverable.seriesId) ?? null : null,
-      projectName: deliverable.projectId ? projectMap.get(deliverable.projectId) ?? null : null,
-      nextActionLabel: getNextActionLabel(deliverable.status),
-      statusGroup: mapQueueStatusGroup(deliverable.status)
-    }));
+      const [members, projectMap, campaignMap, seriesMap] = await Promise.all([
+        ownerIds.length > 0 ? listWorkspaceMembers(workspaceId) : Promise.resolve([]),
+        listProjectNames(projectIds),
+        loadCampaignMap(workspaceId, campaignIds),
+        loadSeriesMap(workspaceId, seriesIds)
+      ]);
+
+      const memberMap = new Map(members.map((member) => [member.id, member]));
+
+      return deliverables
+        .sort((left, right) => {
+          const leftDate = new Date(left.dueAt ?? left.scheduledFor).getTime();
+          const rightDate = new Date(right.dueAt ?? right.scheduledFor).getTime();
+          return leftDate - rightDate;
+        })
+        .map((deliverable) => ({
+          deliverable,
+          assignee: deliverable.ownerUserId ? memberMap.get(deliverable.ownerUserId) ?? null : null,
+          campaign: deliverable.campaignId ? campaignMap.get(deliverable.campaignId) ?? null : null,
+          series: deliverable.seriesId ? seriesMap.get(deliverable.seriesId) ?? null : null,
+          projectName: deliverable.projectId ? projectMap.get(deliverable.projectId) ?? null : null,
+          nextActionLabel: getNextActionLabel(deliverable.status),
+          statusGroup: mapQueueStatusGroup(deliverable.status)
+        }));
+    }
+  );
 }
 
 async function fetchDeliverableSection(workspaceId: string, filters: DeliverableListFilters) {
@@ -1495,8 +1524,19 @@ async function loadCampaignMap(workspaceId: string, campaignIds: string[]) {
     return new Map<string, CampaignRecord>();
   }
 
-  const campaigns = await listCampaigns(workspaceId);
-  return new Map(campaigns.filter((campaign) => uniqueIds.includes(campaign.id)).map((campaign) => [campaign.id, campaign]));
+  const { data, error } = await supabaseAdmin
+    .from("campaigns")
+    .select("id, workspace_id, brand_id, name, objective_code, target_persona_id, primary_project_id, key_message, cta_text, start_at, end_at, owner_user_id, kpi_goal_json, status, notes_json")
+    .eq("workspace_id", workspaceId)
+    .in("id", uniqueIds)
+    .returns<CampaignRow[]>();
+
+  if (error) throw error;
+
+  const projectIdsByCampaign = await listCampaignProjectIds(uniqueIds);
+  return new Map(
+    (data ?? []).map((campaign) => [campaign.id, mapCampaignRow(campaign, projectIdsByCampaign.get(campaign.id) ?? [])])
+  );
 }
 
 async function loadSeriesMap(workspaceId: string, seriesIds: string[]) {
@@ -1505,6 +1545,40 @@ async function loadSeriesMap(workspaceId: string, seriesIds: string[]) {
     return new Map<string, SeriesRecord>();
   }
 
-  const series = await listSeries(workspaceId);
-  return new Map(series.filter((item) => uniqueIds.includes(item.id)).map((item) => [item.id, item]));
+  const { data, error } = await supabaseAdmin
+    .from("series")
+    .select("id, workspace_id, brand_id, project_id, content_pillar_id, name, description, objective_code, post_type_id, creative_template_id, channel_account_id, placement_code, content_format, owner_user_id, cadence_json, start_at, end_at, status, source_brief_json")
+    .eq("workspace_id", workspaceId)
+    .in("id", uniqueIds)
+    .returns<SeriesRow[]>();
+
+  if (error) throw error;
+
+  return new Map((data ?? []).map((series) => [series.id, mapSeriesRow(series)]));
+}
+
+function serializeQueueFilters(
+  filters:
+    | {
+        scope?: "my" | "team" | "unassigned";
+        brandId?: string;
+        projectId?: string;
+        statusGroup?: QueueStatusGroup;
+        planningMode?: DeliverableRecord["planningMode"];
+        dueWindow?: "today" | "week" | "overdue";
+      }
+    | undefined
+) {
+  if (!filters) {
+    return "default";
+  }
+
+  return [
+    filters.scope ?? "team",
+    filters.brandId ?? "all-brands",
+    filters.projectId ?? "all-projects",
+    filters.statusGroup ?? "all-statuses",
+    filters.planningMode ?? "all-modes",
+    filters.dueWindow ?? "all-dates"
+  ].join(":");
 }

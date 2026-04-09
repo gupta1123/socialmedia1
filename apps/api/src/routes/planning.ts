@@ -19,6 +19,7 @@ import {
   getCreativeTemplateDetail,
   getPostType,
   getProject,
+  listWorkspaceCreativeTemplateOptions,
   listWorkspaceCreativeTemplates,
   listWorkspaceFestivals,
   listWorkspacePostTypes
@@ -31,6 +32,7 @@ import {
 } from "../lib/deliverable-utils.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { randomId } from "../lib/utils.js";
+import { invalidateRuntimeCache } from "../lib/runtime-cache.js";
 
 export async function registerPlanningRoutes(app: FastifyInstance) {
   app.get("/api/festivals", { preHandler: app.authenticate }, async (request, reply) => {
@@ -102,6 +104,8 @@ export async function registerPlanningRoutes(app: FastifyInstance) {
       throw error;
     }
 
+    invalidatePlanningCaches(workspace.id);
+
     return PostTypeSchema.parse(await getPostType(postTypeId));
   });
 
@@ -135,6 +139,8 @@ export async function registerPlanningRoutes(app: FastifyInstance) {
       throw error;
     }
 
+    invalidatePlanningCaches(postType.workspaceId);
+
     return PostTypeSchema.parse(await getPostType(postType.id));
   });
 
@@ -158,6 +164,7 @@ export async function registerPlanningRoutes(app: FastifyInstance) {
       projectId?: string;
       postTypeId?: string;
       status?: string;
+      view?: string;
     };
 
     const filters: {
@@ -172,6 +179,10 @@ export async function registerPlanningRoutes(app: FastifyInstance) {
     if (query.postTypeId) filters.postTypeId = query.postTypeId;
     if (query.status === "draft" || query.status === "approved" || query.status === "archived") {
       filters.status = query.status;
+    }
+
+    if (query.view === "picker") {
+      return listWorkspaceCreativeTemplateOptions(workspace.id, { ...filters });
     }
 
     const templates = await listWorkspaceCreativeTemplates(workspace.id, {
@@ -279,6 +290,8 @@ export async function registerPlanningRoutes(app: FastifyInstance) {
       }
     }
 
+    invalidatePlanningCaches(workspace.id, brand.id);
+
     return CreativeTemplateDetailSchema.parse(await getCreativeTemplateDetail(templateId));
   });
 
@@ -341,6 +354,8 @@ export async function registerPlanningRoutes(app: FastifyInstance) {
         throw assetError;
       }
     }
+
+    invalidatePlanningCaches(template.workspaceId, template.brandId);
 
     return CreativeTemplateDetailSchema.parse(await getCreativeTemplateDetail(template.id));
   });
@@ -615,4 +630,14 @@ export async function registerPlanningRoutes(app: FastifyInstance) {
 
     return CalendarItemSchema.parse(mapDeliverableToCalendarItem(await getDeliverable(deliverable.id)));
   });
+}
+
+function invalidatePlanningCaches(workspaceId: string, brandId?: string) {
+  invalidateRuntimeCache(`workspace-festivals:${workspaceId}`);
+  invalidateRuntimeCache(`workspace-post-types:${workspaceId}`);
+  invalidateRuntimeCache(`workspace-templates:${workspaceId}:`);
+  invalidateRuntimeCache(`workspace-template-options:${workspaceId}:`);
+  if (brandId) {
+    invalidateRuntimeCache(`plan-overview:${workspaceId}:${brandId}`);
+  }
 }

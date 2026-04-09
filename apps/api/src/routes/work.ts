@@ -25,6 +25,7 @@ import { getChannelAccount, getContentPillar } from "../lib/deliverables-reposit
 import { getCreativeTemplate, getPostType, getProject } from "../lib/planning-repository.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { randomId } from "../lib/utils.js";
+import { invalidateRuntimeCache } from "../lib/runtime-cache.js";
 
 const MaterializeSeriesSchema = z.object({
   startAt: z.string().optional(),
@@ -114,6 +115,8 @@ export async function registerWorkRoutes(app: FastifyInstance) {
 
     if (error) throw error;
 
+    invalidateWorkOverviewCaches(workspace.id);
+
     return SeriesSchema.parse(await getSeries(seriesId));
   });
 
@@ -157,6 +160,8 @@ export async function registerWorkRoutes(app: FastifyInstance) {
       .eq("id", series.id);
 
     if (error) throw error;
+
+    invalidateWorkOverviewCaches(series.workspaceId);
 
     return SeriesSchema.parse(await getSeries(series.id));
   });
@@ -254,6 +259,8 @@ export async function registerWorkRoutes(app: FastifyInstance) {
       .order("scheduled_for", { ascending: true });
 
     if (error) throw error;
+
+    invalidateWorkOverviewCaches(series.workspaceId);
 
     return (data ?? []).map((row) =>
       DeliverableSchema.parse({
@@ -371,6 +378,12 @@ export async function registerWorkRoutes(app: FastifyInstance) {
     const members = await listWorkspaceMembers(workspace.id);
     return members.map((member) => WorkspaceMemberSchema.parse(member));
   });
+}
+
+function invalidateWorkOverviewCaches(workspaceId: string) {
+  invalidateRuntimeCache(`home-overview:${workspaceId}:`);
+  invalidateRuntimeCache(`plan-overview:${workspaceId}:`);
+  invalidateRuntimeCache(`queue:${workspaceId}:`);
 }
 
 async function validateSeriesRelations(params: {
