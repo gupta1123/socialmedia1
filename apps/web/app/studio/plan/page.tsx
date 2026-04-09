@@ -16,6 +16,7 @@ import {
   describeSeriesReadiness
 } from "../../../lib/series-workflow";
 import { ImagePreviewTrigger } from "../image-preview";
+import { FloatingTooltip } from "../floating-tooltip";
 import { useStudio } from "../studio-context";
 import { PlacementIcons } from "../placement-icons";
 import { useRegisterTopbarActions } from "../topbar-actions-context";
@@ -321,21 +322,70 @@ export default function PlanPage() {
                     <span className={`plan-roadmap-badge plan-roadmap-badge-${getSeriesTone(series.status)}`}>
                       {formatStatusLabel(series.status)}
                     </span>
-                    <Link className="button button-ghost mini" href={`/studio/series/${series.id}`}>
-                      Open series
-                    </Link>
-                    <button
-                      className="button button-ghost mini"
-                      disabled={materializingId === series.id || !canMaterializeSeries(series)}
-                      onClick={() => {
-                        if (canMaterializeSeries(series)) {
-                          void handleMaterialize(series.id);
+                    <div className="plan-roadmap-action-cluster" role="group" aria-label={`${series.name} actions`}>
+                      <FloatingTooltip
+                        className="placement-tooltip"
+                        content={
+                          <>
+                            <strong>Open series</strong>
+                            <span>View cadence, history, and existing tasks.</span>
+                          </>
                         }
-                      }}
-                      type="button"
-                    >
-                      {materializingId === series.id ? "Creating…" : "Create upcoming tasks"}
-                    </button>
+                      >
+                        <Link
+                          aria-label={`Open ${series.name}`}
+                          className="plan-roadmap-action-button"
+                          href={`/studio/series/${series.id}`}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M7 17 17 7" />
+                            <path d="M9 7h8v8" />
+                          </svg>
+                        </Link>
+                      </FloatingTooltip>
+                      <FloatingTooltip
+                        className="placement-tooltip"
+                        content={
+                          <>
+                            <strong>{materializingId === series.id ? "Creating upcoming tasks" : "Create upcoming tasks"}</strong>
+                            <span>
+                              {canMaterializeSeries(series)
+                                ? "Generate the next set of recurring post tasks."
+                                : describeSeriesReadiness(series)}
+                            </span>
+                          </>
+                        }
+                      >
+                        <span className="plan-roadmap-action-anchor">
+                          <button
+                            aria-label={`Create upcoming tasks for ${series.name}`}
+                            className="plan-roadmap-action-button plan-roadmap-action-button-primary"
+                            disabled={materializingId === series.id || !canMaterializeSeries(series)}
+                            onClick={() => {
+                              if (canMaterializeSeries(series)) {
+                                void handleMaterialize(series.id);
+                              }
+                            }}
+                            type="button"
+                          >
+                            {materializingId === series.id ? (
+                              <svg className="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M21 12a9 9 0 1 1-3.2-6.9" />
+                              </svg>
+                            ) : (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <rect x="3.5" y="5.5" width="17" height="15" rx="2.5" />
+                                <path d="M7.5 3.5v4" />
+                                <path d="M16.5 3.5v4" />
+                                <path d="M3.5 10.5h17" />
+                                <path d="M12 13.5v4" />
+                                <path d="M10 15.5h4" />
+                              </svg>
+                            )}
+                          </button>
+                        </span>
+                      </FloatingTooltip>
+                    </div>
                   </div>
                 </article>
               ))

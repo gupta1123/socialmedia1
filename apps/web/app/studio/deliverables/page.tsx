@@ -447,14 +447,7 @@ export default function DeliverablesPage() {
   return (
     <div className="page-stack">
       <section className="page-grid">
-        <article className="panel page-span-12">
-          <div className="panel-header">
-            <div>
-            <h3>{filteredCampaign?.name ?? filteredProject?.name ?? activeBrand?.name ?? "Post tasks"}</h3>
-            </div>
-            <span className="panel-count">{deliverables.length} post tasks</span>
-          </div>
-
+        <div className="page-span-12">
           {filteredProject || filteredCampaign ? (
             <div className="active-scope-strip" aria-label="Active deliverable filters">
               {filteredProject ? (
@@ -487,12 +480,21 @@ export default function DeliverablesPage() {
             columns={tableColumns}
             defaultSort={{ columnId: "scheduledFor", direction: "asc" }}
             emptyAction={
-              <button className="button button-primary" onClick={() => setIsDrawerOpen(true)}>
-                Create first post task
-              </button>
+              <div className="empty-state-card">
+                <div className="circular-check">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 6 9 17l-5-5"/>
+                  </svg>
+                </div>
+                <h3>You're all caught up</h3>
+                <p>When tasks are planned or scheduled, they will appear here.</p>
+                <Link className="button button-primary" href="/studio/plan" style={{ background: "var(--ink)", color: "white", padding: "10px 24px", borderRadius: "10px" }}>
+                  Open plan
+                </Link>
+              </div>
             }
-            emptyBody="Create post tasks here or generate them from campaigns and series."
-            emptyTitle="No post tasks yet"
+            emptyBody=""
+            emptyTitle=""
             filters={[
               {
                 id: "status",
@@ -505,7 +507,7 @@ export default function DeliverablesPage() {
               },
               {
                 id: "objective",
-                label: "Objective",
+                label: "Mode",
                 options: objectiveOptions.map((option) => ({ label: option.label, value: option.value })),
                 getValue: (deliverable) => deliverable.objectiveCode
               }
@@ -514,7 +516,7 @@ export default function DeliverablesPage() {
             rowKey={(deliverable) => deliverable.id}
             rows={deliverables}
             search={{
-              placeholder: "Search post tasks, projects, or campaigns",
+              placeholder: "Search tasks...",
               getText: (deliverable) =>
                 [
                   deliverable.title,
@@ -526,8 +528,14 @@ export default function DeliverablesPage() {
                   .filter(Boolean)
                   .join(" ")
             }}
+            toolbarPrefix={
+              <div className="queue-header-left">
+                <h3 className="queue-header-title">{filteredCampaign?.name ?? filteredProject?.name ?? activeBrand?.name ?? "Assigned to you"}</h3>
+                <span className="queue-header-badge">{deliverables.length}</span>
+              </div>
+            }
           />
-        </article>
+        </div>
       </section>
 
       {isDrawerOpen ? (

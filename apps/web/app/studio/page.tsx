@@ -136,17 +136,6 @@ export default function StudioHomePage() {
   return (
     <div className="page-stack">
       <section className="work-home-hero">
-        <div className="work-home-copy">
-          <p className="panel-label">Dashboard</p>
-          <h2>{activeBrand ? `${activeBrand.name} Social Ops` : "Social Operations"}</h2>
-          <p>
-            An overview of active deliverables, planning status, and scheduling backlog across your team.
-          </p>
-          <div className="work-home-actions">
-            <Link className="button button-primary" href="/studio/queue?scope=my">Start with my queue</Link>
-            <Link className="button button-ghost" href="/studio/plan">Open plan</Link>
-          </div>
-        </div>
         <div className="work-home-signal">
           {sections.slice(0, 4).map((section) => (
             <Link className={`work-signal-card is-${section.theme}`} href={section.href} key={section.key}>

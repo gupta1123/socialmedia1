@@ -41,6 +41,7 @@ type DataTableProps<T> = {
   emptyBody: string;
   emptyAction?: ReactNode;
   resultLabel?: (showing: number, total: number) => string;
+  toolbarPrefix?: ReactNode;
 };
 
 const defaultPageSizes = [10, 20, 50];
@@ -58,7 +59,8 @@ export function DataTable<T>({
   emptyTitle,
   emptyBody,
   emptyAction,
-  resultLabel
+  resultLabel,
+  toolbarPrefix
 }: DataTableProps<T>) {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState("");
@@ -175,9 +177,12 @@ export function DataTable<T>({
 
   return (
     <div className="data-table-shell">
-      {(search || filters.length > 0) ? (
+      {(search || filters.length > 0 || toolbarPrefix) ? (
         <div className="data-table-toolbar">
           <div className="data-table-toolbar-left">
+            {toolbarPrefix}
+          </div>
+          <div className="data-table-toolbar-right">
             {search ? (
               <label className="data-table-search">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -193,24 +198,26 @@ export function DataTable<T>({
               </label>
             ) : null}
 
-            {filters.map((filter) => (
-              <label className="data-table-filter" key={filter.id}>
-                <span>{filter.label}</span>
-                <select
-                  onChange={(event) =>
-                    setFilterValues((current) => ({ ...current, [filter.id]: event.target.value }))
-                  }
-                  value={filterValues[filter.id] ?? "all"}
-                >
-                  <option value="all">All</option>
-                  {filter.options.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ))}
+            <div className="data-table-filters">
+              {filters.map((filter) => (
+                <label className="data-table-filter" key={filter.id}>
+                  <span>{filter.label}</span>
+                  <select
+                    onChange={(event) =>
+                      setFilterValues((current) => ({ ...current, [filter.id]: event.target.value }))
+                    }
+                    value={filterValues[filter.id] ?? "all"}
+                  >
+                    <option value="all">All</option>
+                    {filter.options.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
 
             {(searchTerm || Object.values(filterValues).some(v => v !== "all")) && (
               <button 

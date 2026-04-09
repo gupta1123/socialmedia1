@@ -684,9 +684,9 @@ export function uploadBrandAsset(
   payload: { file: File; kind: string; label: string }
 ) {
   const body = new FormData();
-  body.append("file", payload.file);
   body.append("kind", payload.kind);
   body.append("label", payload.label);
+  body.append("file", payload.file);
 
   return request<{ id: string; storagePath: string }>(`/api/brands/${brandId}/assets`, token, {
     method: "POST",

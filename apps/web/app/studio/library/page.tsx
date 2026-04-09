@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type {
+  AssetKind,
   BrandAssetRecord,
   CreativeTemplateRecord,
   PostingWindowRecord,
@@ -45,7 +46,7 @@ const DEFAULT_LOADED_TABS: LoadedTabsState = {
 };
 
 export default function LibraryPage() {
-  const { sessionToken, activeBrand, activeBrandId, bootstrap, pendingAction, isPending, uploadReference } =
+  const { sessionToken, activeBrand, activeBrandId, bootstrap, pendingAction, isPending, uploadBrandAssetFile } =
     useStudio();
   const [tab, setTab] = useState<LibraryTab>("system");
   const [assets, setAssets] = useState<BrandAssetRecord[]>([]);
@@ -59,6 +60,7 @@ export default function LibraryPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [label, setLabel] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [assetKind, setAssetKind] = useState<AssetKind>("reference");
 
   const topbarActions = useMemo(
     () => (
@@ -67,12 +69,13 @@ export default function LibraryPage() {
         disabled={!activeBrand || pendingAction === "upload-reference"}
         onClick={() => {
           setTab("assets");
+          setAssetKind("reference");
           setIsDrawerOpen(true);
         }}
         title={!activeBrand ? "Set an active brand first" : ""}
         type="button"
       >
-        {pendingAction === "upload-reference" ? "Uploading…" : "Upload reference"}
+        {pendingAction === "upload-reference" ? "Uploading…" : "Upload asset"}
       </button>
     ),
     [activeBrand, pendingAction]
@@ -107,7 +110,7 @@ export default function LibraryPage() {
         setLoadedTabs((current) => ({ ...current, assets: true }));
       } catch (cause) {
         if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : "Unable to load reference assets");
+          setError(cause instanceof Error ? cause.message : "Unable to load brand assets");
         }
       }
     }
@@ -203,15 +206,76 @@ export default function LibraryPage() {
     () => assets.filter((asset) => asset.kind === "reference"),
     [assets]
   );
+  const logoAssets = useMemo(
+    () => assets.filter((asset) => asset.kind === "logo"),
+    [assets]
+  );
   const productAssets = useMemo(
     () => assets.filter((asset) => asset.kind === "product"),
     [assets]
+  );
+  const inspirationAssets = useMemo(
+    () => assets.filter((asset) => asset.kind === "inspiration"),
+    [assets]
+  );
+  const visibleMediaAssetCount = useMemo(
+    () => assets.filter((asset) => asset.kind !== "rera_qr").length,
+    [assets]
+  );
+  const mediaSections = useMemo(
+    () => [
+      {
+        key: "references",
+        title: "References",
+        description: "High-signal references that guide visual language and composition.",
+        emptyTitle: "No references yet",
+        emptyBody: "Upload high-signal references so templates and creation stay in the right visual language.",
+        emptyActionLabel: "Upload reference",
+        uploadKind: "reference" as AssetKind,
+        tagLabel: "Reference",
+        assets: referenceAssets
+      },
+      {
+        key: "logos",
+        title: "Logos",
+        description: "Official brand marks that can be toggled into final creatives when needed.",
+        emptyTitle: "No logos yet",
+        emptyBody: "Upload the official brand logo so Create can optionally place it in the final image.",
+        emptyActionLabel: "Upload logo",
+        uploadKind: "logo" as AssetKind,
+        tagLabel: "Logo",
+        assets: logoAssets
+      },
+      {
+        key: "project-images",
+        title: "Project images",
+        description: "Building shots and other project-specific visuals linked on project profiles.",
+        emptyTitle: "No project images yet",
+        emptyBody: "Project building images appear here once they are linked to project profiles.",
+        emptyActionLabel: null,
+        uploadKind: "product" as AssetKind,
+        tagLabel: "Project image",
+        assets: productAssets
+      },
+      {
+        key: "inspiration",
+        title: "Inspiration",
+        description: "Loose mood and style references that can broaden exploration without acting as the main truth anchor.",
+        emptyTitle: "No inspiration assets yet",
+        emptyBody: "Upload optional inspiration material if the brand uses a broader visual canon.",
+        emptyActionLabel: "Upload inspiration",
+        uploadKind: "inspiration" as AssetKind,
+        tagLabel: "Inspiration",
+        assets: inspirationAssets
+      }
+    ],
+    [inspirationAssets, logoAssets, productAssets, referenceAssets]
   );
 
   async function handleUpload(event: React.FormEvent) {
     event.preventDefault();
     if (!file) return;
-    const success = await uploadReference(file, label || file.name);
+    const success = await uploadBrandAssetFile(file, label || file.name, assetKind);
     if (success) {
       if (sessionToken && activeBrandId) {
         const token = sessionToken;
@@ -223,6 +287,7 @@ export default function LibraryPage() {
       }
       setLabel("");
       setFile(null);
+      setAssetKind("reference");
       setIsDrawerOpen(false);
     }
   }
@@ -358,7 +423,7 @@ export default function LibraryPage() {
               <h2 style={{ fontSize: "14px", fontWeight: 600, margin: 0, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--ink)" }}>
                 {activeBrand ? `${activeBrand.name} media` : "Media library"}
               </h2>
-              {assets.length > 0 ? <span className="panel-count">{assets.length} items</span> : null}
+              {visibleMediaAssetCount > 0 ? <span className="panel-count">{visibleMediaAssetCount} items</span> : null}
             </div>
 
             {!activeBrand ? (
@@ -368,83 +433,59 @@ export default function LibraryPage() {
               </div>
             ) : (
               <div className="library-section-stack" style={{ gap: "40px" }}>
-                <section>
-                  <div style={{ marginBottom: "20px", paddingBottom: "12px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <h3 style={{ fontSize: "14px", fontWeight: 600, margin: 0, color: "var(--ink)" }}>References</h3>
-                    {referenceAssets.length > 0 ? <span className="panel-count">{referenceAssets.length} items</span> : null}
-                  </div>
-                  {referenceAssets.length > 0 ? (
-                    <div className="gallery-grid library-gallery-grid library-media-grid">
-                      {referenceAssets.map((asset) => (
-                        <article className="review-card" key={asset.id} style={{ padding: "12px" }}>
-                          <div className="creative-preview-frame" style={{ minHeight: "200px", padding: "8px" }}>
-                            {asset.previewUrl ? (
-                              <ImagePreviewTrigger alt={asset.label} src={asset.previewUrl} title={asset.label}>
-                                <img alt={asset.label} src={asset.previewUrl} />
-                              </ImagePreviewTrigger>
-                            ) : (
-                              <div className="thumb-fallback" />
-                            )}
-                          </div>
-                          <div className="library-asset-meta">
-                            <strong>{asset.label}</strong>
-                            <div className="review-tag-row">
-                              <span className="review-tag">Reference</span>
+                {mediaSections.map((section) => (
+                  <section key={section.key}>
+                    <div style={{ marginBottom: "20px", paddingBottom: "12px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "20px" }}>
+                      <div>
+                        <h3 style={{ fontSize: "14px", fontWeight: 600, margin: 0, color: "var(--ink)" }}>{section.title}</h3>
+                        <p style={{ margin: "8px 0 0", color: "var(--muted)", fontSize: "14px" }}>
+                          {section.description}
+                        </p>
+                      </div>
+                      {section.assets.length > 0 ? <span className="panel-count">{section.assets.length} items</span> : null}
+                    </div>
+                    {section.assets.length > 0 ? (
+                      <div className="gallery-grid library-gallery-grid library-media-grid">
+                        {section.assets.map((asset) => (
+                          <article className="review-card" key={asset.id} style={{ padding: "12px" }}>
+                            <div className="creative-preview-frame" style={{ minHeight: "200px", padding: "8px" }}>
+                              {asset.previewUrl ? (
+                                <ImagePreviewTrigger alt={asset.label} src={asset.previewUrl} title={asset.label}>
+                                  <img alt={asset.label} src={asset.previewUrl} />
+                                </ImagePreviewTrigger>
+                              ) : (
+                                <div className="thumb-fallback" />
+                              )}
                             </div>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="empty-state compact">
-                      <strong>No references yet</strong>
-                      <p>Upload high-signal references so templates and creation stay in the right visual language.</p>
-                      <button className="button button-ghost" onClick={() => setIsDrawerOpen(true)} type="button">
-                        Upload reference
-                      </button>
-                    </div>
-                  )}
-                </section>
-
-                <section>
-                  <div style={{ marginBottom: "20px", paddingBottom: "12px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div>
-                      <h3 style={{ fontSize: "14px", fontWeight: 600, margin: 0, color: "var(--ink)" }}>Project images</h3>
-                      <p style={{ margin: "8px 0 0", color: "var(--muted)", fontSize: "14px" }}>
-                        Building shots and other project-specific visuals linked on project profiles.
-                      </p>
-                    </div>
-                    {productAssets.length > 0 ? <span className="panel-count">{productAssets.length} items</span> : null}
-                  </div>
-                  {productAssets.length > 0 ? (
-                    <div className="gallery-grid library-gallery-grid library-media-grid">
-                      {productAssets.map((asset) => (
-                        <article className="review-card" key={asset.id} style={{ padding: "12px" }}>
-                          <div className="creative-preview-frame" style={{ minHeight: "200px", padding: "8px" }}>
-                            {asset.previewUrl ? (
-                              <ImagePreviewTrigger alt={asset.label} src={asset.previewUrl} title={asset.label}>
-                                <img alt={asset.label} src={asset.previewUrl} />
-                              </ImagePreviewTrigger>
-                            ) : (
-                              <div className="thumb-fallback" />
-                            )}
-                          </div>
-                          <div className="library-asset-meta">
-                            <strong>{asset.label}</strong>
-                            <div className="review-tag-row">
-                              <span className="review-tag">Project image</span>
+                            <div className="library-asset-meta">
+                              <strong>{asset.label}</strong>
+                              <div className="review-tag-row">
+                                <span className="review-tag">{section.tagLabel}</span>
+                              </div>
                             </div>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="empty-state compact">
-                      <strong>No project images yet</strong>
-                      <p>Project building images appear here once they are linked to project profiles.</p>
-                    </div>
-                  )}
-                </section>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="empty-state compact">
+                        <strong>{section.emptyTitle}</strong>
+                        <p>{section.emptyBody}</p>
+                        {section.emptyActionLabel ? (
+                          <button
+                            className="button button-ghost"
+                            onClick={() => {
+                              setAssetKind(section.uploadKind);
+                              setIsDrawerOpen(true);
+                            }}
+                            type="button"
+                          >
+                            {section.emptyActionLabel}
+                          </button>
+                        ) : null}
+                      </div>
+                    )}
+                  </section>
+                ))}
               </div>
             )}
           </section>
@@ -489,7 +530,7 @@ export default function LibraryPage() {
         <div className="drawer-overlay" onClick={() => setIsDrawerOpen(false)}>
           <div className="drawer-content" onClick={(event) => event.stopPropagation()}>
             <div className="drawer-header">
-              <h2>Upload reference</h2>
+              <h2>Upload asset</h2>
               <button className="drawer-close" onClick={() => setIsDrawerOpen(false)} type="button">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
@@ -501,16 +542,33 @@ export default function LibraryPage() {
               <form className="stack-form" onSubmit={handleUpload}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "24px", paddingTop: "24px" }}>
                   <label className="field-label">
-                    Reference label
-                  <input
-                    onChange={(event) => setLabel(event.target.value)}
-                    placeholder="e.g. Landmark tower exterior"
-                    value={label}
-                  />
-                </label>
+                    Asset type
+                    <select
+                      onChange={(event) => setAssetKind(event.target.value as AssetKind)}
+                      value={assetKind}
+                    >
+                      <option value="reference">Reference</option>
+                      <option value="logo">Logo</option>
+                      <option value="product">Project image</option>
+                      <option value="inspiration">Inspiration</option>
+                    </select>
+                  </label>
+
+                  <label className="field-label">
+                    Asset label
+                    <input
+                      onChange={(event) => setLabel(event.target.value)}
+                      placeholder={
+                        assetKind === "logo"
+                          ? "e.g. Krisala primary logo"
+                          : "e.g. Landmark tower exterior"
+                      }
+                      value={label}
+                    />
+                  </label>
 
                 <label className="field-label">
-                  Reference image
+                  Asset file
                   <div className="library-upload-drop">
                     <input accept="image/*" onChange={(event) => setFile(event.target.files?.[0] ?? null)} type="file" />
                   </div>

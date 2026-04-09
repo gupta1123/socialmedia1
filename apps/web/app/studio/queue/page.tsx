@@ -11,7 +11,7 @@ import { getQueueNextActionHref } from "../../../lib/workflow";
 import { DataTable } from "../data-table";
 import { PlacementIcons } from "../placement-icons";
 import { useStudio } from "../studio-context";
-import { useRegisterTopbarActions } from "../topbar-actions-context";
+import { useRegisterTopbarActions, useRegisterTopbarControls } from "../topbar-actions-context";
 
 const SCOPES = [
   { id: "my", label: "My queue" },
@@ -42,6 +42,28 @@ export default function QueuePage() {
   );
 
   useRegisterTopbarActions(topbarActions);
+
+  const topbarControls = useMemo(
+    () => (
+      <div className="queue-scope-switch" role="tablist" aria-label="Queue scope">
+        {SCOPES.map((item) => (
+          <button
+            className={`filter-chip ${scope === item.id ? "is-active" : ""}`}
+            key={item.id}
+            onClick={() => setScope(item.id)}
+            type="button"
+            role="tab"
+            aria-selected={scope === item.id}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+    ),
+    [scope]
+  );
+
+  useRegisterTopbarControls(topbarControls);
 
   useEffect(() => {
     if (!sessionToken) return;
@@ -143,30 +165,6 @@ export default function QueuePage() {
 
   return (
     <div className="page-stack">
-      <section className="queue-hero">
-        <div className="queue-hero-content">
-          <p className="panel-label">Work queue</p>
-          <h2>Today's work queue</h2>
-          <p>
-            See who owns what, what is due next, and the next step for each post task.
-          </p>
-        </div>
-        <div className="queue-scope-switch" role="tablist" aria-label="Queue scope">
-          {SCOPES.map((item) => (
-            <button
-              className={`filter-chip ${scope === item.id ? "is-active" : ""}`}
-              key={item.id}
-              onClick={() => setScope(item.id)}
-              type="button"
-              role="tab"
-              aria-selected={scope === item.id}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      </section>
-
       {error ? (
         <div className="status-banner">
           <span>{error}</span>

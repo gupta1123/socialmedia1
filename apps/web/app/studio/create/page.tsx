@@ -506,10 +506,18 @@ export default function CreatePage() {
     () => adaptationCandidates.find((output) => output.id === briefForm.sourceOutputId) ?? null,
     [adaptationCandidates, briefForm.sourceOutputId]
   );
+  const referenceEligibleAssets = useMemo(
+    () => activeAssets.filter((asset) => asset.kind !== "logo" && asset.kind !== "rera_qr"),
+    [activeAssets]
+  );
   const selectedReferenceAssets = useMemo(
     () =>
-      activeAssets.filter((asset) => briefForm.selectedReferenceAssetIds.includes(asset.id)),
-    [activeAssets, briefForm.selectedReferenceAssetIds]
+      referenceEligibleAssets.filter((asset) => briefForm.selectedReferenceAssetIds.includes(asset.id)),
+    [briefForm.selectedReferenceAssetIds, referenceEligibleAssets]
+  );
+  const latestBrandLogoAsset = useMemo(
+    () => activeAssets.find((asset) => asset.kind === "logo") ?? null,
+    [activeAssets]
   );
   const normalizedPickerQuery = pickerQuery.trim().toLowerCase();
   const deliverablesForPostTaskPicker = useMemo(
@@ -707,10 +715,10 @@ export default function CreatePage() {
   );
   const filteredReferenceAssets = useMemo(
     () =>
-      activeAssets.filter((asset) =>
+      referenceEligibleAssets.filter((asset) =>
         normalizedPickerQuery ? asset.label.toLowerCase().includes(normalizedPickerQuery) : true
       ),
-    [activeAssets, normalizedPickerQuery]
+    [normalizedPickerQuery, referenceEligibleAssets]
   );
   const filteredOutputs = useMemo(
     () =>
@@ -805,6 +813,8 @@ export default function CreatePage() {
         audience: briefForm.audience ?? "",
         offer: briefForm.offer ?? "",
         exactText: briefForm.exactText ?? "",
+        includeBrandLogo: briefForm.includeBrandLogo,
+        includeReraQr: briefForm.includeReraQr,
         referenceAssetIds: briefForm.selectedReferenceAssetIds
       }),
     [
@@ -817,6 +827,8 @@ export default function CreatePage() {
       briefForm.creativeTemplateId,
       briefForm.deliverableId,
       briefForm.exactText,
+      briefForm.includeBrandLogo,
+      briefForm.includeReraQr,
       briefForm.festivalId,
       briefForm.format,
       briefForm.goal,
@@ -947,7 +959,7 @@ export default function CreatePage() {
           (job) => job.status === "queued" || job.status === "processing"
         );
         if (hasActiveJobs && intervalId === null) {
-          intervalId = window.setInterval(() => { void loadRun(true); }, 4000);
+          intervalId = window.setInterval(() => { void loadRun(true); }, 2000);
         }
         if (!hasActiveJobs && intervalId) {
           window.clearInterval(intervalId);
@@ -990,15 +1002,48 @@ export default function CreatePage() {
 
   const currentSeedTemplates = runDetail?.seedTemplates ?? [];
   const currentFinalOutputs = runDetail?.finalOutputs ?? [];
-  const hasActiveSeedJob = useMemo(
-    () =>
-      runDetail?.jobs.some(
-        (job) =>
-          job.jobType === "style_seed" &&
-          (job.status === "queued" || job.status === "processing")
-      ) ?? false,
-    [runDetail]
-  );
+  const latestActiveSeedJob = useMemo(() => {
+    const jobs = runDetail?.jobs ?? [];
+    for (let index = jobs.length - 1; index >= 0; index -= 1) {
+      const job = jobs[index];
+      if (!job) continue;
+      if (
+        job.jobType === "style_seed" &&
+        (job.status === "queued" || job.status === "processing")
+      ) {
+        return job;
+      }
+    }
+    return null;
+  }, [runDetail?.jobs]);
+
+  const latestActiveFinalJob = useMemo(() => {
+    const jobs = runDetail?.jobs ?? [];
+    for (let index = jobs.length - 1; index >= 0; index -= 1) {
+      const job = jobs[index];
+      if (!job) continue;
+      if (
+        job.jobType === "final" &&
+        (job.status === "queued" || job.status === "processing")
+      ) {
+        return job;
+      }
+    }
+    return null;
+  }, [runDetail?.jobs]);
+
+  const hasActiveSeedJob = Boolean(latestActiveSeedJob);
+  const hasActiveFinalJob = Boolean(latestActiveFinalJob);
+  const activeFinalTemplateId = latestActiveFinalJob?.selectedTemplateId ?? null;
+  const directionTargetCount = latestActiveSeedJob?.requestedCount ?? 3;
+  const optionTargetCount = latestActiveFinalJob?.requestedCount ?? 2;
+  const remainingDirectionSlots = latestActiveSeedJob
+    ? Math.max(directionTargetCount - currentSeedTemplates.length, 0)
+    : 0;
+  const remainingOptionSlots = latestActiveFinalJob
+    ? Math.max(optionTargetCount - currentFinalOutputs.length, 0)
+    : 0;
+  const generationLocked = isPending || hasActiveSeedJob || hasActiveFinalJob;
 
   const seedTemplateLabelById = useMemo(
     () => new Map(currentSeedTemplates.map((t) => [t.id, t.label])),
@@ -1036,6 +1081,18 @@ export default function CreatePage() {
   const hasRequiredPostType = Boolean(selectedPostType);
   const locksPlacement = canUseDeliverableInheritance || isCampaignAssetMode;
   const locksTemplate = canUseDeliverableInheritance || isCampaignAssetMode;
+  const templateSelectionHelper =
+    locksTemplate
+      ? selectedReusableTemplate
+        ? isCampaignAssetMode
+          ? "From the planned asset."
+          : "From the post task."
+        : isCampaignAssetMode
+          ? "No template on this planned asset."
+          : "No template on this post task."
+      : isSeriesEpisodeMode
+        ? "Choose a template family to anchor layout and look."
+        : null;
   const seriesOutputKind = briefForm.seriesOutputKind ?? "single_image";
   const isSeriesCarousel = isSeriesEpisodeMode && seriesOutputKind === "carousel";
   const availableSeriesSlideCounts = useMemo(
@@ -1053,22 +1110,23 @@ export default function CreatePage() {
 
   // Derive current generate phase for the stepper
   const generatePhase: GeneratePhase = useMemo(() => {
+    if (hasActiveFinalJob || pendingAction === "generate-finals") return "creating";
+    if (hasActiveSeedJob || pendingAction === "generate-seeds") return "exploring";
     if (currentFinalOutputs.length > 0 && !isCompiledStale) return "done";
     if (currentSeedTemplates.length > 0 && !isCompiledStale && currentFinalOutputs.length === 0)
       return "picking";
-    if (pendingAction === "generate-seeds") return "exploring";
-    if (pendingAction === "generate-finals") return "creating";
     return "idle";
   }, [
     currentFinalOutputs.length,
     currentSeedTemplates.length,
+    hasActiveFinalJob,
+    hasActiveSeedJob,
     isCompiledStale,
     pendingAction
   ]);
   const isExploringDirections =
     !isAdaptationMode &&
     !isCompiledStale &&
-    currentSeedTemplates.length === 0 &&
     currentFinalOutputs.length === 0 &&
     (pendingCanvasAction === "explore" ||
       pendingAction === "generate-seeds" ||
@@ -1221,7 +1279,11 @@ export default function CreatePage() {
         !canCreateOptionsFromTemplateFamily &&
         !hasFreshSelectedStyle;
   const createDockStatus = allPreflightDone
-    ? "Ready to create options"
+    ? hasActiveFinalJob
+      ? "Creating options"
+      : hasActiveSeedJob
+        ? "Generating directions"
+        : "Ready to create options"
     : requiresStyleExplorationFirst
       ? "Explore styles first"
       : incompletePreflightItems.length === 1
@@ -1234,6 +1296,11 @@ export default function CreatePage() {
   }
 
   async function handleGenerateCandidates() {
+    if (hasActiveSeedJob || hasActiveFinalJob) {
+      setMessage("Wait for the current generation run to finish before starting another one.");
+      return;
+    }
+
     const nextFingerprint = briefFingerprint;
     const compiled =
       promptPackage && !isCompiledStale
@@ -1268,6 +1335,10 @@ export default function CreatePage() {
       setMessage("Adaptation uses the selected source post directly, so style exploration is skipped.");
       return;
     }
+    if (hasActiveSeedJob || hasActiveFinalJob) {
+      setMessage("Wait for the current generation run to finish before exploring a new set of directions.");
+      return;
+    }
     if (!hasRequiredSourceContext) {
       setMessage("Choose the source for this mode before exploring styles.");
       return;
@@ -1292,7 +1363,7 @@ export default function CreatePage() {
   }
 
   async function handleCreateOptionsFromStyle(selectedTemplateId: string) {
-    if (!promptPackage || isCompiledStale) return;
+    if (!promptPackage || isCompiledStale || hasActiveSeedJob || hasActiveFinalJob) return;
     const submitted = await generateFinalImagesForPackage(promptPackage.id, selectedTemplateId);
     if (submitted) rearmRunPolling();
   }
@@ -2679,19 +2750,7 @@ export default function CreatePage() {
                 }
                 actionDisabled={locksTemplate}
                 emptyLabel="None"
-                helper={
-                  locksTemplate
-                    ? selectedReusableTemplate
-                      ? isCampaignAssetMode
-                        ? "From the planned asset."
-                        : "From the post task."
-                      : isCampaignAssetMode
-                        ? "No template on this planned asset."
-                        : "No template on this post task."
-                    : isSeriesEpisodeMode
-                      ? "Choose a template family to anchor layout and look."
-                      : "Choose a template from the library."
-                }
+                {...(templateSelectionHelper ? { helper: templateSelectionHelper } : {})}
                 label={isSeriesEpisodeMode ? "Template family" : "Template"}
                 mediaSrc={selectedReusableTemplate?.previewUrl || ""}
                 onAction={() => setActivePicker("template")}
@@ -2705,45 +2764,65 @@ export default function CreatePage() {
 
               {/* Reference assets */}
               <div className="create-references-section">
-                <p className="create-references-label">
-                  Reference images
-                  {briefForm.selectedReferenceAssetIds.length > 0 && (
-                    <span className="create-references-count">
-                      {briefForm.selectedReferenceAssetIds.length} selected
-                    </span>
-                  )}
-                </p>
-                {activeAssets.length === 0 ? (
-                  <p className="create-hint">No brand assets uploaded yet.</p>
+                {referenceEligibleAssets.length === 0 ? (
+                  <>
+                    <div className="create-picker-summary create-picker-summary-card">
+                      <div className="create-picker-summary-main">
+                        <div>
+                          <p className="create-picker-summary-label">Reference images</p>
+                          <strong>No references selected.</strong>
+                          <p className="create-hint">No supporting reference assets uploaded yet.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </>
                 ) : (
                   <>
-                    <div className="create-reference-selection">
-                      {selectedReferenceAssets.length > 0 ? (
-                        <div className="create-reference-selection-row">
-                          {selectedReferenceAssets.slice(0, MAX_REFERENCE_SELECTION).map((asset) => (
-                            <button
-                              key={asset.id}
-                              className="create-reference-pill"
-                              onClick={() => setActivePicker("references")}
-                              type="button"
-                            >
-                              {asset.previewUrl ? (
-                                <img alt={asset.label} src={asset.previewUrl} />
-                              ) : (
-                                <span>{getInitials(asset.label)}</span>
-                              )}
-                            </button>
-                          ))}
-                          {selectedReferenceAssets.length > MAX_REFERENCE_SELECTION ? (
-                            <span className="create-reference-overflow">+{selectedReferenceAssets.length - MAX_REFERENCE_SELECTION}</span>
+                    <div className="create-reference-selection create-picker-summary create-picker-summary-card">
+                      <div className="create-picker-summary-main">
+                        <div>
+                          <p className="create-picker-summary-label">
+                            Reference images
+                            {briefForm.selectedReferenceAssetIds.length > 0 ? (
+                              <span className="create-references-count">
+                                {briefForm.selectedReferenceAssetIds.length} selected
+                              </span>
+                            ) : null}
+                          </p>
+                          <strong>{selectedReferenceAssets.length > 0 ? "References selected" : "No references selected."}</strong>
+                          <p className="create-hint">
+                            {briefForm.sourceOutputId
+                              ? "Using source post as reference."
+                              : isFestiveGreeting
+                                ? "Add up to 2 references if needed."
+                                : "Add up to 2 supporting references."}
+                          </p>
+                          {selectedReferenceAssets.length > 0 ? (
+                            <div className="create-reference-selection-row">
+                              {selectedReferenceAssets.slice(0, MAX_REFERENCE_SELECTION).map((asset) => (
+                                <button
+                                  key={asset.id}
+                                  className="create-reference-pill"
+                                  onClick={() => setActivePicker("references")}
+                                  type="button"
+                                >
+                                  {asset.previewUrl ? (
+                                    <img alt={asset.label} src={asset.previewUrl} />
+                                  ) : (
+                                    <span>{getInitials(asset.label)}</span>
+                                  )}
+                                </button>
+                              ))}
+                              {selectedReferenceAssets.length > MAX_REFERENCE_SELECTION ? (
+                                <span className="create-reference-overflow">+{selectedReferenceAssets.length - MAX_REFERENCE_SELECTION}</span>
+                              ) : null}
+                            </div>
                           ) : null}
                         </div>
-                      ) : (
-                        <p className="create-hint">No references selected.</p>
-                      )}
+                      </div>
                       <div className="create-picker-summary-actions">
                         <button className="create-inline-action" onClick={() => setActivePicker("references")} type="button">
-                          {selectedReferenceAssets.length > 0 ? "Change" : "Choose references"}
+                          {selectedReferenceAssets.length > 0 ? "Change" : "Choose"}
                         </button>
                         {selectedReferenceAssets.length > 0 ? (
                           <button className="create-inline-action subtle" onClick={clearSelectedReferences} type="button">
@@ -2754,17 +2833,37 @@ export default function CreatePage() {
                     </div>
                   </>
                 )}
-                {activeAssets.length > 0 &&
-                briefForm.selectedReferenceAssetIds.length === 0 &&
-                !briefForm.sourceOutputId && (
-                  <p className="create-hint">
-                    {isFestiveGreeting ? "Festive greetings usually work without uploaded references." : "Add up to 2 supporting references."}
-                  </p>
-                )}
-                {briefForm.sourceOutputId ? (
-                  <p className="create-hint">Using source post as reference.</p>
-                ) : null}
               </div>
+
+              {latestBrandLogoAsset ? (
+                <div className="create-references-section">
+                  <p className="create-references-label">Brand assets</p>
+                  <div className="create-brand-asset-toggle-grid">
+                    {latestBrandLogoAsset ? (
+                      <button
+                        className={`create-brand-asset-toggle ${briefForm.includeBrandLogo ? "is-selected" : ""}`}
+                        onClick={() => setBriefForm((state) => ({ ...state, includeBrandLogo: !state.includeBrandLogo }))}
+                        type="button"
+                      >
+                        <div className="create-brand-asset-toggle-preview">
+                          {latestBrandLogoAsset.previewUrl ? (
+                            <img alt={latestBrandLogoAsset.label} src={latestBrandLogoAsset.previewUrl} />
+                          ) : (
+                            <span>{getInitials(latestBrandLogoAsset.label)}</span>
+                          )}
+                        </div>
+                        <div className="create-brand-asset-toggle-copy">
+                          <strong>Use brand logo</strong>
+                          <span>{latestBrandLogoAsset.label}</span>
+                        </div>
+                        <span className="create-brand-asset-toggle-state">
+                          {briefForm.includeBrandLogo ? "On" : "Off"}
+                        </span>
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </div>
           )}
         </div>
@@ -2844,54 +2943,128 @@ export default function CreatePage() {
             )}
           </div>
 
+          {/* ── Styles / Directions section ── */}
+          {!isAdaptationMode && promptPackage && !isCompiledStale && (isExploringDirections || currentSeedTemplates.length > 0) && (
+            <section className="create-section-canvas">
+              <div className="create-canvas-header">
+                <div className="create-canvas-heading">
+                  <h3 className="create-canvas-title">Style directions</h3>
+                  <span className="create-canvas-subtle">
+                    {hasActiveSeedJob
+                      ? `${Math.min(currentSeedTemplates.length, directionTargetCount)} of ${directionTargetCount} ready. Wait for the full batch before choosing a direction.`
+                      : "Choose one direction to create final options."}
+                  </span>
+                </div>
+                <span className={`create-canvas-progress ${hasActiveSeedJob ? "is-live" : "is-ready"}`}>
+                  {hasActiveSeedJob ? "Generating…" : "Ready to pick"}
+                </span>
+              </div>
+
+              {isExploringDirections && currentSeedTemplates.length === 0 ? (
+                <div className="candidate-grid compact create-direction-loading-grid">
+                  {Array.from({ length: directionTargetCount }).map((_, index) => (
+                    <article className="candidate-card create-direction-loading-card" key={index}>
+                      <div className="candidate-media thumb create-generating-shimmer" />
+                      <div className="candidate-body mini create-direction-loading-meta">
+                        <strong>Direction {index + 1}</strong>
+                        <span>{index === 0 ? directionLoadingTitle : "Generating preview…"}</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="candidate-grid compact">
+                  {currentSeedTemplates.map((template) => (
+                    <article
+                      className={`candidate-card ${latestSelectedStyleId === template.id ? "is-style-source" : ""}`}
+                      key={template.id}
+                    >
+                      <div className="candidate-media thumb">
+                        {template.previewUrl ? (
+                          <ImagePreviewTrigger
+                            alt={template.label}
+                            src={template.previewUrl}
+                            title={template.label}
+                            meta="Direction preview"
+                          >
+                            <img alt="" src={template.previewUrl} />
+                          </ImagePreviewTrigger>
+                        ) : (
+                          <div className="create-generating-shimmer" />
+                        )}
+                        {latestSelectedStyleId === template.id && currentFinalOutputs.length > 0 && (
+                          <div className="create-style-source-badge">Current source</div>
+                        )}
+                      </div>
+                      <div className="candidate-body mini create-direction-card-meta">
+                        <strong>{template.label}</strong>
+                        <button
+                          className="create-action-explore"
+                          onClick={() => void handleCreateOptionsFromStyle(template.id)}
+                          disabled={generationLocked}
+                        >
+                          {hasActiveFinalJob && activeFinalTemplateId === template.id
+                            ? "Creating…"
+                            : isCampaignAssetMode
+                              ? "Create asset options"
+                              : isSeriesEpisodeMode
+                                ? isSeriesCarousel
+                                  ? "Create carousel options"
+                                  : "Create episode options"
+                                : "Create options"}
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                  {hasActiveSeedJob &&
+                    Array.from({ length: remainingDirectionSlots }).map((_, index) => (
+                      <article className="candidate-card create-batch-placeholder" key={`direction-pending-${index}`}>
+                        <div className="candidate-media thumb create-generating-shimmer" />
+                        <div className="candidate-body mini create-direction-loading-meta">
+                          <strong>Direction {currentSeedTemplates.length + index + 1}</strong>
+                          <span>Rendering preview…</span>
+                        </div>
+                      </article>
+                    ))}
+                </div>
+              )}
+            </section>
+          )}
+
           {/* ── Final options section ── */}
           <section className="create-section-canvas">
-            {currentFinalOutputs.length > 0 && (
+            {(currentFinalOutputs.length > 0 || hasActiveFinalJob) && (
               <div className="create-canvas-header">
-                <h3 className="create-canvas-title">Options</h3>
+                <div className="create-canvas-heading">
+                  <h3 className="create-canvas-title">Options</h3>
+                  <span className="create-canvas-subtle">
+                    {hasActiveFinalJob
+                      ? currentFinalOutputs.length > 0
+                        ? "Refreshing this set. New options will replace it automatically."
+                        : `Rendering ${optionTargetCount} option${optionTargetCount === 1 ? "" : "s"} now.`
+                      : "Review the strongest option or generate another set."}
+                  </span>
+                </div>
                 <div className="create-canvas-actions">
-                  <Link className="button button-ghost mini create-action-explore" href={currentReviewHref}>
-                    Review →
-                  </Link>
+                  {currentFinalOutputs.length > 0 && (
+                    <Link className="button button-ghost mini create-action-explore" href={currentReviewHref}>
+                      Review →
+                    </Link>
+                  )}
                   {promptPackage && !isCompiledStale && canCreateOptionsDirectly && (
                     <button
                       className="button button-ghost mini create-action-explore"
-                      disabled={pendingAction === "generate-finals"}
+                      disabled={generationLocked}
                       onClick={() => void handleGenerateCandidates()}
                     >
-                      {pendingAction === "generate-finals" ? "Generating…" : "Generate more"}
+                      {hasActiveFinalJob ? "Generating…" : "Generate more"}
                     </button>
                   )}
                 </div>
               </div>
             )}
 
-            {isExploringDirections ? (
-              <div className="create-direction-loading">
-                <div className="create-direction-loading-copy">
-                  <div className="create-direction-loading-status">
-                    <span className="create-direction-loading-pulse" />
-                    <span>Step 1 in progress</span>
-                  </div>
-                  <h4>{directionLoadingTitle}</h4>
-                  <p>{directionLoadingBody}</p>
-                  <span className="create-direction-loading-next">
-                    Next, you’ll pick one direction and turn it into final options.
-                  </span>
-                </div>
-                <div className="candidate-grid compact create-direction-loading-grid">
-                  {[1, 2, 3].map((index) => (
-                    <article className="candidate-card create-direction-loading-card" key={index}>
-                      <div className="candidate-media thumb create-generating-shimmer" />
-                      <div className="candidate-body mini create-direction-loading-meta">
-                        <strong>Direction {index}</strong>
-                        <span>Generating preview…</span>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </div>
-            ) : !promptPackage ? (
+            {!promptPackage ? (
               <div className="create-empty-state">
                 <div className="create-empty-icon">
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
@@ -2909,7 +3082,6 @@ export default function CreatePage() {
               </div>
             ) : isCompiledStale ? (
               <div className="create-stale-overlay-wrap">
-                {/* Show old results behind the stale overlay */}
                 <div className={`candidate-grid create-stale-grid`}>
                   {currentFinalOutputs.map((output, idx) => (
                     <article className="candidate-card create-stale-card" key={output.id || idx}>
@@ -2929,18 +3101,44 @@ export default function CreatePage() {
                   <button
                     className="button button-primary mini"
                     onClick={() => void handleGenerateCandidates()}
-                    disabled={isPending || !allPreflightDone}
+                    disabled={generationLocked || !allPreflightDone}
                   >
                     Regenerate
                   </button>
                 </div>
               </div>
+            ) : currentFinalOutputs.length === 0 && hasActiveFinalJob ? (
+              <div className="candidate-grid create-processing-pulse">
+                {Array.from({ length: optionTargetCount }).map((_, index) => (
+                  <article className="candidate-card create-batch-placeholder" key={`option-pending-${index}`}>
+                    <div
+                      className="candidate-media create-generating-shimmer"
+                      style={{ aspectRatio: compiledPlacement?.aspectRatio === "9:16" ? "9/16" : "1/1" }}
+                    />
+                    <div className="candidate-body create-batch-placeholder-copy">
+                      <strong>Option {index + 1}</strong>
+                      <span>Rendering option…</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
             ) : currentFinalOutputs.length === 0 && currentSeedTemplates.length > 0 ? (
               <div className="create-pick-prompt">
-                <p>{isAdaptationMode ? "Choose a source post to continue." : "Choose a template family, pick a style, or use references."}</p>
+                <p>Choose one direction above to create final options.</p>
+              </div>
+            ) : currentFinalOutputs.length === 0 ? (
+              <div className="create-empty-state create-empty-state-compact">
+                <h4>No options generated yet</h4>
+                <p>
+                  {isAdaptationMode
+                    ? "Choose a source post, then create a new version."
+                    : canCreateOptionsFromReferences || canCreateOptionsFromSourceOutput || canCreateOptionsFromTemplateFamily
+                      ? "Your setup is ready. Use Create options when you want the first set."
+                      : "Explore styles first, then create options from the direction you choose."}
+                </p>
               </div>
             ) : (
-              <div className={`candidate-grid ${runLoading ? "create-processing-pulse" : ""}`}>
+              <div className={`candidate-grid ${hasActiveFinalJob ? "create-processing-pulse" : runLoading ? "create-processing-pulse" : ""}`}>
                 {currentFinalOutputs.map((output, idx) => (
                   <article className="candidate-card" key={output.id || idx}>
                     <div
@@ -2978,72 +3176,22 @@ export default function CreatePage() {
                     </div>
                   </article>
                 ))}
-                {runLoading && currentFinalOutputs.length === 0 &&
-                  [1, 2, 3, 4].map((n) => (
-                    <div key={n} className="candidate-card skeleton">
-                      <div className="candidate-media create-generating-shimmer" />
-                    </div>
+                {hasActiveFinalJob &&
+                  Array.from({ length: remainingOptionSlots }).map((_, index) => (
+                    <article className="candidate-card create-batch-placeholder" key={`option-refresh-${index}`}>
+                      <div
+                        className="candidate-media create-generating-shimmer"
+                        style={{ aspectRatio: compiledPlacement?.aspectRatio === "9:16" ? "9/16" : "1/1" }}
+                      />
+                      <div className="candidate-body create-batch-placeholder-copy">
+                        <strong>Option {currentFinalOutputs.length + index + 1}</strong>
+                        <span>Rendering option…</span>
+                      </div>
+                    </article>
                   ))}
               </div>
             )}
           </section>
-
-          {/* ── Styles / Directions section ── */}
-          {currentSeedTemplates.length > 0 && !isCompiledStale && !isAdaptationMode && (
-            <section className="create-section-canvas">
-              <div className="create-canvas-header">
-                <h3 className="create-canvas-title">
-                  Style directions
-                </h3>
-              </div>
-              <div className="candidate-grid compact">
-                {currentSeedTemplates.map((template) => (
-                  <article
-                    className={`candidate-card ${latestSelectedStyleId === template.id ? "is-style-source" : ""}`}
-                    key={template.id}
-                  >
-                    <div className="candidate-media thumb">
-                      {template.previewUrl ? (
-                        <ImagePreviewTrigger
-                          alt={template.label}
-                          src={template.previewUrl}
-                          title={template.label}
-                          meta="Direction preview"
-                        >
-                          <img alt="" src={template.previewUrl} />
-                        </ImagePreviewTrigger>
-                      ) : (
-                        <div className="create-generating-shimmer" />
-                      )}
-                      {latestSelectedStyleId === template.id && currentFinalOutputs.length > 0 && (
-                        <div className="create-style-source-badge">Current source</div>
-                      )}
-                    </div>
-                    <div className="candidate-body mini" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px' }}>
-                      <strong style={{ fontSize: '12px', fontWeight: 500, color: 'var(--ink)' }}>{template.label}</strong>
-                      <button
-                        className="create-action-explore"
-                        onClick={() => void handleCreateOptionsFromStyle(template.id)}
-                        disabled={pendingAction === "generate-finals"}
-                        style={{ alignSelf: 'flex-start', padding: '4px 10px', fontSize: '11px', borderRadius: '4px' }}
-                      >
-                      {pendingAction === "generate-finals" &&
-                      pendingTargetKey === `template:${template.id}:finals`
-                          ? "Generating…"
-                          : isCampaignAssetMode
-                            ? "Create asset options"
-                            : isSeriesEpisodeMode
-                              ? isSeriesCarousel
-                                ? "Create carousel options"
-                                : "Create episode options"
-                              : "Create options"}
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-          )}
         </div>
 
         {/* ── Hyper-Minimal Floating Dock ── */}
@@ -3053,9 +3201,13 @@ export default function CreatePage() {
               <div className="create-preflight-status">
                 <strong>{createDockStatus}</strong>
                 <span>
-                  {allPreflightDone
-                    ? "Brand context and brief are ready."
-                    : "Complete setup to enable generation."}
+                  {hasActiveFinalJob
+                    ? "Options are rendering now. Results will appear here automatically."
+                    : hasActiveSeedJob
+                      ? "Directions are rendering now. Wait for the full batch before continuing."
+                      : allPreflightDone
+                        ? "Brand context and brief are ready."
+                        : "Complete setup to enable generation."}
                 </span>
               </div>
               <div className="create-preflight-chips">
@@ -3074,24 +3226,30 @@ export default function CreatePage() {
               <button
                 className="create-action-explore"
                 type="button"
-                disabled={isPending || !hasBriefPrompt || !hasRequiredSourceContext || !hasFestivalSelection || isAdaptationMode}
+                disabled={generationLocked || !hasBriefPrompt || !hasRequiredSourceContext || !hasFestivalSelection || isAdaptationMode}
                 onClick={() => void handleExploreDirections()}
               >
-                {pendingAction === "generate-seeds" ? "Exploring…" : isAdaptationMode ? "Source post" : "Explore styles"}
+                {hasActiveSeedJob
+                  ? "Exploring…"
+                  : isAdaptationMode
+                    ? "Source post"
+                    : "Explore styles"}
               </button>
 
               <button
                 className={`create-action-create ${allPreflightDone ? "" : "create-action-create-blocked"}`}
                 type="button"
-                disabled={isPending || !allPreflightDone || requiresStyleExplorationFirst}
+                disabled={generationLocked || !allPreflightDone || requiresStyleExplorationFirst}
                 onClick={() => void handleGenerateCandidates()}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
                 </svg>
                 <span>
-                  {pendingAction === "generate-finals"
+                  {hasActiveFinalJob
                     ? "Creating…"
+                    : hasActiveSeedJob
+                      ? "Finishing directions…"
                     : requiresStyleExplorationFirst
                       ? "Explore styles first"
                     : isAdaptationMode

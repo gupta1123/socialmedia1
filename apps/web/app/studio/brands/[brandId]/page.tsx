@@ -323,6 +323,10 @@ export default function BrandDetailPage() {
                 <strong>{detail.assetCounts.reference}</strong>
               </div>
               <div className="property-item">
+                <span>Logos</span>
+                <strong>{detail.assetCounts.logo}</strong>
+              </div>
+              <div className="property-item">
                 <span>Review checks</span>
                 <strong>{profile.compliance.reviewChecks.length}</strong>
               </div>

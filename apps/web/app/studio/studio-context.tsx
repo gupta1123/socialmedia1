@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
 import type {
+  AssetKind,
   BootstrapResponse,
   BrandProfile,
   CreativeBrief,
@@ -128,6 +129,7 @@ type StudioContextValue = {
   refresh: (preferredBrandId?: string) => Promise<void>;
   createBrandRecord: () => Promise<boolean>;
   uploadReference: (file: File, label: string) => Promise<boolean>;
+  uploadBrandAssetFile: (file: File, label: string, kind: AssetKind) => Promise<boolean>;
   compilePromptPackage: (options?: { silentSuccess?: boolean }) => Promise<PromptPackage | null>;
   generateSeeds: () => Promise<void>;
   generateSeedsForPackage: (promptPackageId: string) => Promise<boolean>;
@@ -167,6 +169,8 @@ const defaultBriefForm: BriefFormState = {
   audience: "Homebuyers and investors",
   offer: "Site visits now open",
   exactText: "Luxury residences. Site visits now open.",
+  includeBrandLogo: false,
+  includeReraQr: false,
   templateType: "announcement",
   selectedReferenceAssetIds: []
 };
@@ -381,17 +385,28 @@ export function StudioProvider({
       const validAssetIds = state.selectedReferenceAssetIds.filter((assetId) =>
         activeAssets.some((asset) => asset.id === assetId)
       );
+      const hasBrandLogo = activeAssets.some((asset) => asset.kind === "logo");
+      const hasReraQr = activeAssets.some((asset) => asset.kind === "rera_qr");
 
       if (activeAssets.length === 0) {
-        return validAssetIds.length === state.selectedReferenceAssetIds.length
-          ? state
-          : { ...state, selectedReferenceAssetIds: [] };
-      }
-
-      if (validAssetIds.length !== state.selectedReferenceAssetIds.length) {
         return {
           ...state,
-          selectedReferenceAssetIds: validAssetIds
+          selectedReferenceAssetIds: [],
+          includeBrandLogo: false,
+          includeReraQr: false
+        };
+      }
+
+      if (
+        validAssetIds.length !== state.selectedReferenceAssetIds.length ||
+        (!hasBrandLogo && state.includeBrandLogo) ||
+        (!hasReraQr && state.includeReraQr)
+      ) {
+        return {
+          ...state,
+          selectedReferenceAssetIds: validAssetIds,
+          includeBrandLogo: hasBrandLogo ? state.includeBrandLogo : false,
+          includeReraQr: hasReraQr ? state.includeReraQr : false
         };
       }
 
@@ -428,6 +443,8 @@ export function StudioProvider({
       postTypeId: undefined,
       creativeTemplateId: undefined,
       calendarItemId: undefined,
+      includeBrandLogo: false,
+      includeReraQr: false,
       selectedReferenceAssetIds: []
     }));
 
@@ -513,6 +530,10 @@ export function StudioProvider({
   }
 
   async function uploadReference(file: File, label: string) {
+    return uploadBrandAssetFile(file, label, "reference");
+  }
+
+  async function uploadBrandAssetFile(file: File, label: string, kind: AssetKind) {
     if (!sessionToken || !activeBrandId) {
       return false;
     }
@@ -523,11 +544,11 @@ export function StudioProvider({
     try {
       await uploadBrandAsset(sessionToken, activeBrandId, {
         file,
-        kind: "reference",
+        kind,
         label
       });
       await refresh(activeBrandId);
-      setMessage("Reference uploaded.");
+      setMessage("Asset uploaded.");
       return true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Asset upload failed");
@@ -701,6 +722,7 @@ export function StudioProvider({
         refresh,
         createBrandRecord,
         uploadReference,
+        uploadBrandAssetFile,
         compilePromptPackage,
         generateSeeds,
         generateSeedsForPackage,
