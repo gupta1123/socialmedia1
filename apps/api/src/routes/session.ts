@@ -20,6 +20,7 @@ export async function registerSessionRoutes(app: FastifyInstance) {
       ? query.view
       : "full";
     const isLightView = view === "light";
+    const isCreateView = view === "create";
 
     if (!viewer) {
       return reply.unauthorized();
@@ -64,13 +65,15 @@ export async function registerSessionRoutes(app: FastifyInstance) {
       listWorkspaceAssets(workspace.id, scopedBrandId),
       listWorkspaceTemplates(workspace.id, scopedBrandId),
       listWorkspaceJobs(workspace.id, scopedBrandId),
-      listWorkspaceOutputs(workspace.id, scopedBrandId)
+      isCreateView ? Promise.resolve([]) : listWorkspaceOutputs(workspace.id, scopedBrandId)
     ]);
 
     const [assetUrls, templateUrls, outputUrls] = await Promise.all([
       Promise.all(brandAssets.map((asset) => createSignedUrl(asset.storagePath).catch(() => null))),
       Promise.all(styleTemplates.map((template) => createSignedUrl(template.storagePath).catch(() => null))),
-      Promise.all(recentOutputs.map((output) => createSignedUrl(output.storagePath).catch(() => null)))
+      isCreateView
+        ? Promise.resolve([])
+        : Promise.all(recentOutputs.map((output) => createSignedUrl(output.storagePath).catch(() => null)))
     ]);
 
     const response = BootstrapResponseSchema.parse({
