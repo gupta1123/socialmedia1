@@ -390,17 +390,6 @@ export default function CampaignsPage() {
     );
   }
 
-  if (loading) {
-    return (
-      <div className="page-stack">
-        <article className="panel">
-          <p className="panel-label">Campaigns</p>
-          <h3>Loading campaign board…</h3>
-        </article>
-      </div>
-    );
-  }
-
   if (error) {
     return (
       <div className="page-stack">
@@ -454,6 +443,7 @@ export default function CampaignsPage() {
                 getValue: (campaign) => campaign.status
               }
             ]}
+            loading={loading}
             rowHref={(campaign) => `/studio/campaigns/${campaign.id}`}
             rowKey={(campaign) => campaign.id}
             rows={campaigns}

@@ -109,17 +109,6 @@ export default function RunsPage() {
     []
   );
 
-  if (loading) {
-    return (
-      <div className="page-stack">
-        <article className="panel">
-          <p className="panel-label">Runs</p>
-          <h3>Loading creative runs…</h3>
-        </article>
-      </div>
-    );
-  }
-
   if (error) {
     return (
       <div className="page-stack">
@@ -165,6 +154,7 @@ export default function RunsPage() {
                 getValue: (run) => run.status
               }
             ]}
+            loading={loading}
             rowHref={(run) => `/studio/runs/${run.id}`}
             rowKey={(run) => run.id}
             rows={visibleRuns}

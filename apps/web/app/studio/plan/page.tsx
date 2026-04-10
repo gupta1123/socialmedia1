@@ -20,6 +20,7 @@ import { FloatingTooltip } from "../floating-tooltip";
 import { useStudio } from "../studio-context";
 import { PlacementIcons } from "../placement-icons";
 import { useRegisterTopbarActions } from "../topbar-actions-context";
+import { Skeleton, SkeletonRow } from "../skeleton";
 
 const EMPTY_OVERVIEW: PlanOverview = {
   activeCampaigns: [],
@@ -261,9 +262,16 @@ export default function PlanPage() {
           </div>
           <div className="plan-roadmap-platter">
             {loading ? (
-              <div className="empty-state compact">
-                <strong>Loading</strong>
-                <p>Pulling active campaigns.</p>
+              <div className="plan-roadmap-list">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div className="plan-roadmap-row" key={index} style={{ pointerEvents: "none" }}>
+                    <Skeleton width="1.5rem" height="1.5rem" className="plan-roadmap-token" />
+                    <div className="plan-roadmap-row-copy" style={{ flex: 1 }}>
+                      <Skeleton width="70%" height="1rem" style={{ marginBottom: "0.4rem" }} />
+                      <Skeleton width="40%" height="0.75rem" />
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : overview.activeCampaigns.length > 0 ? (
               campaignPreview.map((campaign) => (
@@ -304,9 +312,16 @@ export default function PlanPage() {
           </div>
           <div className="plan-roadmap-platter">
             {loading ? (
-              <div className="empty-state compact">
-                <strong>Loading</strong>
-                <p>Pulling recurring work.</p>
+              <div className="plan-roadmap-list">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div className="plan-roadmap-series-row" key={index} style={{ pointerEvents: "none", borderBottom: "1px solid var(--line)" }}>
+                    <Skeleton width="1.5rem" height="1.5rem" className="plan-roadmap-token" />
+                    <div className="plan-roadmap-row-copy" style={{ flex: 1 }}>
+                      <Skeleton width="60%" height="1rem" style={{ marginBottom: "0.4rem" }} />
+                      <Skeleton width="80%" height="0.75rem" />
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : overview.activeSeries.length > 0 ? (
               seriesPreview.map((series) => (
@@ -410,9 +425,10 @@ export default function PlanPage() {
         </div>
         <div className="plan-roadmap-platter">
           {loading ? (
-            <div className="empty-state compact">
-              <strong>Loading</strong>
-              <p>Pulling unscheduled work.</p>
+            <div className="work-list">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <SkeletonRow key={index} />
+              ))}
             </div>
           ) : overview.unscheduledPostTasks.length > 0 ? (
             backlogPreview.map((task) => (
@@ -456,9 +472,18 @@ export default function PlanPage() {
           ) : null}
         </div>
         {loading ? (
-          <div className="empty-state compact">
-            <strong>Loading</strong>
-            <p>Pulling upcoming work.</p>
+          <div className="plan-roadmap-upcoming-grid">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div className="plan-roadmap-upcoming-card" key={index} style={{ pointerEvents: "none" }}>
+                <div className="plan-roadmap-upcoming-top">
+                  <Skeleton width="60px" height="0.75rem" />
+                  <Skeleton width="20px" height="20px" circle />
+                </div>
+                <Skeleton height="120px" className="plan-roadmap-upcoming-media" />
+                <Skeleton width="80%" height="1rem" style={{ marginTop: "12px", marginBottom: "8px" }} />
+                <Skeleton width="50%" height="0.75rem" />
+              </div>
+            ))}
           </div>
         ) : overview.upcomingPostTasks.length > 0 ? (
           <div className="plan-roadmap-upcoming-grid">

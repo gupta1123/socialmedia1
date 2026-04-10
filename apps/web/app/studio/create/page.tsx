@@ -46,6 +46,7 @@ import { getCurrentCreatePostTaskId } from "../../../lib/workflow";
 import { ImagePreviewTrigger } from "../image-preview";
 import { useRegisterTopbarControls, useRegisterTopbarMeta } from "../topbar-actions-context";
 import { useStudio } from "../studio-context";
+import { SkeletonRow } from "../skeleton";
 
 // ─── Stepper phase enum ───────────────────────────────────────────────────────
 type GeneratePhase = "idle" | "exploring" | "picking" | "creating" | "done";
@@ -3576,8 +3577,10 @@ export default function CreatePage() {
                 {activePicker === "campaign-plan" ? (
                   <div className="create-picker-list">
                     {campaignPlansLoading ? (
-                      <div className="empty-state compact">
-                        <strong>Loading planned assets…</strong>
+                      <div className="create-picker-list">
+                        {Array.from({ length: 3 }).map((_, index) => (
+                          <SkeletonRow key={index} className="create-picker-row-skeleton" />
+                        ))}
                       </div>
                     ) : filteredCampaignPlans.length > 0 ? (
                       filteredCampaignPlans.map((plan) => (

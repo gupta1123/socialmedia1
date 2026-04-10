@@ -21,6 +21,7 @@ import { formatLocalTimeLabel, formatWeekdayLabel } from "../../../lib/posting-w
 import { ImagePreviewTrigger } from "../image-preview";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions } from "../topbar-actions-context";
+import { Skeleton } from "../skeleton";
 
 const LIBRARY_TABS = [
   { id: "system", label: "System" },
@@ -319,9 +320,32 @@ export default function LibraryPage() {
         </div>
 
         {loading ? (
-          <div className="empty-state compact">
-            <strong>Loading</strong>
-            <p>Pulling the current library setup.</p>
+          <div className="library-section-stack">
+            {tab === "assets" || tab === "templates" ? (
+              <div className="gallery-grid library-gallery-grid">
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="review-card" style={{ padding: "12px" }}>
+                    <Skeleton style={{ height: "200px", borderRadius: "8px" }} />
+                    <div style={{ marginTop: "12px" }}>
+                      <Skeleton style={{ height: "16px", width: "60%" }} />
+                      <Skeleton style={{ height: "12px", width: "40%", marginTop: "8px" }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+                {[...Array(4)].map((_, i) => (
+                  <div key={i}>
+                    <Skeleton style={{ height: "20px", width: "120px", marginBottom: "16px" }} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                      <Skeleton style={{ height: "48px", borderRadius: "8px" }} />
+                      <Skeleton style={{ height: "48px", borderRadius: "8px" }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : null}
 

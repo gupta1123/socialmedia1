@@ -14,6 +14,7 @@ import { DataTable } from "../data-table";
 import { ProjectProfileFormSections } from "./project-form-sections";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions } from "../topbar-actions-context";
+import { Skeleton } from "../skeleton";
 
 const stageOptions: Array<{ value: CreateProjectInput["stage"]; label: string }> = [
   { value: "pre_launch", label: "Pre-launch" },
@@ -222,17 +223,6 @@ export default function ProjectsPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="page-stack">
-        <article className="panel">
-          <p className="panel-label">Projects</p>
-          <h3>Loading project inventory…</h3>
-        </article>
-      </div>
-    );
-  }
-
   if (error) {
     return (
       <div className="page-stack">
@@ -283,6 +273,7 @@ export default function ProjectsPage() {
                 getValue: (project) => project.status
               }
             ]}
+            loading={loading}
             rowHref={(project) => `/studio/projects/${project.id}`}
             rowKey={(project) => project.id}
             rows={visibleProjects}

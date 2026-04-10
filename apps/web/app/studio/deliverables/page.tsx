@@ -34,6 +34,7 @@ import { formatDisplayDate } from "../../../lib/formatters";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions } from "../topbar-actions-context";
 import { PlacementIcons } from "../placement-icons";
+import { Skeleton } from "../skeleton";
 
 type DeliverableFormState = {
   title: string;
@@ -414,17 +415,6 @@ export default function DeliverablesPage() {
     );
   }
 
-  if (loading) {
-    return (
-      <div className="page-stack">
-        <article className="panel">
-          <p className="panel-label">Post tasks</p>
-          <h3>Loading production work…</h3>
-        </article>
-      </div>
-    );
-  }
-
   if (error) {
     return (
       <div className="page-stack">
@@ -505,6 +495,7 @@ export default function DeliverablesPage() {
                 getValue: (deliverable) => deliverable.objectiveCode
               }
             ]}
+            loading={loading}
             rowHref={(deliverable) => `/studio/deliverables/${deliverable.id}`}
             rowKey={(deliverable) => deliverable.id}
             rows={deliverables}

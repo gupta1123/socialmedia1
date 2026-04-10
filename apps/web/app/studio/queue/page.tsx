@@ -180,63 +180,57 @@ export default function QueuePage() {
           <span className="panel-count">{rows.length} items</span>
         </div>
 
-        {loading ? (
-          <div className="empty-state compact">
-            <strong>Loading</strong>
-            <p>Building the current queue.</p>
-          </div>
-        ) : (
-          <DataTable
-            columns={columns}
-            emptyAction={<Link className="button button-ghost" href="/studio/plan">Open plan</Link>}
-            emptyBody="When post tasks are planned, approved, or scheduled, they will show up here."
-            emptyTitle="Queue is clear"
-            filters={[
-              {
-                id: "statusGroup",
-                label: "Status",
-                options: [
-                  { label: "To do", value: "todo" },
-                  { label: "In progress", value: "in_progress" },
-                  { label: "Ready to schedule", value: "ready_to_ship" },
-                  { label: "Blocked", value: "blocked" }
-                ],
-                getValue: (row) => row.statusGroup
-              },
-              {
-                id: "planningMode",
-                label: "Mode",
-                options: [
-                  { label: "Campaign", value: "campaign" },
-                  { label: "Series", value: "series" },
-                  { label: "One-off", value: "one_off" },
-                  { label: "Always-on", value: "always_on" },
-                  { label: "Ad hoc", value: "ad_hoc" }
-                ],
-                getValue: (row) => row.deliverable.planningMode
-              }
-            ]}
-            initialPageSize={12}
-            resultLabel={(showing, total) => `${showing} of ${total} post tasks`}
-            rowHref={(row) => `/studio/deliverables/${row.deliverable.id}`}
-            rowKey={(row) => row.deliverable.id}
-            rows={rows}
-            search={{
-              placeholder: "Search post tasks, projects, assignees",
-              getText: (row) =>
-                [
-                  row.deliverable.title,
-                  row.projectName,
-                  row.assignee?.displayName,
-                  row.assignee?.email,
-                  row.campaign?.name,
-                  row.series?.name
-                ]
-                  .filter(Boolean)
-                  .join(" ")
-            }}
-          />
-        )}
+        <DataTable
+          columns={columns}
+          emptyAction={<Link className="button button-ghost" href="/studio/plan">Open plan</Link>}
+          emptyBody="When post tasks are planned, approved, or scheduled, they will show up here."
+          emptyTitle="Queue is clear"
+          filters={[
+            {
+              id: "statusGroup",
+              label: "Status",
+              options: [
+                { label: "To do", value: "todo" },
+                { label: "In progress", value: "in_progress" },
+                { label: "Ready to schedule", value: "ready_to_ship" },
+                { label: "Blocked", value: "blocked" }
+              ],
+              getValue: (row) => row.statusGroup
+            },
+            {
+              id: "planningMode",
+              label: "Mode",
+              options: [
+                { label: "Campaign", value: "campaign" },
+                { label: "Series", value: "series" },
+                { label: "One-off", value: "one_off" },
+                { label: "Always-on", value: "always_on" },
+                { label: "Ad hoc", value: "ad_hoc" }
+              ],
+              getValue: (row) => row.deliverable.planningMode
+            }
+          ]}
+          initialPageSize={12}
+          loading={loading}
+          resultLabel={(showing, total) => `${showing} of ${total} post tasks`}
+          rowHref={(row) => `/studio/deliverables/${row.deliverable.id}`}
+          rowKey={(row) => row.deliverable.id}
+          rows={rows}
+          search={{
+            placeholder: "Search post tasks, projects, assignees",
+            getText: (row) =>
+              [
+                row.deliverable.title,
+                row.projectName,
+                row.assignee?.displayName,
+                row.assignee?.email,
+                row.campaign?.name,
+                row.series?.name
+              ]
+                .filter(Boolean)
+                .join(" ")
+          }}
+        />
       </section>
     </div>
   );

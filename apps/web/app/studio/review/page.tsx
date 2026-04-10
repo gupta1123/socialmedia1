@@ -11,6 +11,7 @@ import { ImagePreviewTrigger } from "../image-preview";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions } from "../topbar-actions-context";
 import { PlacementIcons } from "../placement-icons";
+import { Skeleton } from "../skeleton";
 
 export default function ReviewPage() {
   const searchParams = useSearchParams();
@@ -239,17 +240,6 @@ export default function ReviewPage() {
     );
   }
 
-  if (loading) {
-    return (
-      <div className="page-stack">
-        <article className="panel">
-          <p className="panel-label">Review queue</p>
-          <h3>Loading post options awaiting approval…</h3>
-        </article>
-      </div>
-    );
-  }
-
   if (error) {
     return (
       <div className="page-stack">
@@ -332,6 +322,7 @@ export default function ReviewPage() {
                 getValue: (entry) => entry.deliverable.priority
               }
             ]}
+            loading={loading}
             rowHref={(entry) => `/studio/deliverables/${entry.deliverable.id}`}
             rowKey={(entry) => entry.postVersion.id}
             rows={queue}

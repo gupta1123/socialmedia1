@@ -39,6 +39,7 @@ import { formatDisplayDate, formatDisplayDateRange } from "../../../../lib/forma
 import { ImagePreviewTrigger } from "../../image-preview";
 import { useStudio } from "../../studio-context";
 import { useRegisterTopbarActions, useRegisterTopbarMeta } from "../../topbar-actions-context";
+import { PanelSkeleton } from "../../skeleton";
 
 type CampaignEditorState = {
   name: string;
@@ -237,14 +238,7 @@ export default function CampaignDetailPage() {
   useRegisterTopbarMeta(topbarMeta);
 
   if (loading) {
-    return (
-      <div className="page-stack">
-        <article className="panel">
-          <p className="panel-label">Campaign detail</p>
-          <h3>Loading campaign detail…</h3>
-        </article>
-      </div>
-    );
+    return <PanelSkeleton />;
   }
 
   if (!campaign || !campaignForm || error) {

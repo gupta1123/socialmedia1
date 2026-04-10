@@ -7,6 +7,7 @@ import { getHomeOverview } from "../../lib/api";
 import { formatDisplayDateTime } from "../../lib/formatters";
 import { useStudio } from "./studio-context";
 import { useRegisterTopbarActions } from "./topbar-actions-context";
+import { SkeletonRow } from "./skeleton";
 
 const EMPTY_OVERVIEW: HomeOverview = {
   dueToday: { count: 0, items: [] },
@@ -169,9 +170,10 @@ export default function StudioHomePage() {
             </div>
 
             {loading ? (
-              <div className="empty-state compact">
-                <strong>Loading</strong>
-                <p>Pulling the latest team view.</p>
+              <div className="work-list">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <SkeletonRow key={index} />
+                ))}
               </div>
             ) : section.items.length > 0 ? (
               <div className="work-list">

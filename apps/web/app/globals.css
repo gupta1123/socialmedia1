@@ -1047,18 +1047,22 @@ textarea {
 .studio-shell-skeleton {
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--line);
   border-radius: 14px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--paper-soft) 86%, transparent), color-mix(in srgb, var(--paper-strong) 90%, transparent));
+  background: color-mix(in srgb, var(--paper-strong) 40%, var(--paper-soft));
+  animation: skeleton-pulse 2s ease-in-out infinite;
 }
 
 .studio-shell-skeleton::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.14), transparent);
-  animation: shimmer 1.5s infinite;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--paper-soft) 30%, transparent),
+    transparent
+  );
+  animation: skeleton-shimmer 2s infinite;
 }
 
 .studio-shell-loading-sidebar {
@@ -4716,17 +4720,17 @@ textarea {
       transparent,
       rgba(255, 255, 255, 0.1),
       transparent);
-  animation: shimmer 1.5s infinite;
+  animation: skeleton-shimmer 2s infinite;
 }
 
-@keyframes shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
+@keyframes skeleton-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
 
-  100% {
-    transform: translateX(100%);
-  }
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
 }
 
 .create-processing-pulse {
@@ -7877,10 +7881,10 @@ textarea {
       color-mix(in srgb, var(--paper-strong) 90%, var(--ink)) 50%,
       var(--paper-strong) 75%);
   background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
+  animation: skeleton-bg-shimmer 2s infinite linear;
 }
 
-@keyframes shimmer {
+@keyframes skeleton-bg-shimmer {
   0% {
     background-position: 200% 0;
   }

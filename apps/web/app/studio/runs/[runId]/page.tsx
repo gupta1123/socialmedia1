@@ -10,6 +10,7 @@ import { getPlacementSpec } from "../../../../lib/placement-specs";
 import { ImagePreviewTrigger } from "../../image-preview";
 import { useStudio } from "../../studio-context";
 import { useRegisterTopbarActions } from "../../topbar-actions-context";
+import { PanelSkeleton } from "../../skeleton";
 
 function PromptSection({ label, content }: { label: string; content: string }) {
   const [expanded, setExpanded] = useState(false);
@@ -137,14 +138,7 @@ export default function RunDetailPage() {
   );
 
   if (loading) {
-    return (
-      <div className="page-stack">
-        <article className="panel">
-          <p className="panel-label">Run detail</p>
-          <h3>Loading creative run…</h3>
-        </article>
-      </div>
-    );
+    return <PanelSkeleton />;
   }
 
   if (!detail || error) {

@@ -300,7 +300,6 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
             )}
-            <p className="sidebar-loading">Loading {pageMeta.title.toLowerCase()}…</p>
           </div>
         </main>
       </div>

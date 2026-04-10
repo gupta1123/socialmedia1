@@ -39,6 +39,7 @@ import { useRegisterTopbarActions } from "../topbar-actions-context";
 import { FloatingTooltip } from "../floating-tooltip";
 import { ImagePreviewTrigger } from "../image-preview";
 import { PlacementIcons, PlatformGlyph } from "../placement-icons";
+import { CalendarSkeleton } from "../skeleton";
 
 type DeliverableFormState = {
   title: string;
@@ -505,11 +506,10 @@ export default function CalendarPage() {
 
   if (loading) {
     return (
-      <div className="page-stack">
-        <article className="panel">
-          <p className="panel-label">Calendar</p>
-          <h3>Loading calendar…</h3>
-        </article>
+      <div className="page-stack calendar-page">
+        <section className="calendar-shell">
+          <CalendarSkeleton />
+        </section>
       </div>
     );
   }

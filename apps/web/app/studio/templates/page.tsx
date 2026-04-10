@@ -16,7 +16,9 @@ import { getAllowedFormats, getDefaultFormat, getPlacementSpec } from "../../../
 import { ImagePreviewTrigger } from "../image-preview";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions } from "../topbar-actions-context";
+import { Skeleton } from "../skeleton";
 import { PlacementIcons } from "../placement-icons";
+import { DataTable } from "../data-table";
 
 type TemplateFormState = {
   name: string;
@@ -232,29 +234,6 @@ export default function TemplatesPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="page-stack">
-        <article className="panel">
-          <p className="panel-label">Templates</p>
-          <h3>Loading reusable directions…</h3>
-        </article>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="page-stack">
-        <article className="panel">
-          <p className="panel-label">Templates</p>
-          <h3>Unable to load templates</h3>
-          <p>{error}</p>
-        </article>
-      </div>
-    );
-  }
-
   return (
     <div className="page-stack">
       <section className="page-grid">
@@ -270,27 +249,21 @@ export default function TemplatesPage() {
             </span>
           </div>
 
+          {error ? (
+            <div className="status-banner">
+              <span>{error}</span>
+            </div>
+          ) : null}
+
           <div className="data-table-toolbar">
             <div className="data-table-toolbar-left">
-              <label className="data-table-search">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <circle cx="11" cy="11" r="7" />
-                  <path d="m20 20-3.5-3.5" />
-                </svg>
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search templates, projects, or notes"
-                />
-              </label>
-
               <label className="data-table-filter">
                 <span>Status</span>
                 <select
                   value={statusFilter}
                   onChange={(event) => setStatusFilter(event.target.value as TemplateStatus | "all")}
                 >
-                  <option value="all">All</option>
+                  <option value="all">All status</option>
                   {statusOptions.map((status) => (
                     <option key={status} value={status}>
                       {status}
@@ -305,7 +278,7 @@ export default function TemplatesPage() {
                   value={channelFilter}
                   onChange={(event) => setChannelFilter(event.target.value as CreativeChannel | "all")}
                 >
-                  <option value="all">All</option>
+                  <option value="all">All channels</option>
                   <option value="instagram-feed">Instagram feed</option>
                   <option value="instagram-story">Instagram story</option>
                   <option value="linkedin-feed">LinkedIn</option>
@@ -317,67 +290,71 @@ export default function TemplatesPage() {
             </div>
           </div>
 
-          {filteredTemplates.length > 0 ? (
-            <div className="gallery-grid template-gallery-grid">
-              {filteredTemplates.map((template) => {
-                const projectName = projects.find((project) => project.id === template.projectId)?.name;
-                const postTypeName = postTypes.find((postType) => postType.id === template.postTypeId)?.name;
-                const summary =
-                  template.config.approvedUseCases[0] ??
-                  template.config.notes[0] ??
-                  postTypeName ??
-                  "Reusable starting point";
-
-                return (
-                  <Link className="template-gallery-card" href={`/studio/templates/${template.id}`} key={template.id}>
-                    <div className="creative-preview-frame template-gallery-frame">
-                      {template.previewUrl ? (
-                        <ImagePreviewTrigger alt={template.name} mode="inline" src={template.previewUrl} title={template.name}>
-                          <img alt={template.name} src={template.previewUrl} />
-                        </ImagePreviewTrigger>
-                      ) : (
-                        <div className="thumb-fallback" />
-                      )}
-                    </div>
-
-                    <div className="template-gallery-body">
-                      <div className="review-card-top">
-                        <div className="review-copy">
-                          <strong>{template.name}</strong>
-                          <p>{summary}</p>
-                        </div>
-                        <span className={`planner-status planner-status-${template.status}`}>{template.status}</span>
-                      </div>
-
-                      <div className="planner-tag-row">
-                        {projectName ? <span className="planner-tag">{projectName}</span> : <span className="planner-tag">Any project</span>}
-                        {postTypeName ? <span className="planner-tag">{postTypeName}</span> : null}
-                      </div>
-
-                      <div className="template-gallery-footer">
-                        <PlacementIcons channel={template.channel} format={template.format} interactive={false} />
-                        <span className="review-link">Open template</span>
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="empty-state">
-              <strong>{templates.length > 0 ? "No templates match" : "No templates yet"}</strong>
-              <p>
-                {templates.length > 0
-                  ? "Try clearing a filter or changing the search."
-                  : "Save reusable creative systems instead of starting from scratch."}
-              </p>
-              {templates.length === 0 ? (
-                <button className="button button-primary" onClick={() => setIsDrawerOpen(true)} disabled={!activeBrandId}>
-                  Create first template
-                </button>
-              ) : null}
-            </div>
-          )}
+          <DataTable
+            columns={[
+              {
+                id: "preview",
+                header: "",
+                cell: (template: CreativeTemplateRecord) => (
+                  <div className="work-list-thumb">
+                    {template.previewUrl ? <img alt={template.name} src={template.previewUrl} /> : <div className="thumb-fallback" />}
+                  </div>
+                )
+              },
+              {
+                id: "name",
+                header: "Name",
+                cell: (template: CreativeTemplateRecord) => (
+                  <div className="work-list-main">
+                    <strong>{template.name}</strong>
+                    <span className="work-list-sub">
+                      {template.config.templateFamily || "Reusable starting point"}
+                    </span>
+                  </div>
+                )
+              },
+              {
+                id: "project",
+                header: "Project",
+                cell: (template: CreativeTemplateRecord) => {
+                  const projectName = projects.find((p) => p.id === template.projectId)?.name;
+                  return <span>{projectName || "Any project"}</span>;
+                }
+              },
+              {
+                id: "placement",
+                header: "Placement",
+                cell: (template: CreativeTemplateRecord) => (
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <PlacementIcons channel={template.channel} format={template.format} interactive={false} />
+                    <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                      {template.channel}
+                    </span>
+                  </div>
+                )
+              },
+              {
+                id: "status",
+                header: "Status",
+                cell: (template: CreativeTemplateRecord) => <span className={`pill pill-${template.status}`}>{template.status}</span>
+              }
+            ]}
+            emptyAction={
+              <button className="button button-ghost" onClick={() => setIsDrawerOpen(true)}>
+                Create template
+              </button>
+            }
+            emptyBody="Save your favorite style explorations to reuse them in future runs."
+            emptyTitle="No templates yet"
+            loading={loading}
+            rowHref={(template) => `/studio/templates/${template.id}`}
+            rowKey={(template) => template.id}
+            rows={filteredTemplates}
+            search={{
+              placeholder: "Search templates, projects, or notes",
+              getText: (template) => [template.name, template.config.templateFamily].filter(Boolean).join(" ")
+            }}
+          />
         </article>
       </section>
 

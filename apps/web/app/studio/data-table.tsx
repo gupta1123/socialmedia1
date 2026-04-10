@@ -42,6 +42,7 @@ type DataTableProps<T> = {
   emptyAction?: ReactNode;
   resultLabel?: (showing: number, total: number) => string;
   toolbarPrefix?: ReactNode;
+  loading?: boolean;
 };
 
 const defaultPageSizes = [10, 20, 50];
@@ -60,7 +61,8 @@ export function DataTable<T>({
   emptyBody,
   emptyAction,
   resultLabel,
-  toolbarPrefix
+  toolbarPrefix,
+  loading
 }: DataTableProps<T>) {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState("");
@@ -236,7 +238,39 @@ export function DataTable<T>({
         </div>
       ) : null}
 
-      {total > 0 ? (
+      {loading ? (
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                {columns.map((column) => (
+                  <th
+                    className={`${column.className ?? ""} ${column.align === "end" ? "is-end" : ""}`.trim()}
+                    key={column.id}
+                    scope="col"
+                  >
+                    <span className="data-table-header-label">{column.header}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 5 }).map((_, rowIndex) => (
+                <tr key={rowIndex}>
+                  {columns.map((column) => (
+                    <td
+                      className={`${column.className ?? ""} ${column.align === "end" ? "is-end" : ""}`.trim()}
+                      key={column.id}
+                    >
+                      <div className="studio-shell-skeleton" style={{ height: "1.2rem", width: rowIndex === 0 ? "80%" : rowIndex % 2 === 0 ? "60%" : "40%", borderRadius: "4px" }} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : total > 0 ? (
         <>
           <div className="data-table-wrap">
             <table className="data-table">
