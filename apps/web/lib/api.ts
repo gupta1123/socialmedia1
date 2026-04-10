@@ -60,7 +60,7 @@ import type {
 } from "@image-lab/contracts";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-export type BootstrapMode = "full" | "light";
+export type BootstrapMode = "full" | "light" | "create";
 export type PlanningTemplateOption = {
   id: string;
   workspaceId: string;
@@ -77,7 +77,15 @@ const inflightRequests = new Map<string, Promise<unknown>>();
 
 function getCacheTtlMs(path: string) {
   if (path.startsWith("/api/session/bootstrap")) {
-    return path.includes("view=light") ? 20_000 : 12_000;
+    if (path.includes("view=light")) {
+      return 20_000;
+    }
+
+    if (path.includes("view=create")) {
+      return 12_000;
+    }
+
+    return 12_000;
   }
 
   if (path.startsWith("/api/home")) {
@@ -333,6 +341,8 @@ export function bootstrapSession(token: string, mode: BootstrapMode = "full", br
   const params = new URLSearchParams();
   if (mode === "light") {
     params.set("view", "light");
+  } else if (mode === "create") {
+    params.set("view", "create");
   }
   if (brandId) {
     params.set("brandId", brandId);

@@ -605,6 +605,10 @@ function resolvePageMeta(pathname: string) {
 }
 
 function resolveBootstrapMode(pathname: string) {
+  if (pathname === "/studio/create" || pathname.startsWith("/studio/create/")) {
+    return "create" as const;
+  }
+
   if (
     pathname === "/studio" ||
     pathname === "/studio/plan" ||
