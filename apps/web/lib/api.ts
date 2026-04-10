@@ -76,8 +76,8 @@ const responseCache = new Map<string, { data: unknown; expiresAt: number }>();
 const inflightRequests = new Map<string, Promise<unknown>>();
 
 function getCacheTtlMs(path: string) {
-  if (path.startsWith("/api/session/bootstrap") && path.includes("view=light")) {
-    return 20_000;
+  if (path.startsWith("/api/session/bootstrap")) {
+    return path.includes("view=light") ? 20_000 : 12_000;
   }
 
   if (path.startsWith("/api/home")) {

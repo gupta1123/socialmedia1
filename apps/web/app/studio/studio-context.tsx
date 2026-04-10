@@ -175,6 +175,8 @@ const defaultBriefForm: BriefFormState = {
   selectedReferenceAssetIds: []
 };
 
+const BOOTSTRAP_CACHE_KEY_PREFIX = "studio-bootstrap-cache";
+
 const StudioContext = createContext<StudioContextValue | null>(null);
 
 export function StudioProvider({
@@ -223,13 +225,24 @@ export function StudioProvider({
       }
 
       setBootstrap(payload);
+      writeBootstrapCache(bootstrapMode, payload);
       setActiveBrandIdState((current) => current ?? storedBrandId ?? payload.brands[0]?.id ?? null);
     }
 
     const load = async () => {
+      const cachedBootstrap = readBootstrapCache(bootstrapMode);
+      const storedBrandId = window.localStorage.getItem("activeBrandId");
+
+      if (cachedBootstrap) {
+        setBootstrap(cachedBootstrap);
+        setActiveBrandIdState((current) => current ?? storedBrandId ?? cachedBootstrap.brands[0]?.id ?? null);
+        setLoading(false);
+      }
+
       const { data } = await supabase.auth.getSession();
 
       if (!data.session?.access_token) {
+        clearBootstrapCache();
         router.push("/login");
         return;
       }
@@ -241,6 +254,7 @@ export function StudioProvider({
       data: { subscription }
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT" || !session?.access_token) {
+        clearBootstrapCache();
         setSessionToken(null);
         setBootstrap(null);
         setActiveBrandIdState(null);
@@ -249,7 +263,7 @@ export function StudioProvider({
         return;
       }
 
-      if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN" || event === "INITIAL_SESSION" || event === "USER_UPDATED") {
+      if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN" || event === "USER_UPDATED") {
         void hydrateSession(session.access_token, session.user.email ?? null).catch((error) => {
           setMessage(error instanceof Error ? error.message : "Failed to refresh workspace session");
         });
@@ -423,6 +437,7 @@ export function StudioProvider({
       bootstrapMode === "full" ? scopedBrandId : undefined
     );
     setBootstrap(payload);
+    writeBootstrapCache(bootstrapMode, payload);
     setActiveBrandIdState(preferredBrandId ?? activeBrandId ?? payload.brands[0]?.id ?? null);
   }, [activeBrandId, bootstrapMode, sessionToken]);
 
@@ -687,6 +702,7 @@ export function StudioProvider({
   }
 
   async function signOut() {
+    clearBootstrapCache();
     await supabase.auth.signOut();
     router.push("/login");
   }
@@ -751,4 +767,51 @@ function splitList(value: string) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function readBootstrapCache(mode: BootstrapMode): BootstrapResponse | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(`${BOOTSTRAP_CACHE_KEY_PREFIX}:${mode}`);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as BootstrapResponse;
+    if (!parsed || !parsed.workspace || !Array.isArray(parsed.brands)) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeBootstrapCache(mode: BootstrapMode, payload: BootstrapResponse) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(`${BOOTSTRAP_CACHE_KEY_PREFIX}:${mode}`, JSON.stringify(payload));
+  } catch {
+    // Ignore storage pressure or browser privacy restrictions.
+  }
+}
+
+function clearBootstrapCache() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.removeItem(`${BOOTSTRAP_CACHE_KEY_PREFIX}:full`);
+    window.sessionStorage.removeItem(`${BOOTSTRAP_CACHE_KEY_PREFIX}:light`);
+  } catch {
+    // Ignore storage errors during sign out.
+  }
 }

@@ -175,18 +175,14 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   const [showPopover, setShowPopover] = useState(false);
   const [showTopbarMenu, setShowTopbarMenu] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem("studio-sidebar-collapsed") === "true";
-  });
-  const [createSidebarExpanded, setCreateSidebarExpanded] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem("studio-create-sidebar-expanded") === "true";
-  });
+  const [collapsed, setCollapsed] = useState(false);
+  const [createSidebarExpanded, setCreateSidebarExpanded] = useState(false);
+  const [sidebarPrefsReady, setSidebarPrefsReady] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const topbarMenuRef = useRef<HTMLDivElement>(null);
   const isCreateRoute = pathname === "/studio/create" || pathname.startsWith("/studio/create/");
   const shellCollapsed = isCreateRoute ? !createSidebarExpanded : collapsed;
+  const pageMeta = resolvePageMeta(pathname);
 
   useEffect(() => {
     if (!showPopover && !showTopbarMenu) return;
@@ -210,12 +206,20 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   }, [pathname]);
 
   useEffect(() => {
-    window.localStorage.setItem("studio-sidebar-collapsed", collapsed ? "true" : "false");
-  }, [collapsed]);
+    setCollapsed(window.localStorage.getItem("studio-sidebar-collapsed") === "true");
+    setCreateSidebarExpanded(window.localStorage.getItem("studio-create-sidebar-expanded") === "true");
+    setSidebarPrefsReady(true);
+  }, []);
 
   useEffect(() => {
+    if (!sidebarPrefsReady) return;
+    window.localStorage.setItem("studio-sidebar-collapsed", collapsed ? "true" : "false");
+  }, [collapsed, sidebarPrefsReady]);
+
+  useEffect(() => {
+    if (!sidebarPrefsReady) return;
     window.localStorage.setItem("studio-create-sidebar-expanded", createSidebarExpanded ? "true" : "false");
-  }, [createSidebarExpanded]);
+  }, [createSidebarExpanded, sidebarPrefsReady]);
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -234,16 +238,75 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
 
   if (loading || !bootstrap) {
     return (
-      <div className="workspace-shell">
-        <aside className="workspace-sidebar" />
+      <div className={shellCollapsed ? "workspace-shell sidebar-collapsed" : "workspace-shell"}>
+        <aside className="workspace-sidebar studio-shell-loading-sidebar">
+          <div className="sidebar-brand">
+            {!shellCollapsed ? <div className="studio-shell-skeleton studio-shell-wordmark-skeleton" /> : null}
+          </div>
+          <nav className="sidebar-nav studio-shell-loading-nav" aria-hidden="true">
+            {navigation.map((item) => (
+              <div className="nav-item studio-shell-loading-nav-item" key={item.href}>
+                <span className="nav-icon">{item.icon}</span>
+                {!shellCollapsed ? <span className="studio-shell-skeleton studio-shell-nav-label-skeleton" /> : null}
+              </div>
+            ))}
+          </nav>
+          <div className="sidebar-foot">
+            <div className="sidebar-user-anchor studio-shell-loading-user" aria-hidden="true">
+              <span className="sidebar-avatar">B</span>
+              {!shellCollapsed ? <span className="studio-shell-skeleton studio-shell-user-skeleton" /> : null}
+            </div>
+          </div>
+        </aside>
         <main className="workspace-main">
-          <p className="sidebar-loading">Loading…</p>
+          <header className="workspace-topbar">
+            <div className="topbar-page-meta studio-shell-loading-meta">
+              <div className="studio-shell-skeleton studio-shell-title-skeleton" />
+              <div className="studio-shell-skeleton studio-shell-subtitle-skeleton" />
+            </div>
+          </header>
+          <div className={`workspace-content studio-shell-loading-content ${isCreateRoute ? "is-create" : ""}`}>
+            {isCreateRoute ? (
+              <div className="studio-create-loading-layout" aria-hidden="true">
+                <div className="studio-create-loading-rail">
+                  <div className="studio-shell-skeleton studio-create-loading-section-title" />
+                  <div className="studio-shell-skeleton studio-create-loading-toggle" />
+                  <div className="studio-shell-skeleton studio-create-loading-card tall" />
+                  <div className="studio-shell-skeleton studio-create-loading-section-title short" />
+                  <div className="studio-shell-skeleton studio-create-loading-card" />
+                  <div className="studio-shell-skeleton studio-create-loading-card" />
+                </div>
+                <div className="studio-create-loading-main">
+                  <div className="studio-shell-skeleton studio-create-loading-breadcrumb" />
+                  <div className="studio-shell-skeleton studio-create-loading-heading" />
+                  <div className="studio-shell-skeleton studio-create-loading-hero" />
+                  <div className="studio-create-loading-grid">
+                    {Array.from({ length: 3 }).map((_, index) => (
+                      <div className="studio-shell-skeleton studio-create-loading-candidate" key={index} />
+                    ))}
+                  </div>
+                  <div className="studio-shell-skeleton studio-create-loading-dock" />
+                </div>
+              </div>
+            ) : (
+              <div className="studio-shell-loading-panel" aria-hidden="true">
+                <div className="studio-shell-loading-row">
+                  <div className="studio-shell-skeleton studio-shell-panel-card" />
+                  <div className="studio-shell-skeleton studio-shell-panel-card" />
+                  <div className="studio-shell-skeleton studio-shell-panel-card" />
+                </div>
+                <div className="studio-shell-loading-row">
+                  <div className="studio-shell-skeleton studio-shell-panel-wide" />
+                </div>
+              </div>
+            )}
+            <p className="sidebar-loading">Loading {pageMeta.title.toLowerCase()}…</p>
+          </div>
         </main>
       </div>
     );
   }
 
-  const pageMeta = resolvePageMeta(pathname);
   const topbarTitle = topbarMeta?.title ?? pageMeta.title;
   const topbarSubtitle = topbarMeta?.subtitle ?? pageMeta.subtitle;
 
