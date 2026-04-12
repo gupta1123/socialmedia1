@@ -30,11 +30,16 @@ export function applyLocalTimeToDate(date: Date, localTime: string) {
   return next;
 }
 
+type PostingWindowSuggestionOptions = {
+  sameDayOnly?: boolean;
+};
+
 export function buildPostingWindowSuggestions(
   postingWindows: PostingWindowRecord[],
   channel: CreativeChannel,
   anchorDate: Date,
-  limit = 4
+  limit = 4,
+  options: PostingWindowSuggestionOptions = { sameDayOnly: true }
 ) {
   const activeWindows = postingWindows
     .filter((postingWindow) => postingWindow.active && postingWindow.channel === channel)
@@ -63,17 +68,19 @@ export function buildPostingWindowSuggestions(
   const start = new Date(anchorDate);
   start.setHours(0, 0, 0, 0);
 
-  for (let offset = 0; offset < 21 && suggestions.length < limit; offset += 1) {
+  const maxOffset = options.sameDayOnly === false ? 20 : 0;
+
+  for (let offset = 0; offset <= maxOffset && suggestions.length < limit; offset += 1) {
     const day = new Date(start);
     day.setDate(start.getDate() + offset);
     const weekday = weekdayByIndex[day.getDay()];
 
     for (const postingWindow of uniqueWindows) {
       if (postingWindow.weekday !== weekday) continue;
-      const dateTime = applyLocalTimeToDate(day, postingWindow.localTime);
+      const dateTime = applyPostingWindowTimeToDate(day, postingWindow.localTime, postingWindow.timezone);
       suggestions.push({
         key: `${postingWindow.channel}-${dateTime.toISOString()}`,
-        label: formatSuggestionLabel(day, postingWindow.localTime, anchorDate),
+        label: formatSuggestionLabel(day, postingWindow.localTime, anchorDate, postingWindow.timezone),
         dateTime,
         postingWindow
       });
@@ -84,11 +91,74 @@ export function buildPostingWindowSuggestions(
   return suggestions;
 }
 
-function formatSuggestionLabel(date: Date, localTime: string, anchorDate: Date) {
+function applyPostingWindowTimeToDate(date: Date, localTime: string, timezone: string | null | undefined) {
+  if (!timezone) {
+    return applyLocalTimeToDate(date, localTime);
+  }
+
+  const [hours = "00", minutes = "00"] = localTime.split(":");
+  try {
+    return zonedDateTimeToDate(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+      Number(hours),
+      Number(minutes),
+      timezone
+    );
+  } catch {
+    return applyLocalTimeToDate(date, localTime);
+  }
+}
+
+function zonedDateTimeToDate(
+  year: number,
+  monthIndex: number,
+  day: number,
+  hours: number,
+  minutes: number,
+  timezone: string
+) {
+  const targetUtc = Date.UTC(year, monthIndex, day, hours, minutes, 0, 0);
+  let guess = new Date(targetUtc);
+
+  for (let index = 0; index < 2; index += 1) {
+    const parts = getDatePartsInTimeZone(guess, timezone);
+    const representedUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, 0, 0);
+    guess = new Date(guess.getTime() + targetUtc - representedUtc);
+  }
+
+  return guess;
+}
+
+function getDatePartsInTimeZone(date: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+  const byType = new Map(parts.map((part) => [part.type, part.value]));
+  const rawHour = Number(byType.get("hour") ?? "0");
+
+  return {
+    year: Number(byType.get("year") ?? "1970"),
+    month: Number(byType.get("month") ?? "1"),
+    day: Number(byType.get("day") ?? "1"),
+    hour: rawHour === 24 ? 0 : rawHour,
+    minute: Number(byType.get("minute") ?? "0")
+  };
+}
+
+function formatSuggestionLabel(date: Date, localTime: string, anchorDate: Date, timezone: string | null | undefined) {
   const dayLabel = isSameDay(date, anchorDate)
     ? "Today"
     : date.toLocaleDateString([], { weekday: "short" });
-  return `${dayLabel} · ${formatLocalTimeLabel(localTime)}`;
+  const timezoneLabel = formatTimezoneLabel(timezone);
+  return `${dayLabel} · ${formatLocalTimeLabel(localTime)}${timezoneLabel ? ` ${timezoneLabel}` : ""}`;
 }
 
 function isSameDay(left: Date, right: Date) {
@@ -101,4 +171,21 @@ function isSameDay(left: Date, right: Date) {
 
 function normalizeLocalTime(localTime: string) {
   return localTime.slice(0, 5);
+}
+
+function formatTimezoneLabel(timezone: string | null | undefined) {
+  if (!timezone) {
+    return "";
+  }
+
+  try {
+    const formatter = new Intl.DateTimeFormat([], {
+      timeZone: timezone,
+      timeZoneName: "short"
+    });
+    const zoneName = formatter.formatToParts(new Date()).find((part) => part.type === "timeZoneName")?.value;
+    return zoneName ?? timezone;
+  } catch {
+    return timezone;
+  }
 }

@@ -2,6 +2,20 @@ import { z } from "zod";
 
 export const WorkspaceRoleSchema = z.enum(["owner", "admin", "editor", "viewer"]);
 export const AssetKindSchema = z.enum(["reference", "logo", "product", "inspiration", "rera_qr"]);
+export const AssetSubjectTypeSchema = z.enum([
+  "project_exterior",
+  "construction_progress",
+  "amenity",
+  "interior",
+  "sample_flat",
+  "lifestyle",
+  "logo",
+  "rera_qr",
+  "generic_reference"
+]);
+export const AssetViewTypeSchema = z.enum(["aerial", "wide", "facade", "close_up", "street", "site", "interior"]);
+export const AssetUsageIntentSchema = z.enum(["truth_anchor", "supporting_ref", "inspiration_only", "exact_asset"]);
+export const AssetQualityTierSchema = z.enum(["hero", "usable", "weak"]);
 export const ProjectStageSchema = z.enum(["pre_launch", "launch", "under_construction", "near_possession", "delivered"]);
 export const ProjectStatusSchema = z.enum(["active", "archived"]);
 export const FestivalCategorySchema = z.enum(["national", "religious", "cultural", "seasonal", "observance"]);
@@ -79,6 +93,18 @@ export const OutputVerdictSchema = z.enum(["approved", "close", "off-brand", "wr
 export const OutputReviewStateSchema = z.enum(["pending_review", "approved", "needs_revision", "closed"]);
 export const CreateModeSchema = z.enum(["post", "series_episode", "campaign_asset", "adaptation"]);
 const JsonRecordSchema = z.record(z.string(), z.unknown());
+
+export const NormalizedAssetMetadataSchema = z.object({
+  subjectType: AssetSubjectTypeSchema.optional(),
+  viewType: AssetViewTypeSchema.optional(),
+  amenityName: z.string().optional(),
+  projectStageHint: ProjectStageSchema.optional(),
+  usageIntent: AssetUsageIntentSchema.optional(),
+  preserveIdentity: z.boolean().optional(),
+  textSafeHints: z.array(z.string()).default([]),
+  qualityTier: AssetQualityTierSchema.optional(),
+  tags: z.array(z.string()).default([])
+});
 
 const BrandIdentitySchema = z.object({
   positioning: z.string().default(""),
@@ -544,6 +570,7 @@ export const CreateDeliverableSchema = z.object({
   scheduledFor: z.string(),
   dueAt: z.string().optional(),
   ownerUserId: z.string().uuid().optional(),
+  reviewerUserId: z.string().uuid().nullable().optional(),
   priority: DeliverablePrioritySchema.default("normal"),
   status: DeliverableStatusSchema.default("planned"),
   seriesOccurrenceDate: z.string().optional(),
@@ -569,6 +596,7 @@ export const UpdateDeliverableSchema = z.object({
   scheduledFor: z.string(),
   dueAt: z.string().optional(),
   ownerUserId: z.string().uuid().optional(),
+  reviewerUserId: z.string().uuid().nullable().optional(),
   priority: DeliverablePrioritySchema,
   status: DeliverableStatusSchema,
   approvedPostVersionId: z.string().uuid().optional(),
@@ -587,6 +615,8 @@ export const CreatePostVersionSchema = z.object({
   notesJson: JsonRecordSchema.default({}),
   createdFromTemplateId: z.string().uuid().optional()
 });
+
+export const ExternalPostReviewModeSchema = z.enum(["review", "approved", "scheduled"]);
 
 export const ApprovalDecisionSchema = z.object({
   action: ApprovalActionSchema,
@@ -646,6 +676,18 @@ export const CreativeBriefSchema = z.object({
   templateType: TemplateTypeSchema.optional()
 });
 
+export const PromptVariationSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  strategy: z.string(),
+  seedPrompt: z.string(),
+  finalPrompt: z.string(),
+  referenceStrategy: z.enum(["generated-template", "uploaded-references", "hybrid"]).optional(),
+  differenceFromOthers: z.string().optional(),
+  resolvedConstraints: z.record(z.string(), z.unknown()).default({}),
+  compilerTrace: z.record(z.string(), z.unknown()).default({})
+});
+
 export const PromptPackageSchema = z.object({
   id: z.string().uuid(),
   workspaceId: z.string().uuid(),
@@ -665,6 +707,7 @@ export const PromptPackageSchema = z.object({
   templateType: TemplateTypeSchema.optional(),
   referenceStrategy: z.enum(["generated-template", "uploaded-references", "hybrid"]),
   referenceAssetIds: z.array(z.string().uuid()),
+  variations: z.array(PromptVariationSchema).default([]),
   resolvedConstraints: z.record(z.string(), z.unknown()),
   compilerTrace: z.record(z.string(), z.unknown()).default({})
 });
@@ -825,7 +868,178 @@ export const BrandAssetSchema = z.object({
   fileName: z.string(),
   mimeType: z.string(),
   storagePath: z.string(),
+  metadataJson: JsonRecordSchema.default({}),
   previewUrl: z.string().url().optional()
+});
+
+export const CandidateAssetEligibilitySchema = z.object({
+  isProjectScoped: z.boolean().default(false),
+  isTemplateLinked: z.boolean().default(false),
+  isSelectedReference: z.boolean().default(false),
+  isBrandDefaultReference: z.boolean().default(false),
+  isExactLogo: z.boolean().default(false),
+  isExactReraQr: z.boolean().default(false),
+  isProjectTruthAnchor: z.boolean().default(false)
+});
+
+export const CandidateAssetSchema = z.object({
+  id: z.string().uuid(),
+  brandId: z.string().uuid(),
+  projectId: z.string().uuid().nullable().default(null),
+  kind: AssetKindSchema,
+  label: z.string(),
+  fileName: z.string(),
+  storagePath: z.string(),
+  metadataJson: JsonRecordSchema.default({}),
+  normalizedMetadata: NormalizedAssetMetadataSchema.default({
+    textSafeHints: [],
+    tags: []
+  }),
+  templateRoles: z.array(TemplateAssetRoleSchema).default([]),
+  eligibility: CandidateAssetEligibilitySchema.default({
+    isProjectScoped: false,
+    isTemplateLinked: false,
+    isSelectedReference: false,
+    isBrandDefaultReference: false,
+    isExactLogo: false,
+    isExactReraQr: false,
+    isProjectTruthAnchor: false
+  })
+});
+
+export const CreativeRequestContextSchema = z.object({
+  createMode: CreateModeSchema,
+  channel: CreativeChannelSchema,
+  format: CreativeFormatSchema,
+  goal: z.string(),
+  prompt: z.string(),
+  audience: z.string().optional(),
+  offer: z.string().optional(),
+  exactText: z.string().optional(),
+  templateType: TemplateTypeSchema.optional(),
+  variationCount: z.number().int().min(1).max(6),
+  includeBrandLogo: z.boolean(),
+  includeReraQr: z.boolean()
+});
+
+export const BrandTruthSchema = z.object({
+  name: z.string(),
+  identity: BrandIdentitySchema.default({
+    positioning: "",
+    promise: "",
+    audienceSummary: ""
+  }),
+  palette: BrandProfileSchema.shape.palette,
+  styleDescriptors: z.array(z.string()).default([]),
+  visualSystem: BrandVisualSystemSchema.default({
+    typographyMood: "",
+    compositionPrinciples: [],
+    imageTreatment: [],
+    textDensity: "balanced",
+    realismLevel: "elevated_real"
+  }),
+  voice: BrandVoiceSchema,
+  doRules: z.array(z.string()).default([]),
+  dontRules: z.array(z.string()).default([]),
+  bannedPatterns: z.array(z.string()).default([]),
+  compliance: BrandComplianceSchema.default({
+    bannedClaims: [],
+    reviewChecks: []
+  }),
+  referenceCanon: BrandReferenceCanonSchema.default({
+    antiReferenceNotes: [],
+    usageNotes: []
+  })
+});
+
+export const ProjectTruthSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  stage: ProjectStageSchema,
+  tagline: z.string().default(""),
+  positioning: z.string().default(""),
+  lifestyleAngle: z.string().default(""),
+  audienceSegments: z.array(z.string()).default([]),
+  heroAmenities: z.array(z.string()).default([]),
+  amenities: z.array(z.string()).default([]),
+  locationAdvantages: z.array(z.string()).default([]),
+  nearbyLandmarks: z.array(z.string()).default([]),
+  constructionStatus: z.string().default(""),
+  latestUpdate: z.string().default(""),
+  approvedClaims: z.array(z.string()).default([]),
+  bannedClaims: z.array(z.string()).default([]),
+  legalNotes: z.array(z.string()).default([]),
+  credibilityFacts: z.array(z.string()).default([]),
+  reraNumber: z.string().default(""),
+  actualProjectImageIds: z.array(z.string().uuid()).default([]),
+  sampleFlatImageIds: z.array(z.string().uuid()).default([])
+});
+
+export const PostTypeContractSchema = z.object({
+  id: z.string().uuid(),
+  code: z.string(),
+  name: z.string(),
+  config: PostTypeConfigSchema,
+  playbookKey: z.string(),
+  requiredFields: z.array(z.string()).default([]),
+  safeZoneGuidance: z.array(z.string()).default([])
+});
+
+export const FestivalTruthSchema = z.object({
+  id: z.string().uuid(),
+  code: z.string(),
+  name: z.string(),
+  category: FestivalCategorySchema,
+  community: z.string().nullable().default(null),
+  regions: z.array(z.string()).default([]),
+  meaning: z.string(),
+  dateLabel: z.string().nullable().default(null),
+  nextOccursOn: z.string().nullable().default(null)
+});
+
+export const TemplateTruthSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  channel: CreativeChannelSchema,
+  format: CreativeFormatSchema,
+  basePrompt: z.string(),
+  promptScaffold: z.string().optional(),
+  roles: z.array(z.string()).default([]),
+  linkedAssets: z.array(
+    z.object({
+      assetId: z.string().uuid(),
+      role: TemplateAssetRoleSchema
+    })
+  ).default([])
+});
+
+export const ExactAssetContractSchema = z.object({
+  logoAssetId: z.string().uuid().nullable().default(null),
+  reraQrAssetId: z.string().uuid().nullable().default(null),
+  requiredProjectAnchorAssetId: z.string().uuid().nullable().default(null),
+  mustUseExactLogo: z.boolean().default(false),
+  mustUseExactReraQr: z.boolean().default(false),
+  preserveProjectIdentity: z.boolean().default(false)
+});
+
+export const GenerationContractSchema = z.object({
+  aspectRatio: z.string(),
+  chosenModel: z.string(),
+  variationCount: z.number().int().min(1).max(6),
+  maxSupportingRefs: z.number().int().min(0).default(2),
+  hardGuardrails: z.array(z.string()).default([])
+});
+
+export const CreativeTruthBundleSchema = z.object({
+  requestContext: CreativeRequestContextSchema,
+  brandTruth: BrandTruthSchema,
+  projectTruth: ProjectTruthSchema.nullable().default(null),
+  postTypeContract: PostTypeContractSchema,
+  festivalTruth: FestivalTruthSchema.nullable().default(null),
+  templateTruth: TemplateTruthSchema.nullable().default(null),
+  candidateAssets: z.array(CandidateAssetSchema).default([]),
+  exactAssetContract: ExactAssetContractSchema,
+  generationContract: GenerationContractSchema
 });
 
 export const StyleTemplateSchema = z.object({
@@ -955,6 +1169,7 @@ export const DeliverableSchema = z.object({
   scheduledFor: z.string(),
   dueAt: z.string().nullable(),
   ownerUserId: z.string().uuid().nullable(),
+  reviewerUserId: z.string().uuid().nullable().default(null),
   priority: DeliverablePrioritySchema,
   status: DeliverableStatusSchema,
   approvedPostVersionId: z.string().uuid().nullable(),
@@ -1043,6 +1258,12 @@ export const CreativeOutputSchema = z.object({
   latestVerdict: OutputVerdictSchema.nullable().default(null),
   reviewedAt: z.string().nullable().default(null),
   previewUrl: z.string().url().optional()
+});
+
+export const ExternalPostUploadResponseSchema = z.object({
+  deliverable: DeliverableSchema,
+  postVersion: PostVersionSchema,
+  output: CreativeOutputSchema
 });
 
 export const CreativeJobSchema = z.object({
@@ -1271,6 +1492,17 @@ export type ChannelAccountRecord = z.infer<typeof ChannelAccountSchema>;
 export type PostingWindowRecord = z.infer<typeof PostingWindowSchema>;
 export type PostTypeRecord = z.infer<typeof PostTypeSchema>;
 export type BrandAssetRecord = z.infer<typeof BrandAssetSchema>;
+export type NormalizedAssetMetadata = z.infer<typeof NormalizedAssetMetadataSchema>;
+export type CandidateAsset = z.infer<typeof CandidateAssetSchema>;
+export type CreativeRequestContext = z.infer<typeof CreativeRequestContextSchema>;
+export type BrandTruth = z.infer<typeof BrandTruthSchema>;
+export type ProjectTruth = z.infer<typeof ProjectTruthSchema>;
+export type PostTypeContract = z.infer<typeof PostTypeContractSchema>;
+export type FestivalTruth = z.infer<typeof FestivalTruthSchema>;
+export type TemplateTruth = z.infer<typeof TemplateTruthSchema>;
+export type ExactAssetContract = z.infer<typeof ExactAssetContractSchema>;
+export type GenerationContract = z.infer<typeof GenerationContractSchema>;
+export type CreativeTruthBundle = z.infer<typeof CreativeTruthBundleSchema>;
 export type StyleTemplateRecord = z.infer<typeof StyleTemplateSchema>;
 export type CreativeTemplateRecord = z.infer<typeof CreativeTemplateSchema>;
 export type CreativeTemplateAssetRecord = z.infer<typeof CreativeTemplateAssetSchema>;
@@ -1285,6 +1517,8 @@ export type ApprovalEventRecord = z.infer<typeof ApprovalEventSchema>;
 export type PublicationRecord = z.infer<typeof PublicationSchema>;
 export type DeliverableDetail = z.infer<typeof DeliverableDetailSchema>;
 export type CreativeOutputRecord = z.infer<typeof CreativeOutputSchema>;
+export type ExternalPostReviewMode = z.infer<typeof ExternalPostReviewModeSchema>;
+export type ExternalPostUploadResponse = z.infer<typeof ExternalPostUploadResponseSchema>;
 export type CreativeJobRecord = z.infer<typeof CreativeJobSchema>;
 export type CalendarItemRecord = z.infer<typeof CalendarItemSchema>;
 export type CreativeRunSummary = z.infer<typeof CreativeRunSummarySchema>;

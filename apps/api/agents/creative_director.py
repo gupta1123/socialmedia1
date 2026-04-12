@@ -85,7 +85,7 @@ Do not paste tool JSON into the answer. Synthesize the skill guidance into the p
 
 
 def build_agent() -> Agent:
-    skills_dir = Path(__file__).resolve().parents[3] / "skills" / "prompt"
+    skills_dir = Path(os.getenv("AGNO_AGENT_SKILLS_DIR", Path(__file__).resolve().parents[3] / "skills" / "prompt" / "v1"))
     base_url = os.getenv("OPENAI_BASE_URL")
     skill_first_mode = os.getenv("AGNO_SKILL_FIRST_MODE", "0") == "1"
     model_kwargs: dict[str, Any] = {

@@ -196,6 +196,7 @@ export async function registerBrandRoutes(app: FastifyInstance) {
       | null = null;
     let labelValue: string | null = null;
     let kindValue: string | null = null;
+    let metadataJsonValue: Record<string, unknown> = {};
 
     for await (const part of request.parts()) {
       if (part.type === "file") {
@@ -217,6 +218,18 @@ export async function registerBrandRoutes(app: FastifyInstance) {
 
       if (part.fieldname === "label") {
         labelValue = typeof part.value === "string" ? part.value : String(part.value ?? "");
+      }
+
+      if (part.fieldname === "metadataJson") {
+        const raw = typeof part.value === "string" ? part.value : String(part.value ?? "");
+        if (raw.trim()) {
+          try {
+            const parsed = JSON.parse(raw);
+            metadataJsonValue = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+          } catch {
+            return reply.badRequest("metadataJson must be valid JSON");
+          }
+        }
       }
     }
 
@@ -256,6 +269,7 @@ export async function registerBrandRoutes(app: FastifyInstance) {
       file_name: filePart.filename,
       mime_type: filePart.mimetype,
       storage_path: storagePath,
+      metadata_json: metadataJsonValue,
       created_by: viewer.userId
     });
 

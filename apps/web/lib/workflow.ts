@@ -30,6 +30,10 @@ export function isEligibleCalendarCandidate(status: DeliverableStatus) {
   return status === "approved";
 }
 
+export function isMovableCalendarStatus(status: DeliverableStatus) {
+  return status !== "published" && status !== "archived";
+}
+
 export function canGenerateCandidates(selectedReferenceCount: number, hasReusableTemplate: boolean) {
   return selectedReferenceCount > 0 || hasReusableTemplate;
 }

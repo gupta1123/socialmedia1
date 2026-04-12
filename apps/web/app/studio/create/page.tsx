@@ -86,6 +86,8 @@ type SeriesCreateFormState = {
 };
 
 const defaultGoalText = "Drive enquiries for a premium residential project";
+const legacyDefaultOfferText = "Site visits now open";
+const legacyDefaultExactText = "Luxury residences. Site visits now open.";
 const legacyDefaultPromptText =
   "Design an elegant Instagram launch graphic for a premium residential development. Showcase architectural form, refined materials, warm natural light, and an aspirational lifestyle without looking like a generic stock ad.";
 const defaultPromptText = "Create a premium real-estate post with a clear visual angle and restrained copy.";
@@ -100,6 +102,24 @@ const POST_TYPE_BRIEF_STARTERS: Record<string, string> = {
   "amenity-spotlight": "Spotlight one amenity with an aspirational lifestyle angle and a calm premium tone.",
   "construction-update": "Show visible progress and build trust through a premium construction update.",
   "festive-greeting": "Create a premium festive greeting that feels respectful, elegant, and brand-safe."
+};
+const POST_TYPE_GOAL_DEFAULTS: Record<string, string> = {
+  "project-launch": "Drive enquiries for the project launch",
+  "site-visit-invite": "Encourage qualified site visit enquiries",
+  "amenity-spotlight": "Build interest in a key project amenity",
+  "construction-update": "Build trust with a visible construction progress update",
+  "festive-greeting": "Festive greeting",
+  "location-advantage": "Communicate location and connectivity advantage",
+  testimonial: "Build trust through buyer or resident proof"
+};
+const POST_TYPE_COPY_DEFAULTS: Record<string, { offer: string; exactText: string }> = {
+  "project-launch": { offer: "Register interest", exactText: "Now launched" },
+  "site-visit-invite": { offer: "Book a site visit", exactText: "Site visits open" },
+  "amenity-spotlight": { offer: "", exactText: "Amenity Spotlight" },
+  "construction-update": { offer: "", exactText: "Construction Update" },
+  "festive-greeting": { offer: "", exactText: "Warm wishes" },
+  "location-advantage": { offer: "", exactText: "Connected living" },
+  testimonial: { offer: "", exactText: "Real homeowner stories" }
 };
 const POST_TASK_STATUS_FILTER_OPTIONS: Array<{
   id: PostTaskPickerStatusFilter;
@@ -234,7 +254,11 @@ export default function CreatePage() {
     promptPackage,
     isPending,
     hasRunningJobs,
+    creativeFlowVersion,
+    styleVariationCount,
+    styleVariationLimit,
     setBriefForm,
+    setStyleVariationCount,
     resetCreateFlow,
     compilePromptPackage,
     generateSeedsForPackage,
@@ -242,6 +266,7 @@ export default function CreatePage() {
     refresh,
     setMessage
   } = useStudio();
+  const isOneStageV2 = creativeFlowVersion === "v2";
 
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [postTypes, setPostTypes] = useState<PostTypeRecord[]>([]);
@@ -611,9 +636,14 @@ export default function CreatePage() {
   );
   const filteredPostTypes = useMemo(
     () =>
-      postTypes.filter((postType) =>
-        normalizedPickerQuery ? postType.name.toLowerCase().includes(normalizedPickerQuery) : true
-      ),
+      postTypes.filter((postType) => {
+        if (!normalizedPickerQuery) {
+          return true;
+        }
+
+        const haystack = [postType.name, postType.code, postType.description ?? ""].join(" ").toLowerCase();
+        return haystack.includes(normalizedPickerQuery);
+      }),
     [normalizedPickerQuery, postTypes]
   );
   const filteredFestivals = useMemo(
@@ -816,7 +846,9 @@ export default function CreatePage() {
         exactText: briefForm.exactText ?? "",
         includeBrandLogo: briefForm.includeBrandLogo,
         includeReraQr: briefForm.includeReraQr,
-        referenceAssetIds: briefForm.selectedReferenceAssetIds
+        referenceAssetIds: briefForm.selectedReferenceAssetIds,
+        creativeFlowVersion,
+        styleVariationCount
       }),
     [
       activeBrandId,
@@ -842,14 +874,18 @@ export default function CreatePage() {
       briefForm.seriesId,
       briefForm.slideCount,
       briefForm.sourceOutputId,
-      briefForm.templateType
+      briefForm.templateType,
+      creativeFlowVersion,
+      styleVariationCount
     ]
   );
 
   const isCompiledStale = Boolean(
     promptPackage && compiledFingerprint && compiledFingerprint !== briefFingerprint
   );
-  const currentRunId = !isCompiledStale ? promptPackage?.id ?? null : null;
+  const isPreviewPromptPackage =
+    promptPackage?.compilerTrace?.preview === true && promptPackage.compilerTrace?.persisted === false;
+  const currentRunId = !isPreviewPromptPackage ? promptPackage?.id ?? null : null;
   const runHasRunningJobs = useMemo(
     () => runDetail?.jobs.some((j) => j.status === "queued" || j.status === "processing") ?? false,
     [runDetail]
@@ -1036,15 +1072,22 @@ export default function CreatePage() {
   const hasActiveSeedJob = Boolean(latestActiveSeedJob);
   const hasActiveFinalJob = Boolean(latestActiveFinalJob);
   const activeFinalTemplateId = latestActiveFinalJob?.selectedTemplateId ?? null;
-  const directionTargetCount = latestActiveSeedJob?.requestedCount ?? 3;
-  const optionTargetCount = latestActiveFinalJob?.requestedCount ?? 2;
+  const directionTargetCount =
+    promptPackage?.variations.length
+      ? promptPackage.variations.length
+      : hasActiveSeedJob
+        ? styleVariationCount
+        : latestActiveSeedJob?.requestedCount ?? 3;
+  const optionTargetCount = isOneStageV2
+    ? promptPackage?.variations.length || runDetail?.promptPackage.variations.length || styleVariationCount
+    : latestActiveFinalJob?.requestedCount ?? 2;
   const remainingDirectionSlots = latestActiveSeedJob
     ? Math.max(directionTargetCount - currentSeedTemplates.length, 0)
     : 0;
   const remainingOptionSlots = latestActiveFinalJob
     ? Math.max(optionTargetCount - currentFinalOutputs.length, 0)
     : 0;
-  const generationLocked = isPending || hasActiveSeedJob || hasActiveFinalJob;
+  const generationLocked = isPending || hasActiveSeedJob || hasActiveFinalJob || pendingCanvasAction === "explore";
 
   const seedTemplateLabelById = useMemo(
     () => new Map(currentSeedTemplates.map((t) => [t.id, t.label])),
@@ -1069,14 +1112,20 @@ export default function CreatePage() {
   const canCreateOptionsFromSourceOutput = Boolean(briefForm.sourceOutputId);
   const canCreateOptionsFromTemplateFamily = Boolean(selectedReusableTemplate);
   const hasFreshSelectedStyle = Boolean(latestSelectedStyleId) && !isCompiledStale;
+  const hasVisibleSelectedStyle = Boolean(latestSelectedStyleId);
   const hasFestivalSelection = !isFestiveGreeting || Boolean(selectedFestival);
   const canCreateOptionsDirectly =
+    isOneStageV2 ||
     canCreateOptionsFromReferences ||
     canCreateOptionsFromSourceOutput ||
     canCreateOptionsFromTemplateFamily ||
     hasFreshSelectedStyle;
   const canUseDeliverableInheritance = isPostMode && Boolean(selectedDeliverable);
-  const styleSourceReady = canUseDeliverableInheritance ? hasFreshSelectedStyle : canCreateOptionsDirectly;
+  const styleSourceReady = isOneStageV2
+    ? true
+    : canUseDeliverableInheritance
+      ? hasFreshSelectedStyle
+      : canCreateOptionsDirectly;
   const requiresExplicitPostType =
     !canUseDeliverableInheritance && (isSeriesEpisodeMode || isCampaignAssetMode || isAdaptationMode);
   const hasRequiredPostType = Boolean(selectedPostType);
@@ -1100,8 +1149,10 @@ export default function CreatePage() {
     () => getTemplateSlideOptions(selectedReusableTemplate),
     [selectedReusableTemplate]
   );
-  const currentReviewHref = currentPostTaskId
-    ? `/studio/review?deliverableId=${currentPostTaskId}`
+  const activeReviewDeliverableId =
+    currentPostTaskId ?? runDetail?.run.deliverableId ?? currentFinalOutputs[0]?.deliverableId ?? null;
+  const currentReviewHref = activeReviewDeliverableId
+    ? `/studio/review?deliverableId=${activeReviewDeliverableId}`
     : "/studio/review";
 
   const promptLength = briefForm.prompt.trim().length;
@@ -1111,10 +1162,16 @@ export default function CreatePage() {
 
   // Derive current generate phase for the stepper
   const generatePhase: GeneratePhase = useMemo(() => {
+    if (isOneStageV2) {
+      if (hasActiveFinalJob || pendingAction === "generate-seeds") return "creating";
+      if (currentFinalOutputs.length > 0) return "done";
+      return "idle";
+    }
+
     if (hasActiveFinalJob || pendingAction === "generate-finals") return "creating";
     if (hasActiveSeedJob || pendingAction === "generate-seeds") return "exploring";
-    if (currentFinalOutputs.length > 0 && !isCompiledStale) return "done";
-    if (currentSeedTemplates.length > 0 && !isCompiledStale && currentFinalOutputs.length === 0)
+    if (currentFinalOutputs.length > 0) return "done";
+    if (currentSeedTemplates.length > 0 && currentFinalOutputs.length === 0)
       return "picking";
     return "idle";
   }, [
@@ -1122,12 +1179,12 @@ export default function CreatePage() {
     currentSeedTemplates.length,
     hasActiveFinalJob,
     hasActiveSeedJob,
-    isCompiledStale,
+    isOneStageV2,
     pendingAction
   ]);
   const isExploringDirections =
+    !isOneStageV2 &&
     !isAdaptationMode &&
-    !isCompiledStale &&
     currentFinalOutputs.length === 0 &&
     (pendingCanvasAction === "explore" ||
       pendingAction === "generate-seeds" ||
@@ -1144,6 +1201,10 @@ export default function CreatePage() {
       : pendingAction === "generate-seeds"
         ? "Submitting three direction previews so you can compare the visual language before creating final options."
         : "We’re rendering three direction previews now. They’ll appear here automatically as soon as they’re ready.";
+  const isGeneratingV2Options =
+    isOneStageV2 &&
+    currentFinalOutputs.length === 0 &&
+    (pendingCanvasAction === "explore" || pendingAction === "generate-seeds" || hasActiveFinalJob);
 
   useEffect(() => {
     if (pendingCanvasAction !== "explore") return;
@@ -1151,12 +1212,13 @@ export default function CreatePage() {
       setPendingCanvasAction(null);
       return;
     }
-    if (!isPending && !hasActiveSeedJob && !runHasRunningJobs) {
+    if (!isPending && !hasActiveSeedJob && !hasActiveFinalJob && !runHasRunningJobs) {
       setPendingCanvasAction(null);
     }
   }, [
     currentFinalOutputs.length,
     currentSeedTemplates.length,
+    hasActiveFinalJob,
     hasActiveSeedJob,
     isPending,
     pendingCanvasAction,
@@ -1218,11 +1280,13 @@ export default function CreatePage() {
       : []),
     {
       id: "style-source",
-      label: canUseDeliverableInheritance
+      label: isOneStageV2
+        ? "Variations will generate final post options"
+        : canUseDeliverableInheritance
         ? hasFreshSelectedStyle
           ? `Direction: ${latestStyleLabel ?? "selected"}`
-          : Boolean(latestSelectedStyleId) && isCompiledStale
-            ? "Explore styles again for this task"
+          : hasVisibleSelectedStyle
+            ? "Explore styles again to update this task"
             : "Explore styles to create options from this task"
         : canCreateOptionsFromSourceOutput
           ? "Source post selected"
@@ -1232,8 +1296,8 @@ export default function CreatePage() {
               ? `Template family: ${getTemplateFamilyLabel(selectedReusableTemplate)}`
               : hasFreshSelectedStyle
                 ? `Style anchor: ${latestStyleLabel ?? "selected"}`
-                : Boolean(latestSelectedStyleId) && isCompiledStale
-                  ? "Explore styles again for this brief"
+                : hasVisibleSelectedStyle
+                  ? "Explore styles again to update this brief"
                   : isAdaptationMode
                     ? "Pick a source post"
                     : isFestiveGreeting
@@ -1255,8 +1319,9 @@ export default function CreatePage() {
     isAdaptationMode,
     isCampaignAssetMode,
     isSeriesEpisodeMode,
-    isCompiledStale,
-    latestSelectedStyleId,
+    hasFreshSelectedStyle,
+    hasVisibleSelectedStyle,
+    isOneStageV2,
     latestStyleLabel,
     requiresExplicitPostType,
     selectedCampaign,
@@ -1272,19 +1337,25 @@ export default function CreatePage() {
   const allPreflightDone = preflightItems.every((item) => item.done);
   const incompletePreflightItems = preflightItems.filter((item) => !item.done);
   const requiresStyleExplorationFirst =
-    canUseDeliverableInheritance
-      ? !hasFreshSelectedStyle
-      : !isAdaptationMode &&
-        !canCreateOptionsFromReferences &&
-        !canCreateOptionsFromSourceOutput &&
-        !canCreateOptionsFromTemplateFamily &&
-        !hasFreshSelectedStyle;
+    isOneStageV2
+      ? false
+      : canUseDeliverableInheritance
+        ? !hasFreshSelectedStyle
+        : !isAdaptationMode &&
+          !canCreateOptionsFromReferences &&
+          !canCreateOptionsFromSourceOutput &&
+          !canCreateOptionsFromTemplateFamily &&
+          !hasFreshSelectedStyle;
   const createDockStatus = allPreflightDone
-    ? hasActiveFinalJob
-      ? "Creating options"
-      : hasActiveSeedJob
-        ? "Generating directions"
-        : "Ready to create options"
+    ? isOneStageV2 && (hasActiveFinalJob || pendingAction === "generate-seeds")
+      ? "Generating options"
+      : isOneStageV2
+        ? "Ready to generate options"
+        : hasActiveFinalJob
+          ? "Creating options"
+          : hasActiveSeedJob
+            ? "Generating directions"
+            : "Ready to create options"
     : requiresStyleExplorationFirst
       ? "Explore styles first"
       : incompletePreflightItems.length === 1
@@ -1297,6 +1368,11 @@ export default function CreatePage() {
   }
 
   async function handleGenerateCandidates() {
+    if (isOneStageV2) {
+      await handleExploreDirections();
+      return;
+    }
+
     if (hasActiveSeedJob || hasActiveFinalJob) {
       setMessage("Wait for the current generation run to finish before starting another one.");
       return;
@@ -1332,16 +1408,24 @@ export default function CreatePage() {
   }
 
   async function handleExploreDirections() {
-    if (isAdaptationMode) {
+    if (isAdaptationMode && !isOneStageV2) {
       setMessage("Adaptation uses the selected source post directly, so style exploration is skipped.");
       return;
     }
     if (hasActiveSeedJob || hasActiveFinalJob) {
-      setMessage("Wait for the current generation run to finish before exploring a new set of directions.");
+      setMessage(
+        isOneStageV2
+          ? "Wait for the current generation run to finish before generating a new set of options."
+          : "Wait for the current generation run to finish before exploring a new set of directions."
+      );
       return;
     }
     if (!hasRequiredSourceContext) {
-      setMessage("Choose the source for this mode before exploring styles.");
+      setMessage(
+        isOneStageV2
+          ? "Choose the source for this mode before generating options."
+          : "Choose the source for this mode before exploring styles."
+      );
       return;
     }
     setPendingCanvasAction("explore");
@@ -1355,7 +1439,7 @@ export default function CreatePage() {
       return;
     }
     setCompiledFingerprint(nextFingerprint);
-    const submitted = await generateSeedsForPackage(compiled.id);
+    const submitted = await generateSeedsForPackage(compiled.id, compiled);
     if (submitted) {
       rearmRunPolling();
     } else {
@@ -1364,17 +1448,13 @@ export default function CreatePage() {
   }
 
   async function handleCreateOptionsFromStyle(selectedTemplateId: string) {
-    if (!promptPackage || isCompiledStale || hasActiveSeedJob || hasActiveFinalJob) return;
+    if (isCompiledStale) {
+      setMessage("Explore styles again to apply the updated brief.");
+      return;
+    }
+    if (!promptPackage || hasActiveSeedJob || hasActiveFinalJob) return;
     const submitted = await generateFinalImagesForPackage(promptPackage.id, selectedTemplateId);
     if (submitted) rearmRunPolling();
-  }
-
-  function handleChannelChange(nextChannel: CreativeChannel) {
-    setBriefForm((state) => {
-      const nextDefault = getDefaultFormat(nextChannel);
-      const currentStillAllowed = getPlacementSpec(nextChannel, state.format);
-      return { ...state, channel: nextChannel, format: currentStillAllowed ? state.format : nextDefault };
-    });
   }
 
   function handleProjectChange(projectId: string) {
@@ -1418,13 +1498,13 @@ export default function CreatePage() {
       const shouldResetGoal =
         state.goal.trim().length === 0 ||
         state.goal === defaultGoalText ||
-        state.goal === "Festive greeting";
-      const shouldResetExactText =
-        (state.exactText ?? "").trim().length === 0 ||
-        state.exactText === "Warm wishes";
+        Object.values(POST_TYPE_GOAL_DEFAULTS).includes(state.goal);
+      const shouldResetOffer = isSystemSuggestedOffer(state.offer ?? "");
+      const shouldResetExactText = isSystemSuggestedExactText(state.exactText ?? "", festivals);
       const nextPrompt: string = shouldResetPrompt
         ? getPostTypeBriefStarter(selected, nextFestival)
         : state.prompt;
+      const nextCopy = getPostTypeCopyDefaults(selected, nextFestival);
 
       return {
         ...state,
@@ -1440,19 +1520,10 @@ export default function CreatePage() {
         channel: nextChannel,
         format: nextFormat,
         templateType: selected?.config.recommendedTemplateTypes[0] ?? state.templateType,
-        goal:
-          nextIsFestiveGreeting && shouldResetGoal
-            ? nextFestival
-              ? getFestivalGoal(nextFestival)
-              : "Festive greeting"
-            : state.goal,
+        goal: shouldResetGoal ? getPostTypeGoal(selected, nextFestival) : state.goal,
         prompt: nextPrompt,
-        exactText:
-          nextIsFestiveGreeting && shouldResetExactText
-            ? nextFestival
-              ? getFestivalHeadline(nextFestival)
-              : "Warm wishes"
-            : state.exactText
+        offer: shouldResetOffer ? nextCopy.offer : state.offer,
+        exactText: shouldResetExactText ? nextCopy.exactText : state.exactText
       };
     });
   }
@@ -1464,16 +1535,16 @@ export default function CreatePage() {
       ...state,
       festivalId: festivalId || undefined,
       goal:
-        selected && (state.goal.trim().length === 0 || state.goal === defaultGoalText || state.goal === "Festive greeting")
+        selected && (state.goal.trim().length === 0 || state.goal === defaultGoalText || Object.values(POST_TYPE_GOAL_DEFAULTS).includes(state.goal))
           ? getFestivalGoal(selected)
           : state.goal,
       prompt:
         selected && (state.prompt.trim().length === 0 || isSystemSuggestedBrief(state.prompt, festivals))
           ? getFestivalBriefStarter(selected)
           : state.prompt,
+      offer: selected && isSystemSuggestedOffer(state.offer ?? "") ? "" : state.offer,
       exactText:
-        selected &&
-        ((state.exactText ?? "").trim().length === 0 || state.exactText === "Warm wishes")
+        selected && isSystemSuggestedExactText(state.exactText ?? "", festivals)
           ? getFestivalHeadline(selected)
           : state.exactText
     }));
@@ -1820,7 +1891,17 @@ export default function CreatePage() {
   }
 
   function clearActiveTask() {
-    handleDeliverableChange("");
+    resetCreateFlow({
+      createMode: "post",
+      channel: briefForm.channel,
+      format: briefForm.format,
+      includeBrandLogo: briefForm.includeBrandLogo,
+      includeReraQr: briefForm.includeReraQr
+    });
+    setRunDetail(null);
+    setRunRefreshToken(0);
+    completedRunRefreshRef.current = null;
+    setPendingCanvasAction(null);
   }
 
   function clearSeries() {
@@ -2226,7 +2307,7 @@ export default function CreatePage() {
       <aside className="create-v2-sidebar">
 
         {/* ① CONTEXT */}
-        <div className="create-section">
+        <div className="create-section create-section-context">
           <button
             className="create-section-toggle"
             onClick={() => toggleSection("context")}
@@ -2270,46 +2351,31 @@ export default function CreatePage() {
                     </button>
                   </div>
 
-                  <div className="create-picker-summary">
-                    <div>
-                      <p className="create-picker-summary-label">
-                        {canUseDeliverableInheritance ? "Linked post task" : "Context"}
-                      </p>
-                      <strong>{canUseDeliverableInheritance ? selectedDeliverable?.title : "Ad hoc"}</strong>
-                    </div>
-                    <div className="create-picker-summary-actions">
-                      <button
-                        className="create-inline-action"
-                        onClick={() => setActivePicker("post-task")}
-                        disabled={planningLoading || !activeBrandId}
-                        type="button"
-                      >
-                        {canUseDeliverableInheritance ? "Change" : "Select task"}
-                      </button>
-                      {canUseDeliverableInheritance ? (
+                  {canUseDeliverableInheritance ? (
+                    <div className="create-picker-summary">
+                      <div>
+                        <p className="create-picker-summary-label">Linked post task</p>
+                        <strong>{selectedDeliverable?.title}</strong>
+                      </div>
+                      <div className="create-picker-summary-actions">
+                        <button
+                          className="create-inline-action"
+                          onClick={() => setActivePicker("post-task")}
+                          disabled={planningLoading || !activeBrandId}
+                          type="button"
+                        >
+                          Change
+                        </button>
                         <button className="create-inline-action subtle" onClick={clearActiveTask} type="button">
                           Clear
                         </button>
-                      ) : null}
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
 
                   {selectedDeliverable ? (
-                    <div className="create-task-card">
-                      <div className="create-task-card-header">
-                        <strong>{selectedDeliverable.title}</strong>
-                        <span className={`pill planner-status planner-status-${selectedDeliverable.status}`}>
-                          {formatDeliverableStatus(selectedDeliverable.status)}
-                        </span>
-                      </div>
-                      <div className="create-chip-row">
-                        {selectedProject && <span className="pill">{selectedProject.name}</span>}
-                        {selectedPostType && <span className="pill">{selectedPostType.name}</span>}
-                        {selectedReusableTemplate && <span className="pill">{selectedReusableTemplate.name}</span>}
-                        <span className="pill">{activePlacement.channelLabel}</span>
-                        <span className="pill">{activePlacement.formatLabel}</span>
-                        <span className="pill">{formatDisplayDate(selectedDeliverable.scheduledFor)}</span>
-                      </div>
+                    <div className="create-task-card create-task-card-minimal">
+                      <p className="create-hint">Using this task’s project, post type, placement, and brief.</p>
                     </div>
                   ) : null}
                 </>
@@ -2484,6 +2550,19 @@ export default function CreatePage() {
                     onClear={selectedPostType ? () => handlePostTypeChange("") : undefined}
                     value={selectedPostType?.name ?? null}
                   />
+                  <label className="create-field-label">
+                    Format
+                    <select
+                      value={briefForm.format}
+                      onChange={(e) => setBriefForm((s) => ({ ...s, format: e.target.value as CreativeFormat }))}
+                      disabled={locksPlacement}
+                      className="create-field-select"
+                    >
+                      {allowedFormats.map((f) => (
+                        <option key={f.format} value={f.format}>{f.formatLabel}</option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
               )}
 
@@ -2535,150 +2614,8 @@ export default function CreatePage() {
           )}
         </div>
 
-        {/* ② BRIEF */}
-        <div className="create-section">
-          <button
-            className="create-section-toggle"
-            onClick={() => toggleSection("brief")}
-            type="button"
-          >
-            <span className="create-section-icon">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-            </span>
-            <span className="create-section-label">Brief</span>
-            <span className={`create-section-chevron ${sidebarSections.brief ? "is-open" : ""}`}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </span>
-          </button>
-
-          {sidebarSections.brief && (
-            <div className="create-section-body">
-              {/* Main Prompt */}
-              <label className="create-field-label create-field-label-prominent">
-                {isSeriesEpisodeMode
-                  ? "Episode brief"
-                  : isCampaignAssetMode
-                    ? "Asset brief"
-                    : isAdaptationMode
-                      ? "Adaptation brief"
-                      : "Creative brief"}
-                <textarea
-                  className="create-prompt-textarea"
-                  value={briefForm.prompt}
-                  onChange={(e) => setBriefForm((s) => ({ ...s, prompt: e.target.value }))}
-                  placeholder={getCreativeBriefPlaceholder(selectedPostType, selectedFestival)}
-                  rows={4}
-                />
-                <span className="create-hint">
-                  Provide specific instructions. Brand, project, festival, and post-type rules are added automatically.
-                </span>
-                {promptTooShort ? (
-                  <span className="create-field-warning">
-                    Write at least {MIN_PROMPT_LENGTH} characters for a specific result.
-                  </span>
-                ) : null}
-              </label>
-              {promptPackage && !isCompiledStale ? (
-                <details className="create-compiled-debug">
-                  <summary>View compiled prompt</summary>
-                  <div className="create-compiled-debug-body">
-                    <div className="create-compiled-debug-section">
-                      <p className="panel-label">Summary</p>
-                      <p>{promptPackage.promptSummary}</p>
-                    </div>
-                    <div className="create-compiled-debug-section">
-                      <p className="panel-label">Seed prompt</p>
-                      <pre>{promptPackage.seedPrompt}</pre>
-                    </div>
-                    <div className="create-compiled-debug-section">
-                      <p className="panel-label">Final prompt</p>
-                      <pre>{promptPackage.finalPrompt}</pre>
-                    </div>
-                  </div>
-                </details>
-              ) : null}
-
-              {/* Copy & Strategy Group */}
-              <div className="create-editorial-group">
-                <p className="create-editorial-label">Copy & Strategy</p>
-                
-                <div className="create-field-group">
-                  <label className="create-field-label">
-                    {isSeriesEpisodeMode
-                      ? "Episode title"
-                      : isCampaignAssetMode
-                        ? "Asset title"
-                        : isAdaptationMode
-                          ? "New version title"
-                          : "Primary Goal"}
-                    <input
-                      value={briefForm.goal}
-                      onChange={(e) => setBriefForm((s) => ({ ...s, goal: e.target.value }))}
-                      placeholder="e.g. Drive enquiry"
-                      className="create-field-input"
-                    />
-                  </label>
-
-                  <label className="create-field-label">
-                    Target Audience
-                    <input
-                      value={briefForm.audience ?? ""}
-                      onChange={(e) => setBriefForm((s) => ({ ...s, audience: e.target.value }))}
-                      placeholder="e.g. Homebuyers and investors"
-                      className="create-field-input"
-                    />
-                  </label>
-                  
-                  <label className="create-field-label">
-                    Creative family
-                    <select
-                      value={briefForm.templateType}
-                      onChange={(e) =>
-                        setBriefForm((s) => ({ ...s, templateType: e.target.value as CreativeBrief["templateType"] }))
-                      }
-                      className="create-field-select"
-                    >
-                      <option value="announcement">Announcement</option>
-                      <option value="hero">Hero</option>
-                      <option value="product-focus">Product</option>
-                      <option value="testimonial">Review</option>
-                      <option value="quote">Quote</option>
-                      <option value="offer">Offer</option>
-                    </select>
-                  </label>
-
-                  <label className="create-field-label">
-                    Offer / CTA
-                    <input
-                      value={briefForm.offer ?? ""}
-                      onChange={(e) => setBriefForm((s) => ({ ...s, offer: e.target.value }))}
-                      placeholder="e.g. Site visits now open"
-                      className="create-field-input"
-                    />
-                  </label>
-
-                  <label className="create-field-label">
-                    On-image text
-                    <input
-                      value={briefForm.exactText ?? ""}
-                      onChange={(e) => setBriefForm((s) => ({ ...s, exactText: e.target.value }))}
-                      placeholder="e.g. Luxury residences"
-                      className="create-field-input"
-                    />
-                  </label>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ③ STYLE */}
-        <div className="create-section">
+        {/* ② STYLE */}
+        <div className="create-section create-section-style">
           <button
             className="create-section-toggle"
             onClick={() => toggleSection("style")}
@@ -2703,42 +2640,6 @@ export default function CreatePage() {
 
           {sidebarSections.style && (
             <div className="create-section-body">
-              <div className="create-field-group-row">
-                <label className="create-field-label">
-                  Channel
-                  <select
-                    value={briefForm.channel}
-                    onChange={(e) => handleChannelChange(e.target.value as CreativeChannel)}
-                    disabled={locksPlacement}
-                    className="create-field-select"
-                  >
-                    <option value="instagram-feed">Instagram</option>
-                    <option value="instagram-story">Story</option>
-                    <option value="linkedin-feed">LinkedIn</option>
-                    <option value="x-post">X (Twitter)</option>
-                    <option value="tiktok-cover">TikTok</option>
-                  </select>
-                </label>
-                <label className="create-field-label">
-                  Format
-                  <select
-                    value={briefForm.format}
-                    onChange={(e) => setBriefForm((s) => ({ ...s, format: e.target.value as CreativeFormat }))}
-                    disabled={locksPlacement}
-                    className="create-field-select"
-                  >
-                    {allowedFormats.map((f) => (
-                      <option key={f.format} value={f.format}>{f.formatLabel}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              {locksPlacement && (
-                <p className="create-hint" style={{ marginTop: "-12px", marginBottom: "4px" }}>
-                  {isCampaignAssetMode ? "Locked to planned asset" : "Locked to post task"}
-                </p>
-              )}
-
               <SelectionRow
                 actionLabel={
                   locksTemplate
@@ -2774,6 +2675,11 @@ export default function CreatePage() {
                           <strong>No references selected.</strong>
                           <p className="create-hint">No supporting reference assets uploaded yet.</p>
                         </div>
+                      </div>
+                      <div className="create-picker-summary-actions">
+                        <button className="create-inline-action" disabled type="button">
+                          Choose
+                        </button>
                       </div>
                     </div>
                   </>
@@ -2868,6 +2774,129 @@ export default function CreatePage() {
             </div>
           )}
         </div>
+
+        {/* ③ BRIEF */}
+        <div className="create-section create-section-brief">
+          <button
+            className="create-section-toggle"
+            onClick={() => toggleSection("brief")}
+            type="button"
+          >
+            <span className="create-section-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+            </span>
+            <span className="create-section-label">Brief</span>
+            <span className={`create-section-chevron ${sidebarSections.brief ? "is-open" : ""}`}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </span>
+          </button>
+
+          {sidebarSections.brief && (
+            <div className="create-section-body">
+              {/* Main Prompt */}
+              <label className="create-field-label create-field-label-prominent">
+                {isSeriesEpisodeMode
+                  ? "Episode brief"
+                  : isCampaignAssetMode
+                    ? "Asset brief"
+                    : isAdaptationMode
+                      ? "Adaptation brief"
+                      : "Creative brief"}
+                <textarea
+                  className="create-prompt-textarea"
+                  value={briefForm.prompt}
+                  onChange={(e) => setBriefForm((s) => ({ ...s, prompt: e.target.value }))}
+                  placeholder={getCreativeBriefPlaceholder(selectedPostType, selectedFestival)}
+                  rows={4}
+                />
+                <span className="create-hint">
+                  Provide specific instructions. Brand, project, festival, and post-type rules are added automatically.
+                </span>
+                {promptTooShort ? (
+                  <span className="create-field-warning">
+                    Write at least {MIN_PROMPT_LENGTH} characters for a specific result.
+                  </span>
+                ) : null}
+              </label>
+              {/* Copy & Strategy Group */}
+              <div className="create-editorial-group">
+                <p className="create-editorial-label">Copy & Strategy</p>
+
+                <div className="create-field-group">
+                  <label className="create-field-label">
+                    {isSeriesEpisodeMode
+                      ? "Episode title"
+                      : isCampaignAssetMode
+                        ? "Asset title"
+                        : isAdaptationMode
+                          ? "New version title"
+                          : "Primary Goal"}
+                    <input
+                      value={briefForm.goal}
+                      onChange={(e) => setBriefForm((s) => ({ ...s, goal: e.target.value }))}
+                      placeholder="e.g. Drive enquiry"
+                      className="create-field-input"
+                    />
+                  </label>
+
+                  <label className="create-field-label">
+                    Target Audience
+                    <input
+                      value={briefForm.audience ?? ""}
+                      onChange={(e) => setBriefForm((s) => ({ ...s, audience: e.target.value }))}
+                      placeholder="e.g. Homebuyers and investors"
+                      className="create-field-input"
+                    />
+                  </label>
+
+                  <label className="create-field-label">
+                    Creative family
+                    <select
+                      value={briefForm.templateType}
+                      onChange={(e) =>
+                        setBriefForm((s) => ({ ...s, templateType: e.target.value as CreativeBrief["templateType"] }))
+                      }
+                      className="create-field-select"
+                    >
+                      <option value="announcement">Announcement</option>
+                      <option value="hero">Hero</option>
+                      <option value="product-focus">Product</option>
+                      <option value="testimonial">Review</option>
+                      <option value="quote">Quote</option>
+                      <option value="offer">Offer</option>
+                    </select>
+                  </label>
+
+                  <label className="create-field-label">
+                    Offer / CTA
+                    <input
+                      value={briefForm.offer ?? ""}
+                      onChange={(e) => setBriefForm((s) => ({ ...s, offer: e.target.value }))}
+                      placeholder={getOfferPlaceholder(selectedPostType)}
+                      className="create-field-input"
+                    />
+                  </label>
+
+                  <label className="create-field-label">
+                    On-image text
+                    <input
+                      value={briefForm.exactText ?? ""}
+                      onChange={(e) => setBriefForm((s) => ({ ...s, exactText: e.target.value }))}
+                      placeholder={getExactTextPlaceholder(selectedPostType, selectedFestival)}
+                      className="create-field-input"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
       </aside>
 
       {/* ──────────────────────────────────────────
@@ -2886,7 +2915,7 @@ export default function CreatePage() {
         )}
 
         {/* Muted breadcrumb run-bar */}
-        {promptPackage && !isCompiledStale && (
+        {promptPackage && (
           <div className="create-run-bar">
             <div className="create-run-breadcrumbs">
               <span>{compiledPlacement?.recommendedSize}</span>
@@ -2904,48 +2933,71 @@ export default function CreatePage() {
 
           {/* STEP INDICATOR */}
           <div className="create-stepper">
-            {/* Step 1: Explore */}
-            <div className={`create-step ${generatePhase === "exploring" || generatePhase === "picking" || generatePhase === "done" ? "is-done" : generatePhase === "idle" ? "is-active" : ""}`}>
-              <div className="create-step-num">
-                {generatePhase === "picking" || generatePhase === "done" ? (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                ) : "1"}
-              </div>
-              <span className="create-step-label">{isAdaptationMode ? "Use source post" : "Explore styles"}</span>
-              <div className="create-step-connector" />
-            </div>
+            {isOneStageV2 ? (
+              <>
+                <div className={`create-step ${generatePhase === "creating" || generatePhase === "done" ? "is-done" : "is-active"}`}>
+                  <div className="create-step-num">
+                    {generatePhase === "creating" || generatePhase === "done" ? (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                    ) : "1"}
+                  </div>
+                  <span className="create-step-label">Prepare brief</span>
+                  <div className="create-step-connector" />
+                </div>
 
-            {/* Step 2: Pick */}
-            <div className={`create-step ${generatePhase === "done" ? "is-done" : generatePhase === "picking" ? "is-active" : ""}`}>
-              <div className="create-step-num">
-                {generatePhase === "done" ? (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                ) : "2"}
-              </div>
-              <span className="create-step-label">{isAdaptationMode ? "Adjust brief" : "Pick a direction"}</span>
-              <div className="create-step-connector" />
-            </div>
+                <div className={`create-step ${generatePhase === "creating" || generatePhase === "done" ? "is-active" : ""}`}>
+                  <div className="create-step-num">2</div>
+                  <span className="create-step-label">Generate options</span>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Step 1: Explore */}
+                <div className={`create-step ${generatePhase === "exploring" || generatePhase === "picking" || generatePhase === "done" ? "is-done" : generatePhase === "idle" ? "is-active" : ""}`}>
+                  <div className="create-step-num">
+                    {generatePhase === "picking" || generatePhase === "done" ? (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                    ) : "1"}
+                  </div>
+                  <span className="create-step-label">{isAdaptationMode ? "Use source post" : "Explore styles"}</span>
+                  <div className="create-step-connector" />
+                </div>
 
-            {/* Step 3: Options */}
-            <div className={`create-step ${generatePhase === "done" ? "is-active" : ""}`}>
-              <div className="create-step-num">3</div>
-              <span className="create-step-label">Get options</span>
-            </div>
+                {/* Step 2: Pick */}
+                <div className={`create-step ${generatePhase === "done" ? "is-done" : generatePhase === "picking" ? "is-active" : ""}`}>
+                  <div className="create-step-num">
+                    {generatePhase === "done" ? (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                    ) : "2"}
+                  </div>
+                  <span className="create-step-label">{isAdaptationMode ? "Adjust brief" : "Pick a direction"}</span>
+                  <div className="create-step-connector" />
+                </div>
 
-            {/* Skip note when references selected */}
-            {canCreateOptionsFromReferences && generatePhase === "idle" && (
-              <span className="create-stepper-skip">
-                References selected — steps 1 &amp; 2 skipped
-              </span>
+                {/* Step 3: Options */}
+                <div className={`create-step ${generatePhase === "done" ? "is-active" : ""}`}>
+                  <div className="create-step-num">3</div>
+                  <span className="create-step-label">Get options</span>
+                </div>
+
+                {/* Skip note when references selected */}
+                {canCreateOptionsFromReferences && generatePhase === "idle" && (
+                  <span className="create-stepper-skip">
+                    References selected — steps 1 &amp; 2 skipped
+                  </span>
+                )}
+              </>
             )}
           </div>
 
           {/* ── Styles / Directions section ── */}
-          {!isAdaptationMode && promptPackage && !isCompiledStale && (isExploringDirections || currentSeedTemplates.length > 0) && (
+          {!isOneStageV2 && !isAdaptationMode && promptPackage && (isExploringDirections || currentSeedTemplates.length > 0) && (
             <section className="create-section-canvas">
               <div className="create-canvas-header">
                 <div className="create-canvas-heading">
@@ -3002,9 +3054,11 @@ export default function CreatePage() {
                         <button
                           className="create-action-explore"
                           onClick={() => void handleCreateOptionsFromStyle(template.id)}
-                          disabled={generationLocked}
+                          disabled={generationLocked || isCompiledStale}
                         >
-                          {hasActiveFinalJob && activeFinalTemplateId === template.id
+                          {isCompiledStale
+                            ? "Explore again"
+                            : hasActiveFinalJob && activeFinalTemplateId === template.id
                             ? "Creating…"
                             : isCampaignAssetMode
                               ? "Create asset options"
@@ -3034,12 +3088,16 @@ export default function CreatePage() {
 
           {/* ── Final options section ── */}
           <section className="create-section-canvas">
-            {(currentFinalOutputs.length > 0 || hasActiveFinalJob) && (
+            {(currentFinalOutputs.length > 0 || hasActiveFinalJob || isGeneratingV2Options) && (
               <div className="create-canvas-header">
                 <div className="create-canvas-heading">
-                  <h3 className="create-canvas-title">Options</h3>
+                  <h3 className="create-canvas-title">Post options</h3>
                   <span className="create-canvas-subtle">
-                    {hasActiveFinalJob
+                    {isOneStageV2 && (hasActiveFinalJob || isGeneratingV2Options)
+                      ? currentFinalOutputs.length > 0
+                        ? "Refreshing this set. New post options will replace it automatically."
+                        : `Rendering ${optionTargetCount} post option${optionTargetCount === 1 ? "" : "s"} now.`
+                      : hasActiveFinalJob
                       ? currentFinalOutputs.length > 0
                         ? "Refreshing this set. New options will replace it automatically."
                         : `Rendering ${optionTargetCount} option${optionTargetCount === 1 ? "" : "s"} now.`
@@ -3052,13 +3110,17 @@ export default function CreatePage() {
                       Review →
                     </Link>
                   )}
-                  {promptPackage && !isCompiledStale && canCreateOptionsDirectly && (
+                  {promptPackage && (isOneStageV2 || canCreateOptionsDirectly) && (
                     <button
                       className="button button-ghost mini create-action-explore"
                       disabled={generationLocked}
                       onClick={() => void handleGenerateCandidates()}
                     >
-                      {hasActiveFinalJob ? "Generating…" : "Generate more"}
+                      {hasActiveFinalJob || (isOneStageV2 && pendingAction === "generate-seeds")
+                        ? "Generating…"
+                        : isOneStageV2
+                          ? "Generate again"
+                          : "Generate more"}
                     </button>
                   )}
                 </div>
@@ -3078,37 +3140,12 @@ export default function CreatePage() {
                 <p>
                   {isAdaptationMode
                     ? "Choose a source post, then create a new version."
-                    : "Add a brief, then explore styles or create options."}
+                    : isOneStageV2
+                      ? "Add a brief, then generate post options."
+                      : "Add a brief, then explore styles or create options."}
                 </p>
               </div>
-            ) : isCompiledStale ? (
-              <div className="create-stale-overlay-wrap">
-                <div className={`candidate-grid create-stale-grid`}>
-                  {currentFinalOutputs.map((output, idx) => (
-                    <article className="candidate-card create-stale-card" key={output.id || idx}>
-                      <div className="candidate-media" style={{ aspectRatio: compiledPlacement?.aspectRatio === "9:16" ? "9/16" : "1/1" }}>
-                        {output.previewUrl ? (
-                          <img alt="" src={output.previewUrl} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                        ) : null}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-                <div className="create-stale-banner">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2v4" /><path d="m16.24 7.76-2.12 2.12" /><path d="M20 12h-4" /><path d="m16.24 16.24-2.12-2.12" /><path d="M12 18v4" /><path d="m7.76 16.24 2.12-2.12" /><path d="M4 12h4" /><path d="m7.76 7.76 2.12 2.12" />
-                  </svg>
-                  <span>Brief has changed</span>
-                  <button
-                    className="button button-primary mini"
-                    onClick={() => void handleGenerateCandidates()}
-                    disabled={generationLocked || !allPreflightDone}
-                  >
-                    Regenerate
-                  </button>
-                </div>
-              </div>
-            ) : currentFinalOutputs.length === 0 && hasActiveFinalJob ? (
+            ) : currentFinalOutputs.length === 0 && (hasActiveFinalJob || isGeneratingV2Options) ? (
               <div className="candidate-grid create-processing-pulse">
                 {Array.from({ length: optionTargetCount }).map((_, index) => (
                   <article className="candidate-card create-batch-placeholder" key={`option-pending-${index}`}>
@@ -3118,12 +3155,12 @@ export default function CreatePage() {
                     />
                     <div className="candidate-body create-batch-placeholder-copy">
                       <strong>Option {index + 1}</strong>
-                      <span>Rendering option…</span>
+                      <span>{isOneStageV2 ? "Rendering post option…" : "Rendering option…"}</span>
                     </div>
                   </article>
                 ))}
               </div>
-            ) : currentFinalOutputs.length === 0 && currentSeedTemplates.length > 0 ? (
+            ) : !isOneStageV2 && currentFinalOutputs.length === 0 && currentSeedTemplates.length > 0 ? (
               <div className="create-pick-prompt">
                 <p>Choose one direction above to create final options.</p>
               </div>
@@ -3133,6 +3170,8 @@ export default function CreatePage() {
                 <p>
                   {isAdaptationMode
                     ? "Choose a source post, then create a new version."
+                    : isOneStageV2
+                      ? "Use Generate options when you want the first set."
                     : canCreateOptionsFromReferences || canCreateOptionsFromSourceOutput || canCreateOptionsFromTemplateFamily
                       ? "Your setup is ready. Use Create options when you want the first set."
                       : "Explore styles first, then create options from the direction you choose."}
@@ -3202,13 +3241,15 @@ export default function CreatePage() {
               <div className="create-preflight-status">
                 <strong>{createDockStatus}</strong>
                 <span>
-                  {hasActiveFinalJob
-                    ? "Options are rendering now. Results will appear here automatically."
-                    : hasActiveSeedJob
-                      ? "Directions are rendering now. Wait for the full batch before continuing."
-                      : allPreflightDone
-                        ? "Brand context and brief are ready."
-                        : "Complete setup to enable generation."}
+                  {isOneStageV2 && (hasActiveFinalJob || pendingAction === "generate-seeds")
+                    ? "Post options are rendering now. Results will appear here automatically."
+                    : hasActiveFinalJob
+                      ? "Options are rendering now. Results will appear here automatically."
+                      : hasActiveSeedJob
+                        ? "Directions are rendering now. Wait for the full batch before continuing."
+                        : allPreflightDone
+                          ? "Brand context and brief are ready."
+                          : "Complete setup to enable generation."}
                 </span>
               </div>
               <div className="create-preflight-chips">
@@ -3224,38 +3265,64 @@ export default function CreatePage() {
             </div>
 
             <div className="create-action-bar">
-              <button
-                className="create-action-explore"
-                type="button"
-                disabled={generationLocked || !hasBriefPrompt || !hasRequiredSourceContext || !hasFestivalSelection || isAdaptationMode}
-                onClick={() => void handleExploreDirections()}
-              >
-                {hasActiveSeedJob
-                  ? "Exploring…"
-                  : isAdaptationMode
-                    ? "Source post"
-                    : "Explore styles"}
-              </button>
+              <label className="create-variation-control" data-flow={creativeFlowVersion}>
+                <span>Variations</span>
+                <select
+                  value={styleVariationCount}
+                  disabled={generationLocked}
+                  onChange={(event) => setStyleVariationCount(Number(event.target.value))}
+                  aria-label={isOneStageV2 ? "Post option variation count" : "Style variation count"}
+                >
+                  {Array.from({ length: styleVariationLimit }, (_, index) => index + 1).map((count) => (
+                    <option key={count} value={count}>
+                      {count}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {!isOneStageV2 && (
+                <button
+                  className="create-action-explore"
+                  type="button"
+                  disabled={generationLocked || !hasBriefPrompt || !hasRequiredSourceContext || !hasFestivalSelection || isAdaptationMode}
+                  onClick={() => void handleExploreDirections()}
+                >
+                  {hasActiveSeedJob
+                    ? "Exploring…"
+                    : isAdaptationMode
+                      ? "Source post"
+                      : "Explore styles"}
+                </button>
+              )}
 
               <button
                 className={`create-action-create ${allPreflightDone ? "" : "create-action-create-blocked"}`}
                 type="button"
-                disabled={generationLocked || !allPreflightDone || requiresStyleExplorationFirst}
-                onClick={() => void handleGenerateCandidates()}
+                disabled={
+                  generationLocked ||
+                  !allPreflightDone ||
+                  (!isOneStageV2 && requiresStyleExplorationFirst)
+                }
+                onClick={() => void (isOneStageV2 ? handleExploreDirections() : handleGenerateCandidates())}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
                 </svg>
                 <span>
-                  {hasActiveFinalJob
-                    ? "Creating…"
-                    : hasActiveSeedJob
-                      ? "Finishing directions…"
-                    : requiresStyleExplorationFirst
-                      ? "Explore styles first"
-                    : isAdaptationMode
-                      ? "Adapt options"
-                      : "Create options"}
+                  {isOneStageV2 && (hasActiveFinalJob || pendingAction === "generate-seeds")
+                    ? "Generating…"
+                    : isOneStageV2
+                      ? "Generate options"
+                      : hasActiveFinalJob
+                        ? "Creating…"
+                        : hasActiveSeedJob
+                          ? "Finishing directions…"
+                          : requiresStyleExplorationFirst
+                            ? "Explore styles first"
+                            : isAdaptationMode
+                              ? "Adapt options"
+                              : "Create options"}
                 </span>
               </button>
             </div>
@@ -3264,18 +3331,37 @@ export default function CreatePage() {
 
         {activePicker ? (
           <div className="drawer-overlay create-picker-overlay" onClick={() => setActivePicker(null)}>
-            <div className="drawer-content create-picker-dialog" onClick={(event) => event.stopPropagation()}>
+            <div
+              className={`drawer-content create-picker-dialog ${
+                activePicker === "post-type" ? "create-picker-dialog-post-type" : ""
+              }`}
+              onClick={(event) => event.stopPropagation()}
+            >
               <div className="drawer-header create-picker-header">
                 <div>
                   <p className="panel-label">{getPickerEyebrow(activePicker)}</p>
-                  <h2>{getPickerTitle(activePicker)}</h2>
+                  <h2>
+                    {activePicker === "post-type" ? (
+                      <>
+                        Choose a <em>post type</em>
+                      </>
+                    ) : (
+                      getPickerTitle(activePicker)
+                    )}
+                  </h2>
                 </div>
                 <button className="drawer-close" onClick={() => setActivePicker(null)} type="button">
                   ×
                 </button>
               </div>
-              <div className="drawer-body create-picker-body">
+              <div className={`drawer-body create-picker-body ${activePicker === "post-type" ? "create-picker-body-post-type" : ""}`}>
                 <div className="create-picker-toolbar">
+                  {activePicker === "post-type" ? (
+                    <svg className="create-picker-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                      <path d="m20 20-4.5-4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  ) : null}
                   <input
                     className="create-field-input"
                     onChange={(event) => setPickerQuery(event.target.value)}
@@ -3446,36 +3532,41 @@ export default function CreatePage() {
                 ) : null}
 
                 {activePicker === "post-type" ? (
-                  <div className="create-picker-list">
-                    <button
-                      className={`create-picker-row ${!selectedPostType ? "is-selected" : ""}`}
-                      onClick={() => {
-                        handlePostTypeChange("");
-                        setActivePicker(null);
-                      }}
-                      type="button"
-                    >
-                      <div className="create-picker-row-copy">
-                        <strong>No post type</strong>
-                      </div>
-                    </button>
-                    {filteredPostTypes.map((postType) => (
-                      <button
-                        key={postType.id}
-                        className={`create-picker-row ${briefForm.postTypeId === postType.id ? "is-selected" : ""}`}
-                        onClick={() => {
-                          handlePostTypeChange(postType.id);
-                          setActivePicker(null);
-                        }}
-                        type="button"
-                      >
-                        <div className="create-picker-row-copy">
-                          <strong>{postType.name}</strong>
-                          {postType.description ? <span>{postType.description}</span> : null}
+                  <>
+                    <div className="create-post-type-grid">
+                      {filteredPostTypes.map((postType, index) => (
+                        <button
+                          key={postType.id}
+                          className={`create-post-type-card ${briefForm.postTypeId === postType.id ? "is-selected" : ""}`}
+                          onClick={() => {
+                            handlePostTypeChange(postType.id);
+                            setActivePicker(null);
+                          }}
+                          type="button"
+                        >
+                          <span className="create-post-type-check" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none">
+                              <path d="m5 12 4 4L19 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </span>
+                          <span className="create-post-type-illo">
+                            <PostTypeIllustration code={postType.code} />
+                          </span>
+                          <span className="create-post-type-card-body">
+                            <span className="create-post-type-index">{String(index + 1).padStart(2, "0")}</span>
+                            <strong>{postType.name}</strong>
+                            <span>{getPostTypeModalDescription(postType)}</span>
+                          </span>
+                        </button>
+                      ))}
+                      {filteredPostTypes.length === 0 ? (
+                        <div className="empty-state compact create-post-type-empty">
+                          <strong>No post types found</strong>
+                          <p>Try launch, festive, amenity, or construction.</p>
                         </div>
-                      </button>
-                    ))}
-                  </div>
+                      ) : null}
+                    </div>
+                  </>
                 ) : null}
 
                 {activePicker === "festival" ? (
@@ -3977,6 +4068,65 @@ function getPostTypeBriefStarter(
   return starter ?? defaultPromptText;
 }
 
+function getPostTypeGoal(
+  postType: Pick<PostTypeRecord, "code"> | null | undefined,
+  festival?: FestivalRecord | null
+): string {
+  if (postType?.code === "festive-greeting") {
+    return festival ? getFestivalGoal(festival) : "Festive greeting";
+  }
+
+  return postType?.code ? POST_TYPE_GOAL_DEFAULTS[postType.code] ?? defaultGoalText : defaultGoalText;
+}
+
+function getPostTypeCopyDefaults(
+  postType: Pick<PostTypeRecord, "code"> | null | undefined,
+  festival?: FestivalRecord | null
+) {
+  if (postType?.code === "festive-greeting") {
+    return { offer: "", exactText: festival ? getFestivalHeadline(festival) : "Warm wishes" };
+  }
+
+  return postType?.code ? POST_TYPE_COPY_DEFAULTS[postType.code] ?? { offer: "", exactText: "" } : { offer: "", exactText: "" };
+}
+
+function getOfferPlaceholder(postType: Pick<PostTypeRecord, "code"> | null | undefined) {
+  switch (postType?.code) {
+    case "project-launch":
+      return "e.g. Register interest";
+    case "site-visit-invite":
+      return "e.g. Book a site visit";
+    case "offer":
+      return "e.g. Limited-period offer";
+    default:
+      return "Optional CTA";
+  }
+}
+
+function getExactTextPlaceholder(
+  postType: Pick<PostTypeRecord, "code"> | null | undefined,
+  festival?: Pick<FestivalRecord, "name"> | null
+) {
+  switch (postType?.code) {
+    case "project-launch":
+      return "e.g. Now launched";
+    case "construction-update":
+      return "e.g. Construction Update";
+    case "amenity-spotlight":
+      return "e.g. Amenity Spotlight";
+    case "site-visit-invite":
+      return "e.g. Site visits open";
+    case "festive-greeting":
+      return festival ? `e.g. Happy ${festival.name}` : "e.g. Warm wishes";
+    case "location-advantage":
+      return "e.g. Connected living";
+    case "testimonial":
+      return "e.g. Real homeowner stories";
+    default:
+      return "Optional headline";
+  }
+}
+
 function getCreativeBriefPlaceholder(
   postType: Pick<PostTypeRecord, "code" | "name"> | null | undefined,
   festival?: Pick<FestivalRecord, "name"> | null
@@ -4016,6 +4166,25 @@ function isSystemSuggestedBrief(value: string, festivals: FestivalRecord[]): boo
     Object.values(POST_TYPE_BRIEF_STARTERS).includes(trimmed) ||
     festivals.some((festival) => trimmed === getFestivalBriefStarter(festival)) ||
     isLegacyFestivalPrompt(trimmed)
+  );
+}
+
+function isSystemSuggestedOffer(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  return (
+    trimmed === legacyDefaultOfferText ||
+    Object.values(POST_TYPE_COPY_DEFAULTS).some((defaults) => defaults.offer === trimmed)
+  );
+}
+
+function isSystemSuggestedExactText(value: string, festivals: FestivalRecord[]): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  return (
+    trimmed === legacyDefaultExactText ||
+    Object.values(POST_TYPE_COPY_DEFAULTS).some((defaults) => defaults.exactText === trimmed) ||
+    festivals.some((festival) => trimmed === getFestivalHeadline(festival))
   );
 }
 
@@ -4164,6 +4333,99 @@ function getPickerTitle(activePicker: CreatePicker) {
   }
 }
 
+function getPostTypeModalDescription(postType: Pick<PostTypeRecord, "code" | "description">) {
+  if (postType.description) {
+    return postType.description;
+  }
+
+  switch (postType.code) {
+    case "project-launch":
+      return "Announce a new project or phase with a premium reveal.";
+    case "construction-update":
+      return "Share progress, milestones, and delivery confidence.";
+    case "amenity-spotlight":
+      return "Highlight one amenity with elevated lifestyle framing.";
+    case "festive-greeting":
+      return "Create a seasonal greeting that stays brand-safe.";
+    case "site-visit-invite":
+      return "Drive visits with a clear invitation and CTA.";
+    case "testimonial":
+      return "Turn buyer or resident proof into polished trust content.";
+    default:
+      return "Use this recipe to shape the prompt, layout, and generation rules.";
+  }
+}
+
+function PostTypeIllustration({ code }: { code: string }) {
+  if (code === "construction-update") {
+    return (
+      <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <rect x="15" y="27" width="34" height="27" rx="3" fill="currentColor" opacity="0.12" />
+        <path d="M15 35h34M15 44h34M25 27v27M39 27v27" stroke="currentColor" strokeWidth="2" strokeDasharray="4 4" opacity="0.45" />
+        <path d="M32 27V9M32 9h21M50 9v12" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+        <rect x="45" y="21" width="10" height="8" rx="2" fill="currentColor" opacity="0.72" />
+      </svg>
+    );
+  }
+
+  if (code === "festive-greeting") {
+    return (
+      <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <rect x="15" y="24" width="34" height="30" rx="3" fill="currentColor" opacity="0.12" />
+        <rect x="12" y="17" width="40" height="9" rx="2" fill="currentColor" opacity="0.48" />
+        <path d="M32 17c-8-12-18-4-3 0M32 17c8-12 18-4 3 0" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+        <path d="M32 18v36" stroke="currentColor" strokeWidth="4" />
+        <circle cx="13" cy="12" r="3" fill="currentColor" opacity="0.38" />
+        <circle cx="51" cy="12" r="3" fill="currentColor" opacity="0.38" />
+      </svg>
+    );
+  }
+
+  if (code === "amenity-spotlight") {
+    return (
+      <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <rect x="10" y="35" width="44" height="15" rx="4" fill="currentColor" opacity="0.14" />
+        <rect x="18" y="24" width="28" height="17" rx="3" fill="currentColor" opacity="0.48" />
+        <path d="M16 50v7M48 50v7M54 57V14" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+        <path d="m54 14 7 10H47l7-10Z" fill="currentColor" opacity="0.7" />
+        <circle cx="32" cy="28" r="3" fill="currentColor" opacity="0.85" />
+      </svg>
+    );
+  }
+
+  if (code === "site-visit-invite") {
+    return (
+      <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <rect x="11" y="17" width="34" height="37" rx="4" fill="currentColor" opacity="0.12" />
+        <path d="M11 29h34M20 12v10M36 12v10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+        <path d="m32 39 22-9 6 13-22 10-6-14Z" fill="var(--paper-soft)" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
+        <path d="m39 37 10-4M41 43l10-4" stroke="currentColor" strokeWidth="2" opacity="0.55" />
+      </svg>
+    );
+  }
+
+  if (code === "location-advantage") {
+    return (
+      <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <path d="m8 40 24 12 24-12-24-12L8 40Z" fill="currentColor" opacity="0.12" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
+        <path d="M20 34 44 46M44 34 20 46" stroke="currentColor" strokeWidth="2" strokeDasharray="4 4" opacity="0.38" />
+        <path d="M32 36s-10-11-10-20a10 10 0 1 1 20 0c0 9-10 20-10 20Z" fill="currentColor" opacity="0.78" />
+        <circle cx="32" cy="16" r="4" fill="var(--paper-soft)" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <path d="M32 6 42 21v23l-10 6-10-6V21L32 6Z" fill="currentColor" opacity="0.12" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
+      <path d="m22 34-9 13v4l9-6M42 34l9 13v4l-9-6" fill="currentColor" opacity="0.5" />
+      <circle cx="32" cy="23" r="5" fill="currentColor" opacity="0.8" />
+      <path d="M32 51v7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray="2 4" />
+      <path d="M23 57c2-5 16-5 18 0" stroke="currentColor" strokeWidth="3" strokeLinecap="round" opacity="0.24" />
+    </svg>
+  );
+}
+
 function getPickerPlaceholder(activePicker: CreatePicker) {
   switch (activePicker) {
     case "post-task":
@@ -4188,4 +4450,3 @@ function getPickerPlaceholder(activePicker: CreatePicker) {
       return "Search references";
   }
 }
-

@@ -5,7 +5,7 @@ Brand-aware social creation lab for marketing teams. The stack is a `pnpm`-shape
 - `apps/web`: Next.js frontend for auth, brand setup, uploads, creative runs, and gallery.
 - `apps/api`: Fastify API for auth-aware orchestration, Supabase access, Fal job submission, and Agno prompt compilation.
 - `packages/contracts`: shared Zod schemas and TypeScript contracts.
-- `skills/prompt`: Agno local skills used by the Creative Director prompt compiler.
+- `skills/prompt/v1` and `skills/prompt/v2`: versioned Agno local skills for the legacy compiler and V2 bundle compiler.
 - `supabase`: local database, auth, storage, and RLS policies.
 
 ## Local setup

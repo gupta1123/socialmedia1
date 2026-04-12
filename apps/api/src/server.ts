@@ -16,6 +16,7 @@ import { registerSessionRoutes } from "./routes/session.js";
 import { registerWorkRoutes } from "./routes/work.js";
 
 export async function buildApp() {
+  const maxUploadFileBytes = env.API_UPLOAD_MAX_FILE_MB * 1024 * 1024;
   const app = Fastify({
     logger: true
   });
@@ -55,7 +56,11 @@ export async function buildApp() {
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"]
   });
-  await app.register(multipart);
+  await app.register(multipart, {
+    limits: {
+      fileSize: maxUploadFileBytes
+    }
+  });
   await registerAuth(app);
 
   app.get("/health", async () => ({ ok: true }));

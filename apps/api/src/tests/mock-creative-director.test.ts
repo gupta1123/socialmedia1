@@ -139,15 +139,15 @@ describe("compilePromptPackageMock", () => {
     expect(output.seedPrompt).toContain("Festival context: Diwali");
     expect(output.seedPrompt).toContain("Do not assume or require input reference images for festive greetings");
     expect(output.seedPrompt).toContain("Main composition direction");
-    expect(output.seedPrompt).toContain("Each generated image must be one complete festive poster only");
     expect(output.seedPrompt).toContain("Each generated seed image must contain exactly one poster or one coherent composition");
+    expect(output.seedPrompt).toContain("Never make a grid, collage, contact sheet, artboard, mood board, or multiple alternate poster designs inside a single frame");
     expect(output.finalPrompt).toContain("Write this as a highly detailed poster-style image prompt");
     expect(output.finalPrompt).toContain("Festival: Diwali");
     expect(output.finalPrompt).toContain("Use references this way");
     expect(output.finalPrompt).toContain("Do not imitate these reference traits");
     expect(output.finalPrompt).toContain("Review checks to satisfy");
     expect(output.finalPrompt).toContain("Do not use project buildings, facades, amenities, brochures, floor plans, maps, or sales overlays");
-    expect(output.finalPrompt).toContain("Render exactly one festive poster composition per output");
+    expect(output.finalPrompt).toContain("This should resolve as one finished post image, not a slide deck");
     expect(output.finalPrompt).toContain("Return exactly one finished design per generated image");
     expect(output.finalPrompt).toContain('render the exact brand name "Northstar" as plain text only');
     expect(output.finalPrompt).toContain("Do not render any logo, monogram, emblem, icon mark, brand symbol, or house icon");

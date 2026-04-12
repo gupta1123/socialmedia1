@@ -16,9 +16,14 @@ import {
   type BootstrapMode,
   bootstrapSession,
   compileCreative,
+  compileCreativeV2,
   createBrand,
+  creativeFlowVersion,
+  defaultStyleVariationCount,
   generateFinals,
   generateStyleSeeds,
+  generateStyleSeedsV2,
+  styleVariationLimit,
   getCreativeJob,
   submitFeedback,
   uploadBrandAsset
@@ -119,12 +124,16 @@ type StudioContextValue = {
   pendingTargetKey: string | null;
   isPending: boolean;
   hasRunningJobs: boolean;
+  creativeFlowVersion: "v1" | "v2";
+  styleVariationCount: number;
+  styleVariationLimit: number;
   brandForm: BrandFormState;
   briefForm: BriefFormState;
   setMessage: (value: string | null) => void;
   setActiveBrandId: (value: string) => void;
   setBrandForm: React.Dispatch<React.SetStateAction<BrandFormState>>;
   setBriefForm: React.Dispatch<React.SetStateAction<BriefFormState>>;
+  setStyleVariationCount: (value: number) => void;
   resetCreateFlow: (overrides?: Partial<BriefFormState>) => void;
   refresh: (preferredBrandId?: string) => Promise<void>;
   createBrandRecord: () => Promise<boolean>;
@@ -132,7 +141,7 @@ type StudioContextValue = {
   uploadBrandAssetFile: (file: File, label: string, kind: AssetKind) => Promise<boolean>;
   compilePromptPackage: (options?: { silentSuccess?: boolean }) => Promise<PromptPackage | null>;
   generateSeeds: () => Promise<void>;
-  generateSeedsForPackage: (promptPackageId: string) => Promise<boolean>;
+  generateSeedsForPackage: (promptPackageId: string, promptPackageOverride?: PromptPackage) => Promise<boolean>;
   generateFinalImages: (selectedTemplateId?: string) => Promise<void>;
   generateFinalImagesForPackage: (promptPackageId: string, selectedTemplateId?: string) => Promise<boolean>;
   leaveFeedback: (outputId: string, verdict: OutputVerdict) => Promise<FeedbackResult | null>;
@@ -167,8 +176,8 @@ const defaultBriefForm: BriefFormState = {
   goal: "Drive enquiries for a premium residential project",
   prompt: "Create a premium real-estate post with a clear visual angle and restrained copy.",
   audience: "Homebuyers and investors",
-  offer: "Site visits now open",
-  exactText: "Luxury residences. Site visits now open.",
+  offer: "",
+  exactText: "",
   includeBrandLogo: false,
   includeReraQr: false,
   templateType: "announcement",
@@ -195,6 +204,7 @@ export function StudioProvider({
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [darkMode, setDarkMode] = useState(false);
   const [promptPackage, setPromptPackage] = useState<PromptPackage | null>(null);
+  const [styleVariationCount, setStyleVariationCountState] = useState(defaultStyleVariationCount);
   const [message, setMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [pendingTargetKey, setPendingTargetKey] = useState<string | null>(null);
@@ -476,6 +486,11 @@ export function StudioProvider({
     });
   }, []);
 
+  function setStyleVariationCount(value: number) {
+    if (!Number.isFinite(value)) return;
+    setStyleVariationCountState(Math.min(styleVariationLimit, Math.max(1, Math.trunc(value))));
+  }
+
   function toggleDarkMode() {
     setDarkMode((prev) => {
       const next = !prev;
@@ -581,11 +596,18 @@ export function StudioProvider({
     setPendingTargetKey("brief-compile");
 
     try {
-      const payload = await compileCreative(sessionToken, {
+      const basePayload = {
         ...briefForm,
         brandId: activeBrandId,
         referenceAssetIds: briefForm.selectedReferenceAssetIds
-      });
+      };
+      const payload =
+        creativeFlowVersion === "v2"
+          ? await compileCreativeV2(sessionToken, {
+              ...basePayload,
+              variationCount: styleVariationCount
+            })
+          : await compileCreative(sessionToken, basePayload);
       setPromptPackage(payload);
       if (!options?.silentSuccess) {
         setMessage("Prompt package compiled.");
@@ -602,10 +624,10 @@ export function StudioProvider({
 
   async function generateSeeds() {
     if (!promptPackage) return;
-    await generateSeedsForPackage(promptPackage.id);
+    await generateSeedsForPackage(promptPackage.id, promptPackage);
   }
 
-  async function generateSeedsForPackage(promptPackageId: string) {
+  async function generateSeedsForPackage(promptPackageId: string, promptPackageOverride?: PromptPackage) {
     if (!sessionToken) {
       return false;
     }
@@ -614,11 +636,40 @@ export function StudioProvider({
     setPendingTargetKey(`promptPackage:${promptPackageId}:seeds`);
 
     try {
-      await generateStyleSeeds(sessionToken, {
-        promptPackageId,
-        count: 3
-      });
-      setMessage("Generating style directions. Results will appear here automatically.");
+      const activePromptPackage =
+        promptPackageOverride?.id === promptPackageId
+          ? promptPackageOverride
+          : promptPackage?.id === promptPackageId
+            ? promptPackage
+            : null;
+      if (creativeFlowVersion === "v2" && activePromptPackage) {
+        await generateStyleSeedsV2(sessionToken, {
+          promptPackage: activePromptPackage,
+          variationCount: styleVariationCount
+        });
+        setPromptPackage((current) =>
+          current?.id === promptPackageId
+            ? {
+                ...current,
+                compilerTrace: {
+                  ...current.compilerTrace,
+                  persisted: true,
+                  v2PostOptionGeneration: true
+                }
+              }
+            : current
+        );
+      } else {
+        await generateStyleSeeds(sessionToken, {
+          promptPackageId,
+          count: Math.min(styleVariationCount, 4)
+        });
+      }
+      setMessage(
+        creativeFlowVersion === "v2"
+          ? "Generating post options. Results will appear here automatically."
+          : "Generating style directions. Results will appear here automatically."
+      );
 
       return true;
     } catch (error) {
@@ -728,12 +779,16 @@ export function StudioProvider({
         pendingTargetKey,
         isPending,
         hasRunningJobs,
+        creativeFlowVersion,
+        styleVariationCount,
+        styleVariationLimit,
         brandForm,
         briefForm,
         setMessage,
         setActiveBrandId,
         setBrandForm,
         setBriefForm,
+        setStyleVariationCount,
         resetCreateFlow,
         refresh,
         createBrandRecord,

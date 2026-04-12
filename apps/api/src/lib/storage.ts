@@ -19,6 +19,19 @@ export async function uploadBufferToStorage(
   }
 }
 
+export async function removeStorageObjects(paths: string[]) {
+  const uniquePaths = Array.from(new Set(paths.filter(Boolean)));
+  if (uniquePaths.length === 0) {
+    return;
+  }
+
+  const { error } = await supabaseAdmin.storage.from(env.SUPABASE_STORAGE_BUCKET).remove(uniquePaths);
+
+  if (error) {
+    throw error;
+  }
+}
+
 export async function downloadStorageBlob(path: string) {
   const { data, error } = await supabaseAdmin.storage.from(env.SUPABASE_STORAGE_BUCKET).download(path);
 

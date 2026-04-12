@@ -10,6 +10,7 @@ import type {
   DeliverablePriority,
   DeliverableRecord,
   DeliverableStatus,
+  ExternalPostReviewMode,
   ObjectiveCode,
   PostTypeRecord,
   ProjectRecord,
@@ -22,7 +23,8 @@ import {
   getPlanningTemplateOptions,
   getPostTypes,
   getProjects,
-  getWorkspaceMembers
+  getWorkspaceMembers,
+  uploadExternalPost
 } from "../../../lib/api";
 import { DataTable } from "../data-table";
 import {
@@ -43,6 +45,7 @@ type DeliverableFormState = {
   postTypeId: string;
   creativeTemplateId: string;
   ownerUserId: string;
+  reviewerUserId: string;
   objectiveCode: ObjectiveCode;
   channel: CreativeChannel;
   format: CreativeFormat;
@@ -87,6 +90,7 @@ function createDefaultDeliverableForm(): DeliverableFormState {
     postTypeId: "",
     creativeTemplateId: "",
     ownerUserId: "",
+    reviewerUserId: "",
     objectiveCode: "lead_gen",
     channel: "instagram-feed",
     format: "square",
@@ -113,18 +117,22 @@ export default function DeliverablesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [drawerMode, setDrawerMode] = useState<"create" | "upload">("create");
+  const [externalUploadFile, setExternalUploadFile] = useState<File | null>(null);
+  const [externalReviewMode, setExternalReviewMode] = useState<ExternalPostReviewMode>("review");
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<DeliverableFormState>(createDefaultDeliverableForm);
 
   const topbarActions = useMemo(
     () => (
-      <button
-        className="button button-primary"
-        onClick={() => setIsDrawerOpen(true)}
-        disabled={!activeBrandId || saving}
-      >
-        {saving ? "Saving post task…" : "New post task"}
-      </button>
+      <>
+        <button className="button button-ghost" onClick={() => openUploadDrawer()} disabled={!activeBrandId || saving}>
+          Upload post
+        </button>
+        <button className="button button-primary" onClick={() => openCreateDrawer()} disabled={!activeBrandId || saving}>
+          {saving ? "Saving post task…" : "New post task"}
+        </button>
+      </>
     ),
     [activeBrandId, saving]
   );
@@ -193,7 +201,7 @@ export default function DeliverablesPage() {
 
   useEffect(() => {
     if (!loading && shouldOpenNew && activeBrandId) {
-      setIsDrawerOpen(true);
+      openCreateDrawer();
     }
   }, [activeBrandId, loading, shouldOpenNew]);
 
@@ -258,6 +266,31 @@ export default function DeliverablesPage() {
     [form.postTypeId, form.projectId, templates]
   );
 
+  function openCreateDrawer() {
+    setDrawerMode("create");
+    setExternalUploadFile(null);
+    setForm({
+      ...createDefaultDeliverableForm(),
+      projectId: projectFilter ?? "",
+      campaignId: campaignFilter ?? ""
+    });
+    setIsDrawerOpen(true);
+  }
+
+  function openUploadDrawer() {
+    setDrawerMode("upload");
+    setExternalUploadFile(null);
+    setExternalReviewMode("review");
+    setForm({
+      ...createDefaultDeliverableForm(),
+      title: "External post upload",
+      projectId: projectFilter ?? "",
+      campaignId: campaignFilter ?? "",
+      status: "review"
+    });
+    setIsDrawerOpen(true);
+  }
+
   const tableColumns = useMemo(
     () => [
       {
@@ -319,6 +352,17 @@ export default function DeliverablesPage() {
         cell: (deliverable: DeliverableRecord) => <span>{formatDisplayDate(deliverable.scheduledFor)}</span>
       },
       {
+        id: "people",
+        header: "People",
+        sortValue: (deliverable: DeliverableRecord) => memberLabel(deliverable.ownerUserId, workspaceMembers),
+        cell: (deliverable: DeliverableRecord) => (
+          <div className="data-table-primary">
+            <strong className="data-table-title">{memberLabel(deliverable.ownerUserId, workspaceMembers)}</strong>
+            <span className="data-table-subtitle">Reviewer: {memberLabel(deliverable.reviewerUserId, workspaceMembers)}</span>
+          </div>
+        )
+      },
+      {
         id: "status",
         header: "Status",
         sortValue: (deliverable: DeliverableRecord) => deliverable.status,
@@ -347,7 +391,7 @@ export default function DeliverablesPage() {
         )
       }
     ],
-    [campaigns, postTypes, visibleProjects]
+    [campaigns, postTypes, visibleProjects, workspaceMembers]
   );
 
   async function handleCreateDeliverable(event: React.FormEvent) {
@@ -360,29 +404,59 @@ export default function DeliverablesPage() {
     setSaving(true);
 
     try {
-      await createDeliverable(sessionToken, {
-        workspaceId: bootstrap.workspace.id,
-        brandId: activeBrandId,
-        projectId: form.projectId,
-        campaignId: form.campaignId || undefined,
-        planningMode: form.campaignId ? "campaign" : "one_off",
-        postTypeId: form.postTypeId,
-        creativeTemplateId: form.creativeTemplateId || undefined,
-        objectiveCode: form.objectiveCode,
-        placementCode: form.channel,
-        contentFormat: mapCreativeFormatToContentFormat(form.format),
-        title: form.title,
-        briefText: form.briefText || undefined,
-        ctaText: form.ctaText || undefined,
-        scheduledFor: new Date(form.scheduledFor).toISOString(),
-        ownerUserId: form.ownerUserId || undefined,
-        priority: form.priority,
-        status: form.status,
-        sourceJson: {
-          source: "manual_deliverable",
-          creativeFormat: form.format
+      if (drawerMode === "upload") {
+        if (!externalUploadFile) {
+          throw new Error("Choose an image to upload");
         }
-      } satisfies CreateDeliverableInput);
+
+        await uploadExternalPost(sessionToken, {
+          file: externalUploadFile,
+          workspaceId: bootstrap.workspace.id,
+          brandId: activeBrandId,
+          projectId: form.projectId || null,
+          campaignId: form.campaignId || undefined,
+          postTypeId: form.postTypeId,
+          creativeTemplateId: form.creativeTemplateId || undefined,
+          placementCode: form.channel,
+          contentFormat: mapCreativeFormatToContentFormat(form.format),
+          creativeFormat: form.format,
+          objectiveCode: form.objectiveCode,
+          priority: form.priority,
+          reviewMode: externalReviewMode,
+          title: form.title,
+          briefText: form.briefText || undefined,
+          caption: form.briefText || undefined,
+          ctaText: form.ctaText || undefined,
+          scheduledFor: new Date(form.scheduledFor).toISOString(),
+          ownerUserId: form.ownerUserId || undefined,
+          reviewerUserId: form.reviewerUserId || undefined
+        });
+      } else {
+        await createDeliverable(sessionToken, {
+          workspaceId: bootstrap.workspace.id,
+          brandId: activeBrandId,
+          projectId: form.projectId,
+          campaignId: form.campaignId || undefined,
+          planningMode: form.campaignId ? "campaign" : "one_off",
+          postTypeId: form.postTypeId,
+          creativeTemplateId: form.creativeTemplateId || undefined,
+          objectiveCode: form.objectiveCode,
+          placementCode: form.channel,
+          contentFormat: mapCreativeFormatToContentFormat(form.format),
+          title: form.title,
+          briefText: form.briefText || undefined,
+          ctaText: form.ctaText || undefined,
+          scheduledFor: new Date(form.scheduledFor).toISOString(),
+          ownerUserId: form.ownerUserId || undefined,
+          reviewerUserId: form.reviewerUserId || undefined,
+          priority: form.priority,
+          status: form.status,
+          sourceJson: {
+            source: "manual_deliverable",
+            creativeFormat: form.format
+          }
+        } satisfies CreateDeliverableInput);
+      }
 
       const refreshed = await getDeliverables(sessionToken, {
         brandId: activeBrandId,
@@ -395,7 +469,8 @@ export default function DeliverablesPage() {
         projectId: projectFilter ?? ""
       });
       setIsDrawerOpen(false);
-      setMessage("Post task created.");
+      setExternalUploadFile(null);
+      setMessage(drawerMode === "upload" ? "External post uploaded." : "Post task created.");
     } catch (saveError) {
       setMessage(saveError instanceof Error ? saveError.message : "Post task creation failed");
     } finally {
@@ -526,7 +601,7 @@ export default function DeliverablesPage() {
         <div className="drawer-overlay" onClick={() => setIsDrawerOpen(false)}>
           <div className="drawer-content" onClick={(event) => event.stopPropagation()}>
             <div className="drawer-header">
-              <h2>Create post task</h2>
+              <h2>{drawerMode === "upload" ? "Upload external post" : "Create post task"}</h2>
               <button className="drawer-close" onClick={() => setIsDrawerOpen(false)} type="button">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 6 6 18" />
@@ -537,8 +612,34 @@ export default function DeliverablesPage() {
 
             <div className="drawer-body">
               <form className="planner-form" onSubmit={handleCreateDeliverable}>
+                {drawerMode === "upload" ? (
+                  <div className="planner-form-section">
+                    <p className="field-group-label">External creative</p>
+                    <div className="planner-form-grid">
+                      <label className="field-label planner-form-span-2">
+                        Upload image
+                        <input
+                          required
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/gif"
+                          onChange={(event) => setExternalUploadFile(event.target.files?.[0] ?? null)}
+                        />
+                      </label>
+
+                      <label className="field-label planner-form-span-2">
+                        Workflow
+                        <select value={externalReviewMode} onChange={(event) => setExternalReviewMode(event.target.value as ExternalPostReviewMode)}>
+                          <option value="review">Send to review</option>
+                          <option value="approved">Mark approved</option>
+                          <option value="scheduled">Schedule directly</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="planner-form-section">
-                  <p className="field-group-label">Post-task brief</p>
+                  <p className="field-group-label">{drawerMode === "upload" ? "Post metadata" : "Post-task brief"}</p>
                   <div className="planner-form-grid">
                     <label className="field-label planner-form-span-2">
                       Title
@@ -546,18 +647,18 @@ export default function DeliverablesPage() {
                         required
                         value={form.title}
                         onChange={(event) => setForm((state) => ({ ...state, title: event.target.value }))}
-                        placeholder="Instagram launch creative for Asteria Residences"
+                        placeholder={drawerMode === "upload" ? "External festive post / campaign creative" : "Instagram launch creative for Asteria Residences"}
                       />
                     </label>
 
                     <label className="field-label">
                       Project
                       <select
-                        required
+                        required={drawerMode !== "upload"}
                         value={form.projectId}
                         onChange={(event) => setForm((state) => ({ ...state, projectId: event.target.value }))}
                       >
-                        <option value="">Select project</option>
+                        <option value="">{drawerMode === "upload" ? "Brand-level / no project" : "Select project"}</option>
                         {visibleProjects.map((project) => (
                           <option key={project.id} value={project.id}>
                             {project.name}
@@ -625,6 +726,21 @@ export default function DeliverablesPage() {
                       <select
                         value={form.ownerUserId}
                         onChange={(event) => setForm((state) => ({ ...state, ownerUserId: event.target.value }))}
+                      >
+                        <option value="">Unassigned</option>
+                        {workspaceMembers.map((member) => (
+                          <option key={member.id} value={member.id}>
+                            {member.displayName ?? member.email}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="field-label">
+                      Reviewer
+                      <select
+                        value={form.reviewerUserId}
+                        onChange={(event) => setForm((state) => ({ ...state, reviewerUserId: event.target.value }))}
                       >
                         <option value="">Unassigned</option>
                         {workspaceMembers.map((member) => (
@@ -710,29 +826,31 @@ export default function DeliverablesPage() {
                       </select>
                     </label>
 
-                    <label className="field-label">
-                      Status
-                      <select
-                        value={form.status}
-                        onChange={(event) =>
-                          setForm((state) => ({ ...state, status: event.target.value as DeliverableStatus }))
-                        }
-                      >
-                        {statusOptions.map((status) => (
-                          <option key={status} value={status}>
-                            {formatStatus(status)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    {drawerMode !== "upload" ? (
+                      <label className="field-label">
+                        Status
+                        <select
+                          value={form.status}
+                          onChange={(event) =>
+                            setForm((state) => ({ ...state, status: event.target.value as DeliverableStatus }))
+                          }
+                        >
+                          {statusOptions.map((status) => (
+                            <option key={status} value={status}>
+                              {formatStatus(status)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
 
                     <label className="field-label planner-form-span-2">
-                      Brief
+                      {drawerMode === "upload" ? "Caption / notes" : "Brief"}
                       <textarea
                         rows={4}
                         value={form.briefText}
                         onChange={(event) => setForm((state) => ({ ...state, briefText: event.target.value }))}
-                        placeholder="Premium launch creative focused on architecture, facade quality, and site visit CTA."
+                        placeholder={drawerMode === "upload" ? "Caption, context, or reviewer notes for this uploaded post." : "Premium launch creative focused on architecture, facade quality, and site visit CTA."}
                       />
                     </label>
 
@@ -756,8 +874,8 @@ export default function DeliverablesPage() {
                   <button className="button button-ghost" type="button" onClick={() => setIsDrawerOpen(false)}>
                     Cancel
                   </button>
-                  <button className="button button-primary" type="submit" disabled={saving}>
-                    {saving ? "Saving…" : "Create post task"}
+                  <button className="button button-primary" type="submit" disabled={saving || !form.postTypeId || (drawerMode !== "upload" && !form.projectId) || (drawerMode === "upload" && !externalUploadFile)}>
+                    {saving ? "Saving…" : drawerMode === "upload" ? "Upload post" : "Create post task"}
                   </button>
                 </div>
               </form>
@@ -775,6 +893,11 @@ function formatObjective(value: ObjectiveCode) {
 
 function formatStatus(value: DeliverableStatus) {
   return value.replace("_", " ");
+}
+
+function memberLabel(userId: string | null, members: WorkspaceMemberRecord[]) {
+  const member = userId ? members.find((item) => item.id === userId) : null;
+  return member?.displayName ?? member?.email ?? "Unassigned";
 }
 
 function toLocalDateTimeValue(value: Date) {

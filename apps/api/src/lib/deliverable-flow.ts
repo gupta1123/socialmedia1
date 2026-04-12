@@ -92,7 +92,10 @@ export async function compileDeliverablePromptPackage(params: {
     },
     template: reusableTemplate
       ? {
+          id: reusableTemplate.id,
           name: reusableTemplate.name,
+          channel: reusableTemplate.channel,
+          format: reusableTemplate.format,
           basePrompt: reusableTemplate.basePrompt,
           config: reusableTemplate.config
         }
@@ -499,6 +502,8 @@ export async function resolveOrCreateAdHocDeliverable(params: {
     brief_text: params.brief.prompt,
     cta_text: params.brief.offer ?? null,
     scheduled_for: new Date().toISOString(),
+    owner_user_id: params.createdBy,
+    reviewer_user_id: params.createdBy,
     priority: "normal",
     status: "planned",
     source_json: {

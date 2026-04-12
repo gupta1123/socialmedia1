@@ -25,6 +25,8 @@ import type {
   CreativeBrief,
   DeliverableDetail,
   DeliverableRecord,
+  ExternalPostReviewMode,
+  ExternalPostUploadResponse,
   FestivalRecord,
   FeedbackRequest,
   FeedbackResult,
@@ -60,7 +62,14 @@ import type {
 } from "@image-lab/contracts";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const rawCreativeFlowVersion = process.env.NEXT_PUBLIC_CREATIVE_FLOW_VERSION;
+const rawStyleVariationCount = Number(process.env.NEXT_PUBLIC_STYLE_VARIATION_COUNT ?? "3");
+
+export type CreativeFlowVersion = "v1" | "v2";
 export type BootstrapMode = "full" | "light" | "create";
+export const creativeFlowVersion: CreativeFlowVersion = rawCreativeFlowVersion === "v2" ? "v2" : "v1";
+export const styleVariationLimit = creativeFlowVersion === "v2" ? 6 : 4;
+export const defaultStyleVariationCount = clampInt(rawStyleVariationCount, 1, styleVariationLimit, 3);
 export type PlanningTemplateOption = {
   id: string;
   workspaceId: string;
@@ -72,8 +81,62 @@ export type PlanningTemplateOption = {
   channel: CreativeTemplateRecord["channel"];
   format: CreativeTemplateRecord["format"];
 };
+
+export type CompileCreativeV2Payload = CreativeBrief & {
+  variationCount?: number;
+};
+
+export type StyleSeedV2Request = {
+  promptPackage: PromptPackage;
+  variationCount?: number;
+};
+
+export type StyleSeedV2Response = {
+  promptPackageId: string;
+  jobs: Array<{
+    id: string;
+    variationId: string;
+    variationTitle: string;
+    requestId: string | null;
+  }>;
+};
+
+export type ExternalPostUploadPayload = {
+  file: File;
+  workspaceId?: string | undefined;
+  brandId: string;
+  projectId?: string | null | undefined;
+  campaignId?: string | undefined;
+  seriesId?: string | undefined;
+  postTypeId: string;
+  creativeTemplateId?: string | undefined;
+  channelAccountId?: string | undefined;
+  placementCode: string;
+  contentFormat: string;
+  creativeFormat: string;
+  objectiveCode?: string | undefined;
+  priority?: string | undefined;
+  reviewMode?: ExternalPostReviewMode | undefined;
+  title: string;
+  briefText?: string | undefined;
+  caption?: string | undefined;
+  ctaText?: string | undefined;
+  scheduledFor?: string | undefined;
+  dueAt?: string | undefined;
+  ownerUserId?: string | undefined;
+  reviewerUserId?: string | undefined;
+};
+
 const responseCache = new Map<string, { data: unknown; expiresAt: number }>();
 const inflightRequests = new Map<string, Promise<unknown>>();
+
+function clampInt(value: number, min: number, max: number, fallback: number) {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
 
 function getCacheTtlMs(path: string) {
   if (path.startsWith("/api/session/bootstrap")) {
@@ -158,6 +221,12 @@ function getCacheTtlMs(path: string) {
 function clearResponseCache() {
   responseCache.clear();
   inflightRequests.clear();
+}
+
+function appendFormField(body: FormData, key: string, value: string | null | undefined) {
+  if (typeof value === "string" && value.trim().length > 0) {
+    body.append(key, value);
+  }
 }
 
 async function request<T>(path: string, token: string, init?: RequestInit) {
@@ -521,6 +590,7 @@ export function getDeliverables(
     campaignId?: string;
     seriesId?: string;
     ownerUserId?: string;
+    reviewerUserId?: string;
     planningMode?: "campaign" | "series" | "one_off" | "always_on" | "ad_hoc";
     status?: string;
     statusIn?: string[];
@@ -537,6 +607,7 @@ export function getDeliverables(
       campaignId: filters?.campaignId,
       seriesId: filters?.seriesId,
       ownerUserId: filters?.ownerUserId,
+      reviewerUserId: filters?.reviewerUserId,
       planningMode: filters?.planningMode,
       status: filters?.status,
       statusIn: filters?.statusIn?.join(","),
@@ -558,6 +629,39 @@ export function createDeliverable(token: string, payload: CreateDeliverableInput
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
+  });
+}
+
+export function uploadExternalPost(token: string, payload: ExternalPostUploadPayload) {
+  const body = new FormData();
+  body.append("file", payload.file);
+  body.append("brandId", payload.brandId);
+  body.append("postTypeId", payload.postTypeId);
+  body.append("placementCode", payload.placementCode);
+  body.append("contentFormat", payload.contentFormat);
+  body.append("creativeFormat", payload.creativeFormat);
+  body.append("title", payload.title);
+
+  appendFormField(body, "workspaceId", payload.workspaceId);
+  appendFormField(body, "projectId", payload.projectId ?? undefined);
+  appendFormField(body, "campaignId", payload.campaignId);
+  appendFormField(body, "seriesId", payload.seriesId);
+  appendFormField(body, "creativeTemplateId", payload.creativeTemplateId);
+  appendFormField(body, "channelAccountId", payload.channelAccountId);
+  appendFormField(body, "objectiveCode", payload.objectiveCode);
+  appendFormField(body, "priority", payload.priority);
+  appendFormField(body, "reviewMode", payload.reviewMode);
+  appendFormField(body, "briefText", payload.briefText);
+  appendFormField(body, "caption", payload.caption);
+  appendFormField(body, "ctaText", payload.ctaText);
+  appendFormField(body, "scheduledFor", payload.scheduledFor);
+  appendFormField(body, "dueAt", payload.dueAt);
+  appendFormField(body, "ownerUserId", payload.ownerUserId);
+  appendFormField(body, "reviewerUserId", payload.reviewerUserId);
+
+  return request<ExternalPostUploadResponse>("/api/deliverables/external-upload", token, {
+    method: "POST",
+    body
   });
 }
 
@@ -602,11 +706,15 @@ export function approvePostVersion(
   );
 }
 
-export function getReviewQueue(token: string, filters?: { brandId?: string; deliverableId?: string }) {
+export function getReviewQueue(
+  token: string,
+  filters?: { brandId?: string; deliverableId?: string; scope?: "my" | "team" | "unassigned" }
+) {
   return request<ReviewQueueEntry[]>(
     withQuery("/api/review-queue", {
       brandId: filters?.brandId,
-      deliverableId: filters?.deliverableId
+      deliverableId: filters?.deliverableId,
+      scope: filters?.scope
     }),
     token
   );
@@ -866,8 +974,24 @@ export function compileCreative(token: string, payload: CreativeBrief) {
   });
 }
 
+export function compileCreativeV2(token: string, payload: CompileCreativeV2Payload) {
+  return request<PromptPackage>("/api/creative/compile-v2", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
 export function generateStyleSeeds(token: string, payload: StyleSeedRequest) {
   return request<{ id: string; requestId: string | null }>("/api/creative/style-seeds", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function generateStyleSeedsV2(token: string, payload: StyleSeedV2Request) {
+  return request<StyleSeedV2Response>("/api/creative/style-seeds-v2", token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)

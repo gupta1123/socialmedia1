@@ -41,33 +41,56 @@ export function SkeletonRow({ className = "", style }: { className?: string, sty
 
 export function CalendarSkeleton() {
   return (
-    <div className="calendar-week-grid" style={{ pointerEvents: "none" }}>
-      {Array.from({ length: 7 }).map((_, i) => (
-        <div 
-          className="calendar-week-column" 
-          key={i} 
-          style={{ height: "600px", opacity: 1 - (i * 0.05) }}
-        >
-          <div className="calendar-week-column-header">
-            <div className="calendar-week-heading-copy">
-              <Skeleton width="24px" height="0.75rem" style={{ marginBottom: "4px" }} />
-              <Skeleton width="18px" height="1.5rem" />
+    <div className="calendar-shell">
+      <div className="calendar-toolbar-skeleton">
+        <div className="calendar-toolbar-skeleton-nav">
+          <Skeleton width="32px" height="32px" />
+          <Skeleton width="64px" height="32px" />
+          <Skeleton width="32px" height="32px" />
+        </div>
+        <div className="calendar-toolbar-skeleton-title">
+          <Skeleton width="180px" height="24px" />
+          <Skeleton width="240px" height="16px" />
+        </div>
+        <div className="calendar-toolbar-skeleton-filters">
+          <Skeleton width="120px" height="32px" />
+          <Skeleton width="120px" height="32px" />
+          <Skeleton width="120px" height="32px" />
+        </div>
+      </div>
+      <div className="calendar-week-grid" style={{ pointerEvents: "none" }}>
+        {Array.from({ length: 7 }).map((_, i) => (
+          <div 
+            className="calendar-week-column" 
+            key={i}
+            style={{ height: "500px", opacity: 1 - (i * 0.03) }}
+          >
+            <div className="calendar-week-column-header">
+              <div className="calendar-week-heading-copy">
+                <Skeleton width="24px" height="10px" />
+                <Skeleton width="28px" height="1.4rem" />
+              </div>
+            </div>
+            <div className="calendar-week-column-body" style={{ padding: "8px", display: "flex", flexDirection: "column", gap: "8px" }}>
+              {i % 2 === 0 && (
+                <div className="calendar-event-card-skeleton">
+                  <Skeleton height="60px" style={{ borderRadius: "6px" }} />
+                </div>
+              )}
+              {i % 3 === 0 && (
+                <div className="calendar-event-card-skeleton">
+                  <Skeleton height="48px" style={{ borderRadius: "6px" }} />
+                </div>
+              )}
+              {i % 4 === 0 && (
+                <div className="calendar-event-card-skeleton">
+                  <Skeleton height="36px" style={{ borderRadius: "6px" }} />
+                </div>
+              )}
             </div>
           </div>
-          <div className="calendar-week-column-body" style={{ padding: "12px" }}>
-            {i % 2 === 0 && (
-              <div className="calendar-event-card-skeleton" style={{ marginBottom: "12px" }}>
-                <Skeleton height="80px" style={{ borderRadius: "var(--radius-md)" }} />
-              </div>
-            )}
-            {i % 3 === 0 && (
-              <div className="calendar-event-card-skeleton">
-                <Skeleton height="120px" style={{ borderRadius: "var(--radius-md)" }} />
-              </div>
-            )}
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

@@ -14,7 +14,7 @@ This document covers the current deployment flow for Briefly Social.
 - `apps/web`: Next.js frontend
 - `apps/api`: Fastify backend
 - `packages/contracts`: shared schemas
-- `skills/prompt`: Agno prompt skills
+- `skills/prompt/v1` and `skills/prompt/v2`: versioned Agno prompt skills
 - `supabase`: database migrations
 
 ## Local development
@@ -51,11 +51,18 @@ SUPABASE_SERVICE_ROLE_KEY=...
 SUPABASE_JWT_SECRET=...
 SUPABASE_STORAGE_BUCKET=creative-assets
 CREATIVE_DIRECTOR_MODE=agno
+CREATIVE_DIRECTOR_V2_MODE=auto
+CREATIVE_DIRECTOR_V2_TRANSPORT=worker
 AGNO_PYTHON_BIN=python3
 AGNO_AGENT_SCRIPT=./agents/creative_director.py
+AGNO_AGENT_V2_SCRIPT=./agents/creative_director_v2.py
+AGNO_AGENT_V2_SERVER_URL=http://127.0.0.1:8787/api/compile-v2
+AGNO_AGENT_V2_SERVER_TIMEOUT_SEC=180
 OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-4o-mini
 ```
+
+For local V2 prompt testing with the Python notebook server, set `CREATIVE_DIRECTOR_V2_TRANSPORT=server` and run `python3 local-playgrounds/agno-prompt-lab/server.py`. For Heroku, keep `CREATIVE_DIRECTOR_V2_TRANSPORT=worker` unless the Python server is deployed as a separate reachable process.
 
 Image provider, choose one:
 

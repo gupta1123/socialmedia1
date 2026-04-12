@@ -10,6 +10,7 @@ import type {
   DeliverablePriority,
   DeliverableRecord,
   DeliverableStatus,
+  ExternalPostReviewMode,
   ObjectiveCode,
   PostingWindowRecord,
   PostTypeRecord,
@@ -27,13 +28,14 @@ import {
   getPostTypes,
   getProjects,
   getWorkspaceMembers,
+  uploadExternalPost,
   updateDeliverable,
   type PlanningTemplateOption
 } from "../../../lib/api";
 import { mapCreativeFormatToContentFormat } from "../../../lib/deliverable-helpers";
 import { getAllowedFormats, getDefaultFormat, getPlacementSpec } from "../../../lib/placement-specs";
 import { buildPostingWindowSuggestions } from "../../../lib/posting-windows";
-import { DEFAULT_CALENDAR_SURFACE_STATUSES, isEligibleCalendarCandidate, isVisibleOnCalendar } from "../../../lib/workflow";
+import { DEFAULT_CALENDAR_SURFACE_STATUSES, isEligibleCalendarCandidate, isMovableCalendarStatus, isVisibleOnCalendar } from "../../../lib/workflow";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions } from "../topbar-actions-context";
 import { FloatingTooltip } from "../floating-tooltip";
@@ -98,6 +100,7 @@ export default function CalendarPage() {
   const [postTypes, setPostTypes] = useState<PostTypeRecord[]>([]);
   const [templates, setTemplates] = useState<PlanningTemplateOption[]>([]);
   const [postingWindows, setPostingWindows] = useState<PostingWindowRecord[]>([]);
+  const [editorDataBrandId, setEditorDataBrandId] = useState<string | null>(null);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -110,7 +113,9 @@ export default function CalendarPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [pickerDate, setPickerDate] = useState<Date | null>(null);
   const [editingDeliverableId, setEditingDeliverableId] = useState<string | null>(null);
-  const [drawerMode, setDrawerMode] = useState<"create" | "edit" | "schedule">("create");
+  const [drawerMode, setDrawerMode] = useState<"create" | "edit" | "schedule" | "upload">("create");
+  const [externalUploadFile, setExternalUploadFile] = useState<File | null>(null);
+  const [externalReviewMode, setExternalReviewMode] = useState<ExternalPostReviewMode>("review");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [movingDeliverableId, setMovingDeliverableId] = useState<string | null>(null);
@@ -119,13 +124,22 @@ export default function CalendarPage() {
 
   const topbarActions = useMemo(
     () => (
-      <button
-        className="button button-primary"
-        onClick={() => openCreateDrawer(new Date())}
-        disabled={!activeBrandId || saving || editorDataLoading}
-      >
-        {saving ? "Saving…" : editorDataLoading ? "Loading…" : "New post task"}
-      </button>
+      <>
+        <button
+          className="button button-ghost"
+          onClick={() => openUploadDrawer(new Date())}
+          disabled={!activeBrandId || saving || editorDataLoading}
+        >
+          Upload post
+        </button>
+        <button
+          className="button button-primary"
+          onClick={() => openCreateDrawer(new Date())}
+          disabled={!activeBrandId || saving || editorDataLoading}
+        >
+          {saving ? "Saving…" : editorDataLoading ? "Loading…" : "New post task"}
+        </button>
+      </>
     ),
     [activeBrandId, editorDataLoading, saving]
   );
@@ -247,13 +261,19 @@ export default function CalendarPage() {
     () =>
       approvedCandidates
         .filter((deliverable) => isEligibleCalendarCandidate(deliverable.status))
+        .filter((deliverable) => {
+          if (channelFilter !== "all" && deliverable.placementCode !== channelFilter) return false;
+          if (projectFilter !== "all" && deliverable.projectId !== projectFilter) return false;
+          return true;
+        })
         .sort((left, right) => new Date(left.scheduledFor).getTime() - new Date(right.scheduledFor).getTime()),
-    [approvedCandidates]
+    [approvedCandidates, channelFilter, projectFilter]
   );
 
   const activePlacement = getPlacementSpec(form.channel, form.format) ?? getAllowedFormats(form.channel)[0]!;
   const editingDeliverable = editingDeliverableId ? allKnownDeliverables.find((item) => item.id === editingDeliverableId) ?? null : null;
   const isScheduleMode = drawerMode === "schedule";
+  const isUploadMode = drawerMode === "upload";
   const suggestedPostingSlots = useMemo(
     () => buildPostingWindowSuggestions(postingWindows, form.channel, new Date(form.scheduledFor)),
     [form.channel, form.scheduledFor, postingWindows]
@@ -261,7 +281,14 @@ export default function CalendarPage() {
 
   async function ensureEditorData() {
     if (!sessionToken || !activeBrandId) return;
-    if (templates.length > 0 && postingWindows.length > 0 && workspaceMembers.length > 0) return;
+    if (
+      editorDataBrandId === activeBrandId &&
+      templates.length > 0 &&
+      postingWindows.length > 0 &&
+      workspaceMembers.length > 0
+    ) {
+      return;
+    }
 
     setEditorDataLoading(true);
     try {
@@ -273,6 +300,7 @@ export default function CalendarPage() {
       setTemplates(templateRecords);
       setPostingWindows(postingWindowRecords);
       setWorkspaceMembers(memberRecords);
+      setEditorDataBrandId(activeBrandId);
     } finally {
       setEditorDataLoading(false);
     }
@@ -285,7 +313,27 @@ export default function CalendarPage() {
       setPickerDate(null);
       setEditingDeliverableId(null);
       setDrawerMode("create");
+      setExternalUploadFile(null);
       setForm(createDefaultDeliverableForm(date ?? currentDate));
+      setIsDrawerOpen(true);
+    })();
+  }
+
+  function openUploadDrawer(date?: Date, defaultReviewMode: ExternalPostReviewMode = "review") {
+    void (async () => {
+      await ensureEditorData();
+      setExpandedDay(null);
+      setPickerDate(null);
+      setEditingDeliverableId(null);
+      setDrawerMode("upload");
+      setExternalUploadFile(null);
+      setExternalReviewMode(defaultReviewMode);
+      setForm({
+        ...createDefaultDeliverableForm(date ?? currentDate),
+        title: "External post upload",
+        briefText: "",
+        status: "review"
+      });
       setIsDrawerOpen(true);
     })();
   }
@@ -297,6 +345,7 @@ export default function CalendarPage() {
       setPickerDate(null);
       setEditingDeliverableId(deliverable.id);
       setDrawerMode("edit");
+      setExternalUploadFile(null);
       setForm(toDeliverableFormState(deliverable));
       setIsDrawerOpen(true);
     })();
@@ -317,6 +366,7 @@ export default function CalendarPage() {
     setExpandedDay(null);
     setEditingDeliverableId(deliverable.id);
     setDrawerMode("schedule");
+    setExternalUploadFile(null);
     setForm({
       ...toDeliverableFormState(deliverable),
       scheduledFor: toLocalDateTimeValue(nextDate),
@@ -363,6 +413,47 @@ export default function CalendarPage() {
     setSaving(true);
 
     try {
+      if (isUploadMode) {
+        if (!externalUploadFile) {
+          throw new Error("Choose an image to upload");
+        }
+
+        await uploadExternalPost(sessionToken, {
+          file: externalUploadFile,
+          workspaceId: bootstrap.workspace.id,
+          brandId: activeBrandId,
+          projectId: form.projectId || null,
+          campaignId: form.campaignId || undefined,
+          postTypeId: form.postTypeId,
+          creativeTemplateId: form.creativeTemplateId || undefined,
+          placementCode: form.channel,
+          contentFormat: mapCreativeFormatToContentFormat(form.format),
+          creativeFormat: form.format,
+          objectiveCode: form.objectiveCode,
+          priority: form.priority,
+          reviewMode: externalReviewMode,
+          title: form.title,
+          briefText: form.briefText || undefined,
+          caption: form.briefText || undefined,
+          ctaText: form.ctaText || undefined,
+          scheduledFor: new Date(form.scheduledFor).toISOString(),
+          ownerUserId: form.ownerUserId || undefined,
+          reviewerUserId: form.ownerUserId || undefined
+        });
+
+        await reloadDeliverables();
+        setIsDrawerOpen(false);
+        setExternalUploadFile(null);
+        setMessage(
+          externalReviewMode === "scheduled"
+            ? "External post uploaded and scheduled."
+            : externalReviewMode === "approved"
+              ? "External post uploaded as approved."
+              : "External post uploaded for review."
+        );
+        return;
+      }
+
       const payload = {
         projectId: form.projectId,
         campaignId: form.campaignId || undefined,
@@ -443,6 +534,12 @@ export default function CalendarPage() {
       return false;
     }
 
+    if (!isMovableCalendarStatus(deliverable.status)) {
+      setMessage("Published or archived posts cannot be rescheduled from the calendar.");
+      setDraggedDeliverableId(null);
+      return false;
+    }
+
     const existingDate = new Date(deliverable.scheduledFor);
     const nextDate = new Date(targetDate);
     nextDate.setHours(existingDate.getHours(), existingDate.getMinutes(), 0, 0);
@@ -507,9 +604,7 @@ export default function CalendarPage() {
   if (loading) {
     return (
       <div className="page-stack calendar-page">
-        <section className="calendar-shell">
-          <CalendarSkeleton />
-        </section>
+        <CalendarSkeleton />
       </div>
     );
   }
@@ -627,10 +722,13 @@ export default function CalendarPage() {
                 <p className="panel-label">Day view</p>
                 <h2>{formatAgendaHeading(expandedDay)}</h2>
                 <p className="calendar-day-drawer-subline">
-                  {expandedDayDeliverables.length} scheduled {expandedDayDeliverables.length === 1 ? "post task" : "post tasks"}
+                  {expandedDayDeliverables.length} {expandedDayDeliverables.length === 1 ? "post task" : "post tasks"}
                 </p>
               </div>
               <div className="calendar-day-drawer-actions">
+                <button className="button button-ghost" onClick={() => openUploadDrawer(expandedDay, "scheduled")} type="button">
+                  Upload post
+                </button>
                 <button className="button button-primary" onClick={() => openPicker(expandedDay)} type="button">
                   Add post
                 </button>
@@ -659,7 +757,7 @@ export default function CalendarPage() {
               ) : (
                 <div className="empty-state empty-state-tall">
                   <strong>No scheduled post tasks on this day</strong>
-                  <p>Add an approved post task or create a new one for this date.</p>
+                  <p>Add an approved post task, upload external creative, or create a new one for this date.</p>
                 </div>
               )}
             </div>
@@ -686,9 +784,14 @@ export default function CalendarPage() {
             <div className="drawer-body calendar-picker-body">
               <div className="calendar-picker-toolbar">
                 <p>Pick from approved post tasks that are ready to schedule.</p>
-                <button className="button button-ghost" onClick={() => openCreateDrawer(pickerDate)} type="button">
-                  New post task
-                </button>
+                <div className="calendar-picker-actions">
+                  <button className="button button-ghost" onClick={() => openUploadDrawer(pickerDate, "scheduled")} type="button">
+                    Upload post
+                  </button>
+                  <button className="button button-ghost" onClick={() => openCreateDrawer(pickerDate)} type="button">
+                    New post task
+                  </button>
+                </div>
               </div>
 
               {availableApprovedPostTasks.length > 0 ? (
@@ -739,7 +842,13 @@ export default function CalendarPage() {
           <div className="drawer-content" onClick={(event) => event.stopPropagation()}>
             <div className="drawer-header">
               <h2>
-                {isScheduleMode ? "Schedule post" : editingDeliverableId ? "Edit post task" : "Create post task"}
+                {isScheduleMode
+                  ? "Schedule post"
+                  : isUploadMode
+                    ? "Upload external post"
+                    : editingDeliverableId
+                      ? "Edit post task"
+                      : "Create post task"}
               </h2>
               <button className="drawer-close" onClick={() => setIsDrawerOpen(false)} type="button">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -776,6 +885,32 @@ export default function CalendarPage() {
                   </div>
                 ) : null}
 
+                {isUploadMode ? (
+                  <div className="planner-form-section">
+                    <p className="field-group-label">External creative</p>
+                    <div className="planner-form-grid">
+                      <label className="field-label planner-form-span-2">
+                        Upload image
+                        <input
+                          required
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/gif"
+                          onChange={(event) => setExternalUploadFile(event.target.files?.[0] ?? null)}
+                        />
+                      </label>
+
+                      <label className="field-label planner-form-span-2">
+                        Workflow
+                        <select value={externalReviewMode} onChange={(event) => setExternalReviewMode(event.target.value as ExternalPostReviewMode)}>
+                          <option value="review">Send to review</option>
+                          <option value="approved">Mark approved</option>
+                          <option value="scheduled">Schedule directly</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+
                 {!isScheduleMode ? (
                   <div className="planner-form-section">
                     <p className="field-group-label">Content</p>
@@ -786,23 +921,23 @@ export default function CalendarPage() {
                           required
                           value={form.title}
                           onChange={(event) => setForm((state) => ({ ...state, title: event.target.value }))}
-                          placeholder="Weekend site visit creative"
+                          placeholder={isUploadMode ? "External festive post / campaign creative" : "Weekend site visit creative"}
                         />
                       </label>
 
                       <label className="field-label planner-form-span-2">
-                        Brief
+                        {isUploadMode ? "Caption / notes" : "Brief"}
                         <textarea
                           value={form.briefText}
                           onChange={(event) => setForm((state) => ({ ...state, briefText: event.target.value }))}
-                          placeholder="What should this post communicate?"
+                          placeholder={isUploadMode ? "Caption, context, or reviewer notes for this uploaded post" : "What should this post communicate?"}
                         />
                       </label>
 
                       <label className="field-label">
                         Project
-                        <select required value={form.projectId} onChange={(event) => setForm((state) => ({ ...state, projectId: event.target.value }))}>
-                          <option value="">Select project</option>
+                        <select value={form.projectId} onChange={(event) => setForm((state) => ({ ...state, projectId: event.target.value }))}>
+                          <option value="">Brand-level / no project</option>
                           {projects.map((project) => (
                             <option key={project.id} value={project.id}>
                               {project.name}
@@ -813,7 +948,18 @@ export default function CalendarPage() {
 
                       <label className="field-label">
                         Campaign
-                        <select value={form.campaignId} onChange={(event) => setForm((state) => ({ ...state, campaignId: event.target.value }))}>
+                        <select
+                          value={form.campaignId}
+                          onChange={(event) => {
+                            const campaignId = event.target.value;
+                            const campaign = campaigns.find((item) => item.id === campaignId) ?? null;
+                            setForm((state) => ({
+                              ...state,
+                              campaignId,
+                              projectId: campaign?.primaryProjectId ?? state.projectId
+                            }));
+                          }}
+                        >
                           <option value="">Standalone</option>
                           {campaigns.map((campaign) => (
                             <option key={campaign.id} value={campaign.id}>
@@ -882,16 +1028,18 @@ export default function CalendarPage() {
                         </select>
                       </label>
 
-                      <label className="field-label">
-                        Status
-                        <select value={form.status} onChange={(event) => setForm((state) => ({ ...state, status: event.target.value as DeliverableStatus }))}>
-                          {statusOptions.map((status) => (
-                            <option key={status} value={status}>
-                              {formatStatus(status)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      {!isUploadMode ? (
+                        <label className="field-label">
+                          Status
+                          <select value={form.status} onChange={(event) => setForm((state) => ({ ...state, status: event.target.value as DeliverableStatus }))}>
+                            {statusOptions.map((status) => (
+                              <option key={status} value={status}>
+                                {formatStatus(status)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
 
                       <label className="field-label">
                         Priority
@@ -1035,8 +1183,20 @@ export default function CalendarPage() {
                         {deleting ? "Deleting…" : "Delete"}
                       </button>
                     ) : null}
-                    <button className="button button-primary" disabled={saving || !form.projectId || !form.postTypeId} type="submit">
-                      {saving ? "Saving…" : isScheduleMode ? "Save schedule" : editingDeliverableId ? "Save changes" : "Save post task"}
+                    <button
+                      className="button button-primary"
+                      disabled={saving || !form.postTypeId || (isUploadMode && !externalUploadFile)}
+                      type="submit"
+                    >
+                      {saving
+                        ? "Saving…"
+                        : isScheduleMode
+                          ? "Save schedule"
+                          : isUploadMode
+                            ? "Upload post"
+                            : editingDeliverableId
+                              ? "Save changes"
+                              : "Save post task"}
                     </button>
                   </div>
                 </div>
@@ -1128,6 +1288,7 @@ function MonthView({
                   campaignMap={campaignMap}
                   compact
                   deliverable={deliverable}
+                  draggableCard={isMovableCalendarStatus(deliverable.status)}
                   moving={movingDeliverableId === deliverable.id}
                   onEdit={onEditDeliverable}
                   onSetDraggedDeliverableId={onSetDraggedDeliverableId}
@@ -1237,6 +1398,7 @@ function WeekView({
                   key={deliverable.id}
                   campaignMap={campaignMap}
                   deliverable={deliverable}
+                  draggableCard={isMovableCalendarStatus(deliverable.status)}
                   moving={movingDeliverableId === deliverable.id}
                   onEdit={onEditDeliverable}
                   onSetDraggedDeliverableId={onSetDraggedDeliverableId}
@@ -1549,7 +1711,7 @@ function createDefaultDeliverableForm(date = new Date()): DeliverableFormState {
     channel: "instagram-feed",
     format: "square",
     scheduledFor: toLocalDateTimeValue(next),
-    status: "planned",
+    status: "scheduled",
     priority: "normal"
   };
 }

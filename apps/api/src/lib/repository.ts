@@ -57,6 +57,7 @@ type AssetRow = {
   file_name: string;
   mime_type: string;
   storage_path: string;
+  metadata_json: Record<string, unknown> | null;
 };
 
 type StyleTemplateRow = {
@@ -267,7 +268,7 @@ export async function getBrandProfileVersion(profileVersionId: string) {
 export async function listBrandAssets(brandId: string): Promise<BrandAssetRecord[]> {
   const { data, error } = await supabaseAdmin
     .from("brand_assets")
-    .select("id, workspace_id, brand_id, project_id, kind, label, file_name, mime_type, storage_path")
+    .select("id, workspace_id, brand_id, project_id, kind, label, file_name, mime_type, storage_path, metadata_json")
     .eq("brand_id", brandId)
     .order("created_at", { ascending: false })
     .returns<AssetRow[]>();
@@ -285,7 +286,8 @@ export async function listBrandAssets(brandId: string): Promise<BrandAssetRecord
     label: asset.label,
     fileName: asset.file_name,
     mimeType: asset.mime_type,
-    storagePath: asset.storage_path
+    storagePath: asset.storage_path,
+    metadataJson: asset.metadata_json ?? {}
   }));
 }
 
@@ -338,7 +340,7 @@ export async function getBrandAssetCounts(brandId: string) {
 export async function listWorkspaceAssets(workspaceId: string, brandId?: string): Promise<BrandAssetRecord[]> {
   let query = supabaseAdmin
     .from("brand_assets")
-    .select("id, workspace_id, brand_id, project_id, kind, label, file_name, mime_type, storage_path")
+    .select("id, workspace_id, brand_id, project_id, kind, label, file_name, mime_type, storage_path, metadata_json")
     .eq("workspace_id", workspaceId);
 
   if (brandId) {
@@ -360,7 +362,8 @@ export async function listWorkspaceAssets(workspaceId: string, brandId?: string)
     label: asset.label,
     fileName: asset.file_name,
     mimeType: asset.mime_type,
-    storagePath: asset.storage_path
+    storagePath: asset.storage_path,
+    metadataJson: asset.metadata_json ?? {}
   }));
 }
 
@@ -523,6 +526,9 @@ export async function getPromptPackage(promptPackageId: string): Promise<PromptP
     throw new Error("Prompt package not found");
   }
 
+  const compilerTrace = row.compiler_trace ?? {};
+  const variations = Array.isArray(compilerTrace.variations) ? compilerTrace.variations : [];
+
   return {
     id: row.id,
     workspaceId: row.workspace_id,
@@ -542,8 +548,9 @@ export async function getPromptPackage(promptPackageId: string): Promise<PromptP
     templateType: row.template_type ?? undefined,
     referenceStrategy: row.reference_strategy,
     referenceAssetIds: row.reference_asset_ids ?? [],
+    variations,
     resolvedConstraints: row.resolved_constraints ?? {},
-    compilerTrace: row.compiler_trace ?? {}
+    compilerTrace
   };
 }
 

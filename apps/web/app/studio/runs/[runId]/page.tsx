@@ -158,6 +158,10 @@ export default function RunDetailPage() {
   const resolvedFinals = detail.finalOutputs.filter((output) => output.reviewState !== "pending_review");
   const hasRunningJobs = detail.jobs.some((job) => job.status === "queued" || job.status === "processing");
   const canGenerateReferenceFinal = detail.promptPackage.referenceAssetIds.length > 0;
+  const isV2Run =
+    detail.promptPackage.compilerTrace.endpoint === "/api/creative/compile-v2" ||
+    detail.promptPackage.compilerTrace.pipeline === "v2-notebook-two-agent" ||
+    detail.promptPackage.compilerTrace.v2PostOptionGeneration === true;
   const seedTemplateLabelById = new Map(detail.seedTemplates.map((template) => [template.id, template.label]));
   const seedPendingKey = `promptPackage:${detail.promptPackage.id}:seeds`;
   const referenceFinalPendingKey = `promptPackage:${detail.promptPackage.id}:references`;
@@ -182,27 +186,37 @@ export default function RunDetailPage() {
               type="button"
             >
               {pendingAction === "generate-seeds" && pendingTargetKey === seedPendingKey
-                ? "Exploring styles…"
-                : "Explore styles"}
+                ? isV2Run
+                  ? "Generating options…"
+                  : "Exploring styles…"
+                : isV2Run
+                  ? "Generate options"
+                  : "Explore styles"}
             </button>
-            <button
-              className="button button-primary"
-              disabled={pendingTargetKey === referenceFinalPendingKey || !canGenerateReferenceFinal}
-              onClick={() => void handleGenerateFinals()}
-              title={!canGenerateReferenceFinal ? "Upload references if you want to create options from brand references" : ""}
-              type="button"
-            >
-              {pendingAction === "generate-finals" && pendingTargetKey === referenceFinalPendingKey
-                ? "Creating options…"
-                : "Create with references"}
-            </button>
+            {!isV2Run ? (
+              <button
+                className="button button-primary"
+                disabled={pendingTargetKey === referenceFinalPendingKey || !canGenerateReferenceFinal}
+                onClick={() => void handleGenerateFinals()}
+                title={!canGenerateReferenceFinal ? "Upload references if you want to create options from brand references" : ""}
+                type="button"
+              >
+                {pendingAction === "generate-finals" && pendingTargetKey === referenceFinalPendingKey
+                  ? "Creating options…"
+                  : "Create with references"}
+              </button>
+            ) : null}
           </div>
         </div>
       </header>
 
       {hasRunningJobs ? (
         <div className="status-banner" style={{ marginBottom: "24px" }}>
-          <span>This run is still processing. New styles and post options will appear here automatically.</span>
+          <span>
+            {isV2Run
+              ? "This run is still processing. New post options will appear here automatically."
+              : "This run is still processing. New styles and post options will appear here automatically."}
+          </span>
         </div>
       ) : null}
 
@@ -301,14 +315,22 @@ export default function RunDetailPage() {
             ) : (
               <div className="empty-state">
                 <strong>No post options yet</strong>
-                <p>Explore styles below or create options directly from your selected references.</p>
+                <p>
+                  {isV2Run
+                    ? "Generate options to create finished post candidates from this prompt package."
+                    : "Explore styles below or create options directly from your selected references."}
+                </p>
                 <div className="hero-actions">
                 <button className="button button-primary" onClick={() => void handleGenerateDirections()} type="button">
                   {pendingAction === "generate-seeds" && pendingTargetKey === seedPendingKey
-                    ? "Exploring styles…"
-                    : "Explore styles"}
+                    ? isV2Run
+                      ? "Generating options…"
+                      : "Exploring styles…"
+                    : isV2Run
+                      ? "Generate options"
+                      : "Explore styles"}
                 </button>
-                {canGenerateReferenceFinal ? (
+                {!isV2Run && canGenerateReferenceFinal ? (
                   <button className="button button-ghost" onClick={() => void handleGenerateFinals()} type="button">
                     {pendingAction === "generate-finals" && pendingTargetKey === referenceFinalPendingKey
                       ? "Creating options…"
@@ -320,7 +342,8 @@ export default function RunDetailPage() {
             )}
           </article>
 
-          <article className="panel">
+          {detail.seedTemplates.length > 0 ? (
+            <article className="panel">
             <div className="panel-header">
               <div>
                 <p className="panel-label">Style exploration</p>
@@ -380,7 +403,8 @@ export default function RunDetailPage() {
                 </button>
               </div>
             )}
-          </article>
+            </article>
+          ) : null}
         </main>
 
         <aside className="page-span-4 page-stack">
@@ -433,7 +457,7 @@ export default function RunDetailPage() {
           <article className="sidebar-panel">
             <h3>Generation logic</h3>
             <div className="property-list">
-              <PromptSection label="Direction prompt" content={detail.promptPackage.seedPrompt} />
+              <PromptSection label={isV2Run ? "First option prompt" : "Direction prompt"} content={detail.promptPackage.seedPrompt} />
               <PromptSection label="Final production prompt" content={detail.promptPackage.finalPrompt} />
             </div>
           </article>

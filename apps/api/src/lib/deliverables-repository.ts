@@ -161,6 +161,7 @@ type DeliverableRow = {
   scheduled_for: string;
   due_at: string | null;
   owner_user_id: string | null;
+  reviewer_user_id: string | null;
   priority: DeliverableRecord["priority"];
   status: DeliverableRecord["status"];
   approved_post_version_id: string | null;
@@ -240,7 +241,7 @@ type ReviewQueueRow = {
   created_from_prompt_package_id: string | null;
   created_from_template_id: string | null;
   created_from_output_id: string | null;
-  deliverable: DeliverableRow;
+  deliverable: DeliverableRow | null;
 };
 
 type ProjectNameRow = {
@@ -281,7 +282,7 @@ type ReviewPreviewOutputRow = {
 };
 
 const DELIVERABLE_SELECT =
-  "id, workspace_id, brand_id, project_id, campaign_id, series_id, persona_id, content_pillar_id, post_type_id, creative_template_id, channel_account_id, planning_mode, objective_code, placement_code, content_format, title, brief_text, cta_text, scheduled_for, due_at, owner_user_id, priority, status, approved_post_version_id, latest_post_version_id, series_occurrence_date, source_json";
+  "id, workspace_id, brand_id, project_id, campaign_id, series_id, persona_id, content_pillar_id, post_type_id, creative_template_id, channel_account_id, planning_mode, objective_code, placement_code, content_format, title, brief_text, cta_text, scheduled_for, due_at, owner_user_id, reviewer_user_id, priority, status, approved_post_version_id, latest_post_version_id, series_occurrence_date, source_json";
 
 type DeliverableListFilters = {
   brandId?: string;
@@ -289,6 +290,7 @@ type DeliverableListFilters = {
   campaignId?: string;
   seriesId?: string;
   ownerUserId?: string;
+  reviewerUserId?: string;
   planningMode?: DeliverableRecord["planningMode"];
   status?: DeliverableRecord["status"];
   statusIn?: DeliverableRecord["status"][];
@@ -542,13 +544,18 @@ function buildDeliverableQuery(
   } else if (filters?.ownerUserId) {
     query = query.eq("owner_user_id", filters.ownerUserId);
   }
+  if (filters?.reviewerUserId === "unassigned") {
+    query = query.is("reviewer_user_id", null);
+  } else if (filters?.reviewerUserId) {
+    query = query.eq("reviewer_user_id", filters.reviewerUserId);
+  }
   if (filters?.planningMode) query = query.eq("planning_mode", filters.planningMode);
   if (filters?.status) query = query.eq("status", filters.status);
   if (filters?.statusIn && filters.statusIn.length > 0) {
     query = query.in("status", filters.statusIn);
   }
   if (filters?.scheduledFrom) query = query.gte("scheduled_for", filters.scheduledFrom);
-  if (filters?.scheduledTo) query = query.lte("scheduled_for", filters.scheduledTo);
+  if (filters?.scheduledTo) query = query.lt("scheduled_for", filters.scheduledTo);
   if (filters?.limit) query = query.limit(filters.limit);
 
   return query;
@@ -629,7 +636,7 @@ export async function attachDeliverablePreviews(deliverables: DeliverableRecord[
 export async function getDeliverable(deliverableId: string) {
   const { data, error } = await supabaseAdmin
     .from("deliverables")
-    .select("id, workspace_id, brand_id, project_id, campaign_id, series_id, persona_id, content_pillar_id, post_type_id, creative_template_id, channel_account_id, planning_mode, objective_code, placement_code, content_format, title, brief_text, cta_text, scheduled_for, due_at, owner_user_id, priority, status, approved_post_version_id, latest_post_version_id, series_occurrence_date, source_json")
+    .select(DELIVERABLE_SELECT)
     .eq("id", deliverableId)
     .maybeSingle();
   if (error) throw error;
@@ -730,7 +737,12 @@ export async function getDeliverableDetail(deliverableId: string): Promise<Deliv
   };
 }
 
-export async function listReviewQueue(workspaceId: string, brandId?: string, deliverableId?: string): Promise<ReviewQueueEntry[]> {
+export async function listReviewQueue(
+  workspaceId: string,
+  brandId?: string,
+  deliverableId?: string,
+  filters?: { scope?: "my" | "team" | "unassigned"; reviewerUserId?: string }
+): Promise<ReviewQueueEntry[]> {
   let query = supabaseAdmin
     .from("post_versions")
     .select(`
@@ -769,6 +781,7 @@ export async function listReviewQueue(workspaceId: string, brandId?: string, del
         scheduled_for,
         due_at,
         owner_user_id,
+        reviewer_user_id,
         priority,
         status,
         approved_post_version_id,
@@ -787,11 +800,17 @@ export async function listReviewQueue(workspaceId: string, brandId?: string, del
   if (deliverableId) {
     query = query.eq("deliverable_id", deliverableId);
   }
+  if (filters?.scope === "my" && filters.reviewerUserId) {
+    query = query.eq("deliverable.reviewer_user_id", filters.reviewerUserId);
+  }
+  if (filters?.scope === "unassigned") {
+    query = query.is("deliverable.reviewer_user_id", null);
+  }
 
   const { data, error } = await query.returns<ReviewQueueRow[]>();
   if (error) throw error;
 
-  const rows = data ?? [];
+  const rows = (data ?? []).filter((row): row is ReviewQueueRow & { deliverable: DeliverableRow } => Boolean(row.deliverable));
   const postVersionIds = rows.map((row) => row.id);
 
   let previewOutputsByPostVersion = new Map<string, ReviewPreviewOutputRow>();
@@ -1042,6 +1061,8 @@ export async function listQueueEntries(
       if (deliverables.length === 0) {
         return [];
       }
+
+      deliverables = await attachDeliverablePreviews(deliverables);
 
       const ownerIds = Array.from(
         new Set(deliverables.map((deliverable) => deliverable.ownerUserId).filter((value): value is string => Boolean(value)))
@@ -1304,6 +1325,7 @@ function mapDeliverableRow(row: DeliverableRow): DeliverableRecord {
     scheduledFor: row.scheduled_for,
     dueAt: row.due_at,
     ownerUserId: row.owner_user_id,
+    reviewerUserId: row.reviewer_user_id,
     priority: row.priority,
     status: row.status,
     approvedPostVersionId: row.approved_post_version_id,

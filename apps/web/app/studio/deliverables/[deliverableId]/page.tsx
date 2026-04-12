@@ -47,6 +47,7 @@ type DeliverableEditorState = {
   creativeTemplateId: string;
   channelAccountId: string;
   ownerUserId: string;
+  reviewerUserId: string;
   objectiveCode: ObjectiveCode;
   channel: CreativeChannel;
   format: CreativeFormat;
@@ -264,6 +265,7 @@ export default function DeliverableDetailPage() {
   const template = templates.find((item) => item.id === deliverable.creativeTemplateId) ?? null;
   const account = channelAccounts.find((item) => item.id === deliverable.channelAccountId) ?? null;
   const assignee = workspaceMembers.find((member) => member.id === deliverable.ownerUserId) ?? null;
+  const reviewer = workspaceMembers.find((member) => member.id === deliverable.reviewerUserId) ?? null;
   const placement = getPlacementSpec(
     deliverable.placementCode,
     deriveCreativeFormatFromDeliverable(
@@ -304,6 +306,7 @@ export default function DeliverableDetailPage() {
         creativeTemplateId: formState.creativeTemplateId || undefined,
         channelAccountId: formState.channelAccountId || undefined,
         ownerUserId: formState.ownerUserId || undefined,
+        reviewerUserId: formState.reviewerUserId || null,
         planningMode: deliverable.planningMode,
         objectiveCode: formState.objectiveCode,
         placementCode: formState.channel,
@@ -529,6 +532,10 @@ export default function DeliverableDetailPage() {
                 <span>Assignee</span>
                 <strong>{assignee?.displayName ?? assignee?.email ?? "Unassigned"}</strong>
               </div>
+              <div className="property-item">
+                <span>Reviewer</span>
+                <strong>{reviewer?.displayName ?? reviewer?.email ?? "Unassigned"}</strong>
+              </div>
               {deliverable.ctaText ? (
                 <div className="property-item">
                   <span>CTA</span>
@@ -618,6 +625,17 @@ export default function DeliverableDetailPage() {
                         <label className="field-label">
                           Assignee
                           <select value={formState.ownerUserId} onChange={(event) => setFormState((state) => (state ? { ...state, ownerUserId: event.target.value } : state))}>
+                            <option value="">Unassigned</option>
+                            {workspaceMembers.map((member) => (
+                              <option key={member.id} value={member.id}>
+                                {member.displayName ?? member.email}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field-label">
+                          Reviewer
+                          <select value={formState.reviewerUserId} onChange={(event) => setFormState((state) => (state ? { ...state, reviewerUserId: event.target.value } : state))}>
                             <option value="">Unassigned</option>
                             {workspaceMembers.map((member) => (
                               <option key={member.id} value={member.id}>
@@ -772,6 +790,7 @@ function toDeliverableEditorState(detail: DeliverableDetail): DeliverableEditorS
     creativeTemplateId: detail.deliverable.creativeTemplateId ?? "",
     channelAccountId: detail.deliverable.channelAccountId ?? "",
     ownerUserId: detail.deliverable.ownerUserId ?? "",
+    reviewerUserId: detail.deliverable.reviewerUserId ?? "",
     objectiveCode: detail.deliverable.objectiveCode,
     channel: detail.deliverable.placementCode,
     format: creativeFormat,

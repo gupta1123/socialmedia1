@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ImagePreviewProvider } from "./image-preview";
+import { CalendarSkeleton } from "./skeleton";
 import { StudioProvider, useStudio } from "./studio-context";
 import { TopbarActionsProvider, useTopbarActions } from "./topbar-actions-context";
 
@@ -181,6 +182,7 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const topbarMenuRef = useRef<HTMLDivElement>(null);
   const isCreateRoute = pathname === "/studio/create" || pathname.startsWith("/studio/create/");
+  const isCalendarRoute = pathname === "/studio/calendar" || pathname.startsWith("/studio/calendar/");
   const shellCollapsed = isCreateRoute ? !createSidebarExpanded : collapsed;
   const pageMeta = resolvePageMeta(pathname);
 
@@ -241,29 +243,44 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
       <div className={shellCollapsed ? "workspace-shell sidebar-collapsed" : "workspace-shell"}>
         <aside className="workspace-sidebar studio-shell-loading-sidebar">
           <div className="sidebar-brand">
-            {!shellCollapsed ? <div className="studio-shell-skeleton studio-shell-wordmark-skeleton" /> : null}
+            {!shellCollapsed ? <span className="sidebar-wordmark">Briefly Social</span> : null}
+            <div className="studio-shell-skeleton studio-shell-toggle-skeleton" aria-hidden="true" />
           </div>
           <nav className="sidebar-nav studio-shell-loading-nav" aria-hidden="true">
-            {navigation.map((item) => (
-              <div className="nav-item studio-shell-loading-nav-item" key={item.href}>
-                <span className="nav-icon">{item.icon}</span>
+            {Array.from({ length: 7 }).map((_, index) => (
+              <div className="nav-item studio-shell-loading-nav-item" key={index}>
+                <span className="studio-shell-skeleton studio-shell-nav-icon-skeleton" />
                 {!shellCollapsed ? <span className="studio-shell-skeleton studio-shell-nav-label-skeleton" /> : null}
               </div>
             ))}
           </nav>
           <div className="sidebar-foot">
             <div className="sidebar-user-anchor studio-shell-loading-user" aria-hidden="true">
-              <span className="sidebar-avatar">B</span>
-              {!shellCollapsed ? <span className="studio-shell-skeleton studio-shell-user-skeleton" /> : null}
+              <span className="studio-shell-skeleton studio-shell-avatar-skeleton" />
+              {!shellCollapsed ? (
+                <span className="studio-shell-loading-user-copy">
+                  <span className="studio-shell-skeleton studio-shell-user-skeleton" />
+                  <span className="studio-shell-skeleton studio-shell-user-subtitle-skeleton" />
+                </span>
+              ) : null}
             </div>
           </div>
         </aside>
         <main className="workspace-main">
           <header className="workspace-topbar">
-            <div className="topbar-page-meta studio-shell-loading-meta">
-              <div className="studio-shell-skeleton studio-shell-title-skeleton" />
-              <div className="studio-shell-skeleton studio-shell-subtitle-skeleton" />
-            </div>
+            {isCalendarRoute ? (
+              <div className="topbar-page-meta">
+                <div className="topbar-breadcrumb">
+                  <h1 className="topbar-title">{pageMeta.title}</h1>
+                </div>
+                {pageMeta.subtitle ? <p className="topbar-subtitle">{pageMeta.subtitle}</p> : null}
+              </div>
+            ) : (
+              <div className="topbar-page-meta studio-shell-loading-meta">
+                <div className="studio-shell-skeleton studio-shell-title-skeleton" />
+                <div className="studio-shell-skeleton studio-shell-subtitle-skeleton" />
+              </div>
+            )}
           </header>
           <div className={`workspace-content studio-shell-loading-content ${isCreateRoute ? "is-create" : ""}`}>
             {isCreateRoute ? (
@@ -287,6 +304,10 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
                   </div>
                   <div className="studio-shell-skeleton studio-create-loading-dock" />
                 </div>
+              </div>
+            ) : isCalendarRoute ? (
+              <div className="page-stack calendar-page">
+                <CalendarSkeleton />
               </div>
             ) : (
               <div className="studio-shell-loading-panel" aria-hidden="true">
@@ -461,63 +482,61 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
       <main className="workspace-main">
         <header className="workspace-topbar">
           <div className="topbar-page-meta">
-            <div className="topbar-title-row">
+            <div className="topbar-breadcrumb">
               {topbarMeta?.backHref ? (
-                <Link
-                  aria-label={topbarMeta.backLabel ?? "Back"}
-                  className="topbar-back-link"
-                  href={topbarMeta.backHref}
-                  prefetch={false}
-                  title={topbarMeta.backLabel ?? "Back"}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="m15 18-6-6 6-6" />
-                  </svg>
-                </Link>
+                <>
+                  <Link
+                    className="breadcrumb-item breadcrumb-back"
+                    href={topbarMeta.backHref}
+                    prefetch={false}
+                  >
+                    {topbarMeta.backLabel ?? "Back"}
+                  </Link>
+                  <span className="breadcrumb-separator">/</span>
+                </>
               ) : null}
               <h1 className="topbar-title">{topbarTitle}</h1>
               {topbarMeta?.badges ? <div className="topbar-badges">{topbarMeta.badges}</div> : null}
             </div>
             {topbarSubtitle ? <p className="topbar-subtitle">{topbarSubtitle}</p> : null}
           </div>
-          {topbarControls || topbarActions ? (
-            <div className="topbar-right">
-              {topbarControls ? <div className="topbar-controls">{topbarControls}</div> : null}
-              {topbarActions ? (
-                <div className="topbar-actions" ref={topbarMenuRef}>
-                  <button
-                    aria-expanded={showTopbarMenu}
-                    aria-label="Open page actions"
-                    className={`topbar-menu-trigger ${showTopbarMenu ? "is-open" : ""}`}
-                    onClick={() => setShowTopbarMenu((value) => !value)}
-                    type="button"
+
+          <div className="topbar-right">
+            {topbarControls ? <div className="topbar-controls">{topbarControls}</div> : null}
+            {topbarActions ? (
+              <div className="topbar-actions" ref={topbarMenuRef}>
+                <button
+                  aria-expanded={showTopbarMenu}
+                  aria-label="Open page actions"
+                  className={`topbar-action-trigger ${showTopbarMenu ? "is-open" : ""}`}
+                  onClick={() => setShowTopbarMenu((value) => !value)}
+                  type="button"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="1" />
+                    <circle cx="19" cy="12" r="1" />
+                    <circle cx="5" cy="12" r="1" />
+                  </svg>
+                </button>
+                {showTopbarMenu ? (
+                  <div
+                    className="topbar-menu-panel"
+                    onClick={(event) => {
+                      const target = event.target as HTMLElement;
+                      if (target.closest("a, button")) {
+                        setShowTopbarMenu(false);
+                      }
+                    }}
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none" />
-                      <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
-                      <circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none" />
-                    </svg>
-                  </button>
-                  {showTopbarMenu ? (
-                    <div
-                      className="topbar-menu-panel"
-                      onClick={(event) => {
-                        const target = event.target as HTMLElement;
-                        if (target.closest("a, button")) {
-                          setShowTopbarMenu(false);
-                        }
-                      }}
-                    >
-                      {topbarActions}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+                    {topbarActions}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </header>
 
-        <div className="workspace-content">
+        <div className={`workspace-content ${isCreateRoute ? "is-create" : ""}`}>
           {message && (
             <div className="status-banner">
               <span>{message}</span>

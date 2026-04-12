@@ -64,6 +64,7 @@ type JobRow = {
   provider_model: string;
   provider_request_id: string | null;
   requested_count: number;
+  request_payload: Record<string, unknown> | null;
   error_json: Record<string, unknown> | null;
   created_at: string;
 };
@@ -123,13 +124,18 @@ export async function getCreativeRunDetail(runId: string): Promise<CreativeRunDe
 
   const jobRows = jobs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   const outputs = await listOutputsByJobIds(jobRows.map((job) => job.id));
-  const latestStyleSeedJobId = getLatestStyleSeedJobId(jobRows);
-  const latestFinalJobId = getLatestFinalJobId(jobRows);
-  const latestSeedOutputs = latestStyleSeedJobId
-    ? outputs
-        .filter((output) => output.kind === "style_seed" && output.job_id === latestStyleSeedJobId)
-        .sort((a, b) => a.output_index - b.output_index)
-    : [];
+  const latestStyleSeedJobIds = getLatestStyleSeedJobIds(jobRows, promptPackage);
+  const latestFinalJobIds = getLatestFinalJobIds(jobRows);
+  const latestSeedJobIdOrder = new Map(latestStyleSeedJobIds.map((jobId, index) => [jobId, index]));
+  const latestFinalJobIdOrder = new Map(latestFinalJobIds.map((jobId, index) => [jobId, index]));
+  const latestSeedOutputs = outputs
+    .filter((output) => output.kind === "style_seed" && latestSeedJobIdOrder.has(output.job_id))
+    .sort((a, b) => {
+      const leftJobIndex = latestSeedJobIdOrder.get(a.job_id) ?? 0;
+      const rightJobIndex = latestSeedJobIdOrder.get(b.job_id) ?? 0;
+      if (leftJobIndex !== rightJobIndex) return leftJobIndex - rightJobIndex;
+      return a.output_index - b.output_index;
+    });
   const seedOutputIds = latestSeedOutputs.map((output) => output.id);
   const templates = await listTemplatesByOutputIds(seedOutputIds);
   const latestSeedTemplates = templates
@@ -149,9 +155,14 @@ export async function getCreativeRunDetail(runId: string): Promise<CreativeRunDe
     jobs: orderedJobs,
     seedTemplates: latestSeedTemplates.map((template) => mapTemplateRow(template, latestSeedOutputs)),
     finalOutputs: outputs
-      .filter((output) => output.kind === "final" && output.job_id === latestFinalJobId)
-      .sort((a, b) => a.output_index - b.output_index)
-      .map((output) => mapOutputRow(output))
+      .filter((output) => output.kind === "final" && latestFinalJobIdOrder.has(output.job_id))
+      .sort((a, b) => {
+        const leftJobIndex = latestFinalJobIdOrder.get(a.job_id) ?? 0;
+        const rightJobIndex = latestFinalJobIdOrder.get(b.job_id) ?? 0;
+        if (leftJobIndex !== rightJobIndex) return leftJobIndex - rightJobIndex;
+        return a.output_index - b.output_index;
+      })
+      .map((output, index) => mapOutputRow(output, index))
   };
 }
 
@@ -296,7 +307,7 @@ async function listJobsByPromptPackageIds(promptPackageIds: string[]) {
   const { data, error } = await supabaseAdmin
     .from("creative_jobs")
     .select(
-      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, prompt_package_id, selected_template_id, job_type, status, provider, provider_model, provider_request_id, requested_count, error_json, created_at"
+      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, prompt_package_id, selected_template_id, job_type, status, provider, provider_model, provider_request_id, requested_count, request_payload, error_json, created_at"
     )
     .in("prompt_package_id", promptPackageIds);
 
@@ -340,6 +351,9 @@ async function listTemplatesByOutputIds(outputIds: string[]) {
 }
 
 function mapPromptPackageRow(row: PromptPackageRow): PromptPackage {
+  const compilerTrace = row.compiler_trace ?? {};
+  const variations = Array.isArray(compilerTrace.variations) ? compilerTrace.variations : [];
+
   return {
     id: row.id,
     workspaceId: row.workspace_id,
@@ -359,8 +373,9 @@ function mapPromptPackageRow(row: PromptPackageRow): PromptPackage {
     templateType: row.template_type ?? undefined,
     referenceStrategy: row.reference_strategy,
     referenceAssetIds: row.reference_asset_ids ?? [],
+    variations,
     resolvedConstraints: row.resolved_constraints ?? {},
-    compilerTrace: row.compiler_trace ?? {}
+    compilerTrace
   };
 }
 
@@ -382,11 +397,13 @@ function buildRunSummary(
       ? resolved.format
       : brief.format;
   const latestJob = [...jobs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] ?? null;
-  const latestStyleSeedJobId = getLatestStyleSeedJobId(jobs);
-  const latestFinalJobId = getLatestFinalJobId(jobs);
+  const latestStyleSeedJobIds = getLatestStyleSeedJobIds(jobs, pkg);
+  const latestFinalJobIds = getLatestFinalJobIds(jobs);
+  const latestSeedJobIdSet = new Set(latestStyleSeedJobIds);
+  const latestFinalJobIdSet = new Set(latestFinalJobIds);
   const latestSeedOutputIds = new Set(
     outputs
-      .filter((output) => output.kind === "style_seed" && output.job_id === latestStyleSeedJobId)
+      .filter((output) => output.kind === "style_seed" && latestSeedJobIdSet.has(output.job_id))
       .map((output) => output.id)
   );
   const templatedSeedOutputIds = new Set(
@@ -396,7 +413,7 @@ function buildRunSummary(
       .filter((outputId) => latestSeedOutputIds.has(outputId))
   );
   const seedTemplateCount = templatedSeedOutputIds.size;
-  const finalOutputCount = outputs.filter((output) => output.kind === "final" && output.job_id === latestFinalJobId).length;
+  const finalOutputCount = outputs.filter((output) => output.kind === "final" && latestFinalJobIdSet.has(output.job_id)).length;
 
   return {
     id: pkg.id,
@@ -427,16 +444,87 @@ function buildRunSummary(
   };
 }
 
-function getLatestStyleSeedJobId(jobs: JobRow[]) {
-  return [...jobs]
+function getLatestStyleSeedJobIds(jobs: JobRow[], promptPackage: PromptPackageRow) {
+  const sortedSeedJobs = [...jobs]
     .filter((job) => job.job_type === "style_seed")
-    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0]?.id ?? null;
+    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());
+  const latestSeedJob = sortedSeedJobs[0];
+
+  if (!latestSeedJob) {
+    return [];
+  }
+
+  const latestBatchId = getJobBatchId(latestSeedJob);
+  if (latestBatchId) {
+    return sortedSeedJobs
+      .filter((job) => getJobBatchId(job) === latestBatchId)
+      .sort((left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime())
+      .map((job) => job.id);
+  }
+
+  const isV2StyleSeedPackage =
+    promptPackage.compiler_trace?.v2StyleSeedGeneration === true ||
+    (Array.isArray(promptPackage.compiler_trace?.variations) && promptPackage.compiler_trace.variations.length > 0);
+
+  if (!isV2StyleSeedPackage) {
+    return [latestSeedJob.id];
+  }
+
+  const latestTime = new Date(latestSeedJob.created_at).getTime();
+  return sortedSeedJobs
+    .filter((job) => Math.abs(latestTime - new Date(job.created_at).getTime()) <= 120_000)
+    .sort((left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime())
+    .map((job) => job.id);
 }
 
-function getLatestFinalJobId(jobs: JobRow[]) {
-  return [...jobs]
+function getLatestFinalJobIds(jobs: JobRow[]) {
+  const sortedFinalJobs = [...jobs]
     .filter((job) => job.job_type === "final")
-    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())[0]?.id ?? null;
+    .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());
+  const latestFinalJob = sortedFinalJobs[0];
+
+  if (!latestFinalJob) {
+    return [];
+  }
+
+  const latestBatchId = getV2OptionBatchId(latestFinalJob);
+  if (latestBatchId) {
+    return sortedFinalJobs
+      .filter((job) => getV2OptionBatchId(job) === latestBatchId)
+      .sort(compareJobsChronologically)
+      .map((job) => job.id);
+  }
+
+  return [latestFinalJob.id];
+}
+
+function getJobBatchId(job: JobRow) {
+  const payload = job.request_payload;
+  return payload && typeof payload.styleSeedBatchId === "string" ? payload.styleSeedBatchId : null;
+}
+
+function getV2OptionBatchId(job: JobRow) {
+  const payload = job.request_payload;
+  return payload && typeof payload.v2OptionBatchId === "string" ? payload.v2OptionBatchId : null;
+}
+
+function compareJobsChronologically(left: JobRow, right: JobRow) {
+  const timeDelta = new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
+  if (timeDelta !== 0) {
+    return timeDelta;
+  }
+
+  return getVariationIndex(left) - getVariationIndex(right);
+}
+
+function getVariationIndex(job: JobRow) {
+  const payload = job.request_payload;
+  if (!payload || typeof payload.variationId !== "string") {
+    return 999;
+  }
+
+  const match = payload.variationId.match(/(\d+)$/);
+  return match ? Number(match[1]) : 999;
 }
 
 function mapJobRow(row: JobRow, promptPackage: PromptPackageRow): CreativeJobRecord {
@@ -477,7 +565,7 @@ function mapJobRow(row: JobRow, promptPackage: PromptPackageRow): CreativeJobRec
   };
 }
 
-function mapOutputRow(row: OutputRow): CreativeOutputRecord {
+function mapOutputRow(row: OutputRow, outputIndex = row.output_index): CreativeOutputRecord {
   return {
     id: row.id,
     workspaceId: row.workspace_id,
@@ -492,7 +580,7 @@ function mapOutputRow(row: OutputRow): CreativeOutputRecord {
     kind: row.kind,
     storagePath: row.storage_path,
     providerUrl: row.provider_url,
-    outputIndex: row.output_index,
+    outputIndex,
     reviewState: row.review_state,
     latestVerdict: row.latest_feedback_verdict,
     reviewedAt: row.reviewed_at
