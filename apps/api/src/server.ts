@@ -10,6 +10,7 @@ import { registerCreativeRoutes } from "./routes/creative.js";
 import { registerDeliverableRoutes } from "./routes/deliverables.js";
 import { registerDomainRoutes } from "./routes/domain.js";
 import { registerFalRoutes } from "./routes/fal.js";
+import { registerImageEditRoutes } from "./routes/image-edit.js";
 import { registerPlanningRoutes } from "./routes/planning.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import { registerSessionRoutes } from "./routes/session.js";
@@ -74,6 +75,7 @@ export async function buildApp() {
   await registerDeliverableRoutes(app);
   await registerWorkRoutes(app);
   await registerCreativeRoutes(app);
+  await registerImageEditRoutes(app);
   await registerFalRoutes(app);
 
   return app;

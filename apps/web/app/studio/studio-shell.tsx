@@ -46,6 +46,17 @@ const navigation = [
     )
   },
   {
+    href: "/studio/ai-edit",
+    label: "AI Edit",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+        <path d="m16 5 3 3" />
+        <path d="M8 16l8.5-8.5a2.12 2.12 0 1 1 3 3L11 19l-4 1 1-4Z" />
+      </svg>
+    )
+  },
+  {
     href: "/studio/queue",
     label: "Queue",
     icon: (
@@ -110,6 +121,10 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   "/studio/create": {
     title: "Create",
     subtitle: "Start from a post task or open an empty brief to create post options.",
+  },
+  "/studio/ai-edit": {
+    title: "AI Edit",
+    subtitle: "Upload an image, mask the exact area to change, and apply a focused AI edit.",
   },
   "/studio/projects": {
     title: "Projects",
@@ -615,6 +630,10 @@ function resolvePageMeta(pathname: string) {
     return PAGE_META["/studio/templates"] ?? { title: "Templates", subtitle: "" };
   }
 
+  if (pathname.startsWith("/studio/ai-edit")) {
+    return PAGE_META["/studio/ai-edit"] ?? { title: "AI Edit", subtitle: "" };
+  }
+
   if (pathname.startsWith("/studio/calendar")) {
     return PAGE_META["/studio/calendar"] ?? { title: "Calendar", subtitle: "" };
   }
@@ -633,6 +652,8 @@ function resolveBootstrapMode(pathname: string) {
     pathname.startsWith("/studio/plan/") ||
     pathname === "/studio/queue" ||
     pathname.startsWith("/studio/queue/") ||
+    pathname === "/studio/ai-edit" ||
+    pathname.startsWith("/studio/ai-edit/") ||
     pathname === "/studio/review" ||
     pathname.startsWith("/studio/review/") ||
     pathname === "/studio/library" ||

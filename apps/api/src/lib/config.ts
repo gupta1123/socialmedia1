@@ -57,6 +57,7 @@ const EnvSchema = z.object({
   OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
   OPENROUTER_STYLE_SEED_MODEL: z.string().default("google/gemini-2.5-flash-image"),
   OPENROUTER_FINAL_MODEL: z.string().default("google/gemini-2.5-flash-image"),
+  OPENROUTER_IMAGE_EDIT_MODEL: z.string().default("google/gemini-2.5-flash-image"),
   OPENROUTER_IMAGE_MODALITIES: optionalCsvList,
   OPENROUTER_IMAGE_SIZE: z.string().optional(),
   OPENROUTER_HTTP_REFERER: optionalUrl,

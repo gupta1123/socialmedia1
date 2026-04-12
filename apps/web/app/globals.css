@@ -10407,6 +10407,213 @@ textarea {
   overflow: hidden;
 }
 
+.ai-edit-page {
+  --ai-edit-mask: rgba(80, 156, 255, 0.46);
+}
+
+.ai-edit-sidebar-panel {
+  gap: 0;
+}
+
+.ai-edit-upload-card {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  width: 100%;
+  padding: 16px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--brand-soft) 62%, transparent), transparent 44%),
+    color-mix(in srgb, var(--paper-soft) 86%, var(--paper-strong));
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.ai-edit-upload-card:hover {
+  border-color: color-mix(in srgb, var(--brand) 56%, var(--line-strong));
+  background: color-mix(in srgb, var(--brand-soft) 42%, var(--paper-soft));
+  transform: translateY(-1px);
+}
+
+.ai-edit-upload-card span,
+.ai-edit-upload-card small {
+  display: block;
+}
+
+.ai-edit-upload-card span {
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.ai-edit-upload-card small {
+  color: var(--ink-soft);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+}
+
+.ai-edit-upload-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--paper-soft);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+
+.ai-edit-range {
+  width: 100%;
+  accent-color: var(--brand);
+}
+
+.ai-edit-apply-button {
+  width: 100%;
+  justify-content: center;
+}
+
+.ai-edit-status-card {
+  margin: 8px 16px 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--brand) 24%, var(--line));
+  background: color-mix(in srgb, var(--brand-soft) 55%, var(--paper-soft));
+  color: var(--ink);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.ai-edit-status-card.is-error {
+  border-color: rgba(220, 38, 38, 0.22);
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.ai-edit-tip-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+  color: var(--ink-soft);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.ai-edit-main {
+  padding: 40px;
+}
+
+.ai-edit-stage-panel {
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-edit-stage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.ai-edit-stage-header h3 {
+  margin: 0;
+  max-width: min(680px, 58vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-lg);
+  letter-spacing: var(--tracking-tight);
+}
+
+.ai-edit-stage-shell {
+  flex: 1;
+  min-height: 520px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--brand-soft) 32%, transparent), transparent 42%),
+    linear-gradient(180deg, color-mix(in srgb, var(--paper-strong) 88%, transparent), color-mix(in srgb, var(--paper) 92%, transparent));
+  overflow: auto;
+}
+
+.ai-edit-stage-frame {
+  position: relative;
+  max-width: 100%;
+  border-radius: 18px;
+  overflow: hidden;
+  background:
+    linear-gradient(45deg, color-mix(in srgb, var(--paper-strong) 95%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, var(--paper-strong) 95%, transparent) 75%),
+    linear-gradient(45deg, color-mix(in srgb, var(--paper-strong) 95%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, var(--paper-strong) 95%, transparent) 75%);
+  background-position: 0 0, 12px 12px;
+  background-size: 24px 24px;
+  box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.24);
+}
+
+.ai-edit-stage-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+.ai-edit-mask-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.ai-edit-mask-canvas.is-erasing {
+  cursor: cell;
+}
+
+.ai-edit-stage-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.ai-edit-stage-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 3px solid rgba(255, 255, 255, 0.28);
+  border-top-color: #fff;
+  animation: aiEditSpin 0.8s linear infinite;
+}
+
+@keyframes aiEditSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .create-flow {
   flex: 1;
   min-height: 0;
@@ -11783,6 +11990,19 @@ textarea {
 
   .topbar-controls {
     flex: 1;
+  }
+
+  .ai-edit-main {
+    padding: 24px;
+  }
+
+  .ai-edit-stage-shell {
+    min-height: 360px;
+    padding: 14px;
+  }
+
+  .ai-edit-stage-header h3 {
+    max-width: 70vw;
   }
 
   .create-topbar-mode-control {
