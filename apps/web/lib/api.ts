@@ -65,7 +65,8 @@ import type {
 } from "@image-lab/contracts";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-const rawCreativeFlowVersion = process.env.NEXT_PUBLIC_CREATIVE_FLOW_VERSION;
+// Force the direct create flow until the style-first v2 path is intentionally re-enabled in production.
+const rawCreativeFlowVersion: string = "v1";
 const rawStyleVariationCount = Number(process.env.NEXT_PUBLIC_STYLE_VARIATION_COUNT ?? "3");
 
 export type CreativeFlowVersion = "v1" | "v2";
