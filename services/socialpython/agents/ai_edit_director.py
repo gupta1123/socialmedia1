@@ -36,9 +36,9 @@ class ImageEditPlanOutput(BaseModel):
     plannerTrace: dict[str, Any] = Field(default_factory=dict)
 
 
-SKILLS_DIR = Path(
-    os.getenv("AI_EDIT_DIRECTOR_SKILLS_DIR", Path(__file__).resolve().parents[3] / "skills" / "image-edit" / "v1")
-)
+DEFAULT_SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills" / "image-edit" / "v1"
+
+SKILLS_DIR = Path(os.getenv("AI_EDIT_DIRECTOR_SKILLS_DIR", str(DEFAULT_SKILLS_DIR)))
 
 OUTPUT_FORMAT_INSTRUCTION = """
 Return only valid JSON with this exact shape:

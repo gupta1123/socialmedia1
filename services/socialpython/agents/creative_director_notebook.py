@@ -27,12 +27,11 @@ except (
     Skills = None
 
 
-SKILLS_DIR = Path(
-    os.getenv(
-        "AGNO_AGENT_V2_SKILLS_DIR",
-        Path(__file__).resolve().parents[3] / "skills" / "prompt" / "v2",
-    )
+DEFAULT_SKILLS_DIR = (
+    Path(__file__).resolve().parents[1] / "skills" / "prompt" / "v2"
 )
+
+SKILLS_DIR = Path(os.getenv("AGNO_AGENT_V2_SKILLS_DIR", str(DEFAULT_SKILLS_DIR)))
 
 
 class PromptVariationOutput(BaseModel):
