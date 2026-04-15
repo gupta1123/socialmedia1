@@ -29,6 +29,9 @@ function buildBaseBrandProfile() {
     styleDescriptors: ["graphic", "cinematic", "structured"],
     visualSystem: {
       typographyMood: "Editorial",
+      headlineFontFamily: "Cormorant Garamond",
+      bodyFontFamily: "Inter",
+      typographyNotes: ["High-contrast editorial hierarchy"],
       compositionPrinciples: ["Protect whitespace"],
       imageTreatment: ["Warm natural light"],
       textDensity: "balanced" as const,
@@ -112,6 +115,7 @@ describe("compilePromptPackageMock", () => {
         referenceAssetIds: [],
         includeBrandLogo: false,
         includeReraQr: false,
+        logoAssetId: null,
         templateType: "announcement"
       },
       referenceLabels: [],
@@ -185,6 +189,7 @@ describe("compilePromptPackageMock", () => {
         referenceAssetIds: [],
         includeBrandLogo: false,
         includeReraQr: false,
+        logoAssetId: null,
         templateType: "announcement"
       },
       referenceLabels: ["Northstar Phase 2 construction hero"],
@@ -229,6 +234,7 @@ describe("compilePromptPackageMock", () => {
         referenceAssetIds: [],
         includeBrandLogo: false,
         includeReraQr: false,
+        logoAssetId: null,
         templateType: "hero"
       },
       referenceLabels: ["Northstar tower hero"],
@@ -276,6 +282,7 @@ describe("compilePromptPackageMock", () => {
         referenceAssetIds: [],
         includeBrandLogo: false,
         includeReraQr: false,
+        logoAssetId: null,
         templateType: "product-focus"
       },
       referenceLabels: ["Northstar tower hero"],
@@ -321,6 +328,7 @@ describe("compilePromptPackageMock", () => {
         referenceAssetIds: [],
         includeBrandLogo: false,
         includeReraQr: false,
+        logoAssetId: null,
         templateType: "offer",
         exactText: "Site visits now open"
       },
@@ -365,6 +373,7 @@ describe("compilePromptPackageMock", () => {
         referenceAssetIds: [],
         includeBrandLogo: false,
         includeReraQr: false,
+        logoAssetId: null,
         templateType: "hero"
       },
       referenceLabels: ["Northstar tower hero"],

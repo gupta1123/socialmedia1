@@ -8,6 +8,7 @@ const FAL_AUTO_SEGMENT_MODEL = "fal-ai/moondream3-preview/segment";
 type ImageEditFile = {
   buffer: Buffer;
   contentType: string;
+  fileName?: string;
 };
 
 type SegmentReferencePoint = {
@@ -36,6 +37,40 @@ type AutoSegmentResult = {
   bbox?: AutoSegmentBBox;
 };
 
+type FalMaskedFillOptions = {
+  prompt: string;
+  image: ImageEditFile;
+  mask: ImageEditFile;
+  width?: number;
+  height?: number;
+  model?: string;
+};
+
+type FalMaskedFillResult = {
+  imageUrl: string;
+  imageDataUrl?: string;
+  model: string;
+  width?: number;
+  height?: number;
+};
+
+type BriaMaskedEditOptions = {
+  instruction: string;
+  image: ImageEditFile;
+  mask: ImageEditFile;
+  width?: number;
+  height?: number;
+  model?: string;
+};
+
+type FalDirectEditOptions = {
+  prompt: string;
+  image: ImageEditFile;
+  width?: number;
+  height?: number;
+  model?: string;
+};
+
 type UntypedFalSubscribeClient = {
   subscribe(endpointId: string, options: { input: Record<string, unknown>; logs?: boolean }): Promise<{ data: unknown }>;
 };
@@ -49,6 +84,7 @@ export async function submitStyleSeedGeneration(
   promptPackage: Pick<PromptPackage, "seedPrompt" | "aspectRatio"> | { prompt: string; aspectRatio: string },
   referenceUrls: string[] = []
 ) {
+  console.log(`[submitStyleSeedGeneration] jobId=${job.id}, refCount=${referenceUrls.length}, refs=${JSON.stringify(referenceUrls)}`);
   if (!env.FAL_KEY) {
     return { request_id: `mock-style-seed-${job.id}` };
   }
@@ -85,6 +121,7 @@ export async function submitFinalGeneration(
   promptPackage: Pick<PromptPackage, "finalPrompt" | "aspectRatio"> | { prompt: string; aspectRatio: string },
   referenceUrls: string[]
 ) {
+  console.log(`[submitFinalGeneration] jobId=${job.id}, refCount=${referenceUrls.length}, refs=${JSON.stringify(referenceUrls)}`);
   if (!env.FAL_KEY) {
     return { request_id: `mock-final-${job.id}` };
   }
@@ -110,7 +147,8 @@ export async function submitFinalGeneration(
     options.webhookUrl = `${env.FAL_WEBHOOK_URL}?jobId=${job.id}`;
   }
 
-  return fal.queue.submit(env.FAL_FINAL_MODEL, options);
+  const model = referenceUrls.length > 0 ? env.FAL_FINAL_MODEL : env.FAL_STYLE_SEED_MODEL;
+  return fal.queue.submit(model, options);
 }
 
 export async function getFalStatus(endpoint: string, requestId: string) {
@@ -204,6 +242,158 @@ export async function submitFalAutoSegment(input: AutoSegmentInput): Promise<Aut
   return segmentResult;
 }
 
+export async function applyFalMaskedFill({
+  prompt,
+  image,
+  mask,
+  width,
+  height,
+  model = env.AI_EDIT_PRIMARY_MODEL
+}: FalMaskedFillOptions): Promise<FalMaskedFillResult> {
+  if (!env.FAL_KEY) {
+    throw new Error("FAL_KEY is required for masked AI edit");
+  }
+
+  const subscribeClient = fal as unknown as UntypedFalSubscribeClient;
+  const inputPayload: Record<string, unknown> = {
+    prompt,
+    image_url: new Blob([toBlobBytes(image.buffer)], { type: image.contentType || "image/png" }),
+    mask_url: new Blob([toBlobBytes(mask.buffer)], { type: mask.contentType || "image/png" }),
+    num_images: 1,
+    sync_mode: true
+  };
+
+  const result = await subscribeClient.subscribe(model, {
+    input: inputPayload,
+    logs: false
+  });
+
+  const data = isRecord(result) && isRecord(result.data) ? result.data : null;
+  if (!data) {
+    throw new Error("FAL masked edit returned an invalid payload");
+  }
+
+  const firstImage = Array.isArray(data.images) ? data.images.find(isRecord) : null;
+  if (!firstImage) {
+    throw new Error("FAL masked edit returned no image");
+  }
+
+  const imageUrl = resolveImageUrl(firstImage);
+  if (!imageUrl) {
+    throw new Error("FAL masked edit returned no image URL");
+  }
+
+  const imageDataUrl =
+    imageUrl.startsWith("data:") ? imageUrl : await fetchImageAsDataUrl(imageUrl, firstImage.content_type);
+
+  return {
+    imageUrl,
+    ...(imageDataUrl ? { imageDataUrl } : {}),
+    model,
+    ...(typeof width === "number" ? { width } : {}),
+    ...(typeof height === "number" ? { height } : {})
+  };
+}
+
+export async function applyBriaMaskedEdit({
+  instruction,
+  image,
+  mask,
+  width,
+  height,
+  model = env.AI_EDIT_PRIMARY_MODEL
+}: BriaMaskedEditOptions): Promise<FalMaskedFillResult> {
+  if (!env.FAL_KEY) {
+    throw new Error("FAL_KEY is required for masked AI edit");
+  }
+
+  const subscribeClient = fal as unknown as UntypedFalSubscribeClient;
+  const result = await subscribeClient.subscribe(model, {
+    input: {
+      instruction,
+      image_url: new Blob([toBlobBytes(image.buffer)], { type: image.contentType || "image/png" }),
+      mask_url: new Blob([toBlobBytes(mask.buffer)], { type: mask.contentType || "image/png" }),
+      sync_mode: true
+    },
+    logs: false
+  });
+
+  const data = isRecord(result) && isRecord(result.data) ? result.data : null;
+  if (!data) {
+    throw new Error("Bria masked edit returned an invalid payload");
+  }
+
+  const firstImage = isRecord(data.image) ? data.image : Array.isArray(data.images) ? data.images.find(isRecord) : null;
+  if (!firstImage) {
+    throw new Error("Bria masked edit returned no image");
+  }
+
+  const imageUrl = resolveImageUrl(firstImage);
+  if (!imageUrl) {
+    throw new Error("Bria masked edit returned no image URL");
+  }
+
+  const imageDataUrl =
+    imageUrl.startsWith("data:") ? imageUrl : await fetchImageAsDataUrl(imageUrl, firstImage.content_type);
+
+  return {
+    imageUrl,
+    ...(imageDataUrl ? { imageDataUrl } : {}),
+    model,
+    ...(typeof width === "number" ? { width } : {}),
+    ...(typeof height === "number" ? { height } : {})
+  };
+}
+
+export async function applyFalDirectEdit({
+  prompt,
+  image,
+  width,
+  height,
+  model = env.AI_EDIT_DIRECT_MODEL
+}: FalDirectEditOptions): Promise<FalMaskedFillResult> {
+  if (!env.FAL_KEY) {
+    throw new Error("FAL_KEY is required for direct AI edit");
+  }
+
+  const subscribeClient = fal as unknown as UntypedFalSubscribeClient;
+  const result = await subscribeClient.subscribe(model, {
+    input: {
+      prompt,
+      image_urls: [new Blob([toBlobBytes(image.buffer)], { type: image.contentType || "image/png" })],
+      num_images: 1,
+      sync_mode: true
+    },
+    logs: false
+  });
+
+  const data = isRecord(result) && isRecord(result.data) ? result.data : null;
+  if (!data) {
+    throw new Error("Direct AI edit returned an invalid payload");
+  }
+
+  const firstImage = Array.isArray(data.images) ? data.images.find(isRecord) : null;
+  if (!firstImage) {
+    throw new Error("Direct AI edit returned no image");
+  }
+
+  const imageUrl = resolveImageUrl(firstImage);
+  if (!imageUrl) {
+    throw new Error("Direct AI edit returned no image URL");
+  }
+
+  const imageDataUrl =
+    imageUrl.startsWith("data:") ? imageUrl : await fetchImageAsDataUrl(imageUrl, firstImage.content_type);
+
+  return {
+    imageUrl,
+    ...(imageDataUrl ? { imageDataUrl } : {}),
+    model,
+    ...(typeof width === "number" ? { width } : {}),
+    ...(typeof height === "number" ? { height } : {})
+  };
+}
+
 function resolveImageUrl(value: Record<string, unknown>) {
   if (typeof value.url === "string" && value.url.length > 0) {
     return value.url;
@@ -227,6 +417,21 @@ function toImageDataUrl(value: Record<string, unknown>) {
       : "image/png";
 
   return `data:${contentType};base64,${value.file_data}`;
+}
+
+async function fetchImageAsDataUrl(url: string, fallbackContentType: unknown) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Unable to fetch generated image (${response.status})`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const contentType =
+    typeof fallbackContentType === "string" && fallbackContentType.length > 0
+      ? fallbackContentType
+      : response.headers.get("content-type") || "image/png";
+
+  return `data:${contentType};base64,${buffer.toString("base64")}`;
 }
 
 function normalizeSegmentBBox(value: Record<string, unknown>): AutoSegmentBBox | undefined {

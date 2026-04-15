@@ -9,6 +9,7 @@ import {
   listWorkspaceOutputs,
   listWorkspaceTemplates
 } from "../lib/repository.js";
+import { env } from "../lib/config.js";
 import { createSignedUrl } from "../lib/storage.js";
 import { toViewerResponse } from "../lib/viewer.js";
 
@@ -32,6 +33,9 @@ export async function registerSessionRoutes(app: FastifyInstance) {
     if (!workspace) {
       return BootstrapResponseSchema.parse({
         viewer: viewerResponse,
+        aiEdit: {
+          flow: env.AI_EDIT_FLOW
+        },
         workspace: null,
         brands: [],
         brandAssets: [],
@@ -52,6 +56,9 @@ export async function registerSessionRoutes(app: FastifyInstance) {
     if (isLightView) {
       return BootstrapResponseSchema.parse({
         viewer: viewerResponse,
+        aiEdit: {
+          flow: env.AI_EDIT_FLOW
+        },
         workspace,
         brands,
         brandAssets: [],
@@ -78,6 +85,9 @@ export async function registerSessionRoutes(app: FastifyInstance) {
 
     const response = BootstrapResponseSchema.parse({
       viewer: viewerResponse,
+      aiEdit: {
+        flow: env.AI_EDIT_FLOW
+      },
       workspace,
       brands,
       brandAssets: brandAssets.map((asset, index) => ({

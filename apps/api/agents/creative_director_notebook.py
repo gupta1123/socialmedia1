@@ -20,13 +20,18 @@ except ImportError as exc:  # pragma: no cover - exercised only when deps missin
 
 try:
     from agno.skills import LocalSkills, Skills
-except ImportError:  # pragma: no cover - exercised only when optional skills support is unavailable
+except (
+    ImportError
+):  # pragma: no cover - exercised only when optional skills support is unavailable
     LocalSkills = None
     Skills = None
 
 
 SKILLS_DIR = Path(
-    os.getenv("AGNO_AGENT_V2_SKILLS_DIR", Path(__file__).resolve().parents[3] / "skills" / "prompt" / "v2")
+    os.getenv(
+        "AGNO_AGENT_V2_SKILLS_DIR",
+        Path(__file__).resolve().parents[3] / "skills" / "prompt" / "v2",
+    )
 )
 
 
@@ -34,8 +39,12 @@ class PromptVariationOutput(BaseModel):
     id: str = Field(..., description="Stable variation id such as variation_1.")
     title: str = Field(..., description="Short label for this creative route.")
     strategy: str = Field(..., description="How this route is meaningfully different.")
-    seedPrompt: str = Field(..., description="Compatibility alias for the finished post option prompt.")
-    finalPrompt: str = Field(..., description="Single-image prompt for a finished post option.")
+    seedPrompt: str = Field(
+        ..., description="Compatibility alias for the finished post option prompt."
+    )
+    finalPrompt: str = Field(
+        ..., description="Single-image prompt for a finished post option."
+    )
     referenceStrategy: Optional[str] = Field(default=None)
     differenceFromOthers: Optional[str] = Field(default=None)
     resolvedConstraints: dict[str, Any] = Field(default_factory=dict)
@@ -43,10 +52,19 @@ class PromptVariationOutput(BaseModel):
 
 
 class PromptPackageOutput(BaseModel):
-    promptSummary: str = Field(..., description="One line description of the creative direction.")
-    seedPrompt: str = Field(..., description="Compatibility alias for the first finished post option prompt.")
-    finalPrompt: str = Field(..., description="Prompt used to create finished post options.")
-    aspectRatio: str = Field(..., description="Target aspect ratio for the requested format.")
+    promptSummary: str = Field(
+        ..., description="One line description of the creative direction."
+    )
+    seedPrompt: str = Field(
+        ...,
+        description="Compatibility alias for the first finished post option prompt.",
+    )
+    finalPrompt: str = Field(
+        ..., description="Prompt used to create finished post options."
+    )
+    aspectRatio: str = Field(
+        ..., description="Target aspect ratio for the requested format."
+    )
     chosenModel: str = Field(..., description="Recommended image model id.")
     templateType: Optional[str] = Field(default=None)
     referenceStrategy: str = Field(..., description="How references should be used.")
@@ -55,8 +73,12 @@ class PromptPackageOutput(BaseModel):
     compilerTrace: dict[str, Any] = Field(default_factory=dict)
 
 
-CURRENT_PAYLOAD: ContextVar[dict[str, Any] | None] = ContextVar("current_payload", default=None)
-CURRENT_TOOL_CALLS: ContextVar[list[dict[str, Any]] | None] = ContextVar("current_tool_calls", default=None)
+CURRENT_PAYLOAD: ContextVar[dict[str, Any] | None] = ContextVar(
+    "current_payload", default=None
+)
+CURRENT_TOOL_CALLS: ContextVar[list[dict[str, Any]] | None] = ContextVar(
+    "current_tool_calls", default=None
+)
 
 OUTPUT_FORMAT_INSTRUCTION = """
 Return only valid JSON with this exact shape:
@@ -93,14 +115,21 @@ Produce a concise working brief for the prompt crafter.
 Required sections:
 ## Brief Contract
 ## Truth Summary
-## Asset Decision
+## Asset Decision (MUST list ONLY the single hero asset id, plus logo/RERA if enabled)
 ## Strategy Route
 ## Risk Checks
 
 Keep it compact.
 Retrieve facts through tools instead of hallucinating them.
 Only include facts that materially affect the image.
-Asset decisions must name the exact selected asset ids when they exist.
+
+CRITICAL: Asset Decision must list ONLY:
+- 1 hero asset id (selected via get_assets_for_post_type tool - this is the PRIMARY reference)
+- logo asset id (if includeBrandLogo is true)
+- RERA QR asset id (if includeReraQr is true)
+
+Do NOT list multiple candidate assets, supporting references, or all available images.
+The prompt crafter will use ONLY these selected assets in the final prompt.
 """.strip()
 
 CRAFTER_OUTPUT_INSTRUCTION = """
@@ -118,6 +147,28 @@ Return a distilled prompt package, not a manifest dump.
 - If logo or RERA QR toggles are on, require exact supplied assets or clean omission. Never invent placeholders.
 - Never describe mood boards, tiled boards, mockup sheets, artboards, multiple posters, or "style exploration" inside one frame.
 - Top-level seedPrompt and finalPrompt must be aliases of variations[0].seedPrompt and variations[0].finalPrompt.
+
+🚨 CRITICAL - Asset Usage - NEVER do this:
+- ❌ DO NOT say "Image 1 is the amenity truth reference (filename.jpg)"
+- ❌ DO NOT say "Image 2 is the project reference" 
+- ❌ DO NOT say "Image 3 is supporting reference"
+- ❌ DO NOT list multiple image filenames in the prompt
+- ❌ DO NOT say "use Image 1 for X, Image 2 for Y"
+- ❌ DO NOT reference more than ONE image in the prompt
+
+✅ CORRECT Asset Usage:
+- ✅ "Use the amenity reference image as the hero subject."
+- ✅ "Use the project reference for building identity context."
+- ✅ "Include the brand logo in the footer as supplied."
+- ✅ If no reference needed: describe the scene without mentioning images
+
+The prompt goes to an image generation model - it cannot see multiple images or understand "Image 1", "Image 2" references. You must describe what you want in plain text and mention which reference is the primary one.
+
+Example of CORRECT prompt:
+"Create a premium amenity spotlight showing a kids' room with soft natural lighting. Use the amenity reference as the hero. Include 'Amenity Spotlight' text at top in refined font. Add project name as brand context."
+
+Example of INCORRECT prompt (NEVER write this):
+"Image 1 is the amenity (kids_room.jpg), Image 2 is the project (tower.jpg), Image 3 is mood (interior.png)..."
 """.strip()
 
 SKILL_WORKFLOW_INSTRUCTION = """
@@ -148,7 +199,9 @@ def load_skill_text(skill_name: str) -> str:
     available = set(list_local_skill_names())
     normalized = skill_name.strip()
     if normalized not in available:
-        raise ValueError(f"Unknown skill '{skill_name}'. Available skills: {', '.join(sorted(available))}")
+        raise ValueError(
+            f"Unknown skill '{skill_name}'. Available skills: {', '.join(sorted(available))}"
+        )
 
     return (SKILLS_DIR / normalized / "SKILL.md").read_text(encoding="utf-8")
 
@@ -164,7 +217,9 @@ def compact_json(value: Any) -> str:
     return json.dumps(value, indent=2, ensure_ascii=False)
 
 
-def record_tool_call(name: str, result: str, tool_args: dict[str, Any] | None = None) -> None:
+def record_tool_call(
+    name: str, result: str, tool_args: dict[str, Any] | None = None
+) -> None:
     tool_calls = CURRENT_TOOL_CALLS.get()
     if tool_calls is None:
         return
@@ -227,8 +282,14 @@ def resolve_reference_strategy(payload: dict[str, Any]) -> str:
     has_template = bundle.get("templateTruth") is not None
     candidate_assets = bundle.get("candidateAssets") or []
     exact_asset_contract = bundle.get("exactAssetContract") or {}
-    has_refs = any(not asset.get("eligibility", {}).get("isExactLogo") and not asset.get("eligibility", {}).get("isExactReraQr") for asset in candidate_assets)
-    has_exact_assets = bool(exact_asset_contract.get("logoAssetId")) or bool(exact_asset_contract.get("reraQrAssetId"))
+    has_refs = any(
+        not asset.get("eligibility", {}).get("isExactLogo")
+        and not asset.get("eligibility", {}).get("isExactReraQr")
+        for asset in candidate_assets
+    )
+    has_exact_assets = bool(exact_asset_contract.get("logoAssetId")) or bool(
+        exact_asset_contract.get("reraQrAssetId")
+    )
     if has_template and (has_refs or has_exact_assets):
         return "hybrid"
     if has_template:
@@ -305,6 +366,163 @@ def list_candidate_assets() -> str:
     result = compact_json(truth_bundle().get("candidateAssets") or [])
     record_tool_call("list_candidate_assets", result)
     return result
+
+
+@tool()
+def get_available_project_amenities() -> str:
+    result = compact_json((truth_bundle().get("amenityResolution") or {}).get("availableAmenities") or [])
+    record_tool_call("get_available_project_amenities", result)
+    return result
+
+
+@tool()
+def get_assets_for_amenity(amenity_name: str) -> str:
+    bundle = truth_bundle()
+    resolution = bundle.get("amenityResolution") or {}
+    available = resolution.get("availableAmenities") or []
+    all_assets = bundle.get("candidateAssets") or []
+
+    selected_option = None
+    normalized_target = str(amenity_name or "").strip().lower()
+    for option in available:
+        option_name = str(option.get("name") or "").strip()
+        if option_name.lower() == normalized_target:
+            selected_option = option
+            break
+
+    asset_ids = selected_option.get("assetIds") if isinstance(selected_option, dict) else []
+    assets = [asset for asset in all_assets if asset.get("id") in asset_ids]
+    result = {
+        "amenityName": amenity_name,
+        "matchedAmenity": selected_option,
+        "assets": assets,
+        "hasExactAssetMatch": bool(assets),
+    }
+    record_tool_call(
+        "get_assets_for_amenity",
+        compact_json(result),
+        {"amenity_name": amenity_name},
+    )
+    return compact_json(result)
+
+
+@tool()
+def get_assets_for_post_type(post_type_code: str) -> str:
+    """
+    Get the most relevant asset for a specific post type based on its subjectType.
+
+    Rules for asset selection:
+    - amenity-spotlight: first use get_available_project_amenities and get_assets_for_amenity
+    - construction-update: use asset with subjectType='construction_progress' or 'project_exterior'
+    - project-launch: use asset with subjectType='project_exterior' or 'facade'
+    - site-visit-invite: use asset with subjectType='project_exterior' or 'facade'
+    - location-advantage: use asset with subjectType='aerial' or 'street'
+    - festive-greeting: use asset with subjectType='generic_reference' or 'interior' (or none - standalone greeting)
+
+    Returns the single best matching asset with its metadata for use in prompt.
+    """
+    bundle = truth_bundle()
+    all_assets = bundle.get("candidateAssets") or []
+    post_type_contract = bundle.get("postTypeContract") or {}
+    amenity_focus = post_type_contract.get("amenityFocus")
+
+    # Map post types to their preferred subject types (in priority order)
+    subject_type_priority = {
+        "amenity-spotlight": ["amenity", "interior"],
+        "construction-update": ["construction_progress", "project_exterior", "facade"],
+        "project-launch": ["project_exterior", "facade", "aerial"],
+        "site-visit-invite": ["project_exterior", "facade", "aerial"],
+        "location-advantage": ["aerial", "street", "facade"],
+        "project-tour": ["interior", "sample_flat"],
+        "testimonial": ["interior", "sample_flat"],
+        "festive-greeting": [
+            "generic_reference",
+            "interior",
+        ],  # Can be None for standalone
+    }
+
+    # Get exact assets (logo, RERA QR) - these are always available
+    exact_contract = bundle.get("exactAssetContract") or {}
+    logo_asset_id = exact_contract.get("logoAssetId")
+    rera_qr_asset_id = exact_contract.get("reraQrAssetId")
+
+    # Find the logo asset if available
+    logo_asset = None
+    if logo_asset_id:
+        for asset in all_assets:
+            if asset.get("id") == logo_asset_id:
+                logo_asset = asset
+                break
+
+    # Filter assets by preferred subject types for this post type
+    preferred_types = subject_type_priority.get(post_type_code, ["generic_reference"])
+
+    # Score and rank assets by subject type match
+    scored_assets = []
+    for asset in all_assets:
+        metadata = asset.get("normalizedMetadata") or {}
+        subject_type = metadata.get("subjectType", "")
+
+        # Skip exact assets (logo, rera) - they are handled separately
+        if asset.get("id") == logo_asset_id or asset.get("id") == rera_qr_asset_id:
+            continue
+
+        # Score based on subject type priority
+        score = 0
+        if subject_type in preferred_types:
+            score = len(preferred_types) - preferred_types.index(subject_type)
+
+        # Boost quality tier
+        quality_tier = metadata.get("qualityTier", "usable")
+        if quality_tier == "hero":
+            score += 1
+        elif quality_tier == "high":
+            score += 0.5
+        elif quality_tier in {"medium", "usable"}:
+            score += 0.25
+
+        if post_type_code == "amenity-spotlight" and isinstance(amenity_focus, str) and amenity_focus.strip():
+            asset_amenity = metadata.get("amenityName") or ""
+            asset_search_text = f"{asset.get('label', '')} {asset_amenity}".lower()
+            normalized_focus = amenity_focus.strip().lower()
+            focus_tokens = [token for token in normalized_focus.split() if len(token) > 2]
+            if normalized_focus in asset_search_text:
+                score += 5
+            elif any(token in asset_search_text for token in focus_tokens):
+                score += 1
+            else:
+                score -= 5
+
+        if score > 0:
+            scored_assets.append(
+                {
+                    "score": score,
+                    "asset": asset,
+                    "match_reason": f"subjectType={subject_type}, quality={quality_tier}",
+                }
+            )
+
+    # Sort by score and get the best match
+    scored_assets.sort(key=lambda x: x["score"], reverse=True)
+
+    # Get top hero asset
+    hero_asset = scored_assets[0]["asset"] if scored_assets else None
+
+    result = {
+        "postTypeCode": post_type_code,
+        "preferredSubjectTypes": preferred_types,
+        "amenityFocus": amenity_focus if isinstance(amenity_focus, str) and amenity_focus.strip() else None,
+        "heroAsset": hero_asset,
+        "logoAsset": logo_asset,  # Can be used in prompt if includeBrandLogo=true
+        "availableAssetCount": len(scored_assets),
+    }
+
+    record_tool_call(
+        "get_assets_for_post_type",
+        compact_json(result),
+        {"post_type_code": post_type_code},
+    )
+    return compact_json(result)
 
 
 @tool()
@@ -393,7 +611,13 @@ def build_skill_packet(payload: dict[str, Any]) -> tuple[list[str], str]:
         text = load_skill_text(name)
         record_tool_call(
             "get_skill_instructions",
-            compact_json({"skillName": name, "characters": len(text), "loadedBy": "deterministic-preload"}),
+            compact_json(
+                {
+                    "skillName": name,
+                    "characters": len(text),
+                    "loadedBy": "deterministic-preload",
+                }
+            ),
             {"skill_name": name},
         )
         sections.append(f"## {name}\n{text.strip()}")
@@ -428,6 +652,9 @@ def build_agents() -> tuple[Agent, Agent]:
             get_festival_truth,
             get_template_truth,
             list_candidate_assets,
+            get_available_project_amenities,
+            get_assets_for_amenity,
+            get_assets_for_post_type,
             get_exact_asset_contract,
             get_generation_contract,
         ],
@@ -435,13 +662,19 @@ def build_agents() -> tuple[Agent, Agent]:
             "You are a senior visual brief analyst for brand-aware social image generation.",
             "When given a request summary, first call get_request_brief, get_post_type_contract, and get_generation_contract.",
             "Always call get_brand_truth and list_candidate_assets.",
+            "For amenity-spotlight, call get_available_project_amenities after get_post_type_contract.",
+            "The amenity choice must come from the project's available amenities only. Do not invent or hardcode amenity types.",
+            "For amenity-spotlight, choose the amenity before writing prompt guidance, then call get_assets_for_amenity for that exact amenity.",
+            "If get_assets_for_amenity returns no assets, explicitly record that there is no exact amenity image match and do not substitute a different amenity asset.",
+            "For non-amenity post types, call get_assets_for_post_type with the post type code to get the single best hero asset.",
+            "Use the selected hero asset as the primary reference in your Asset Decision - do NOT list unrelated assets.",
             "Call get_project_truth when project truth exists.",
             "Call get_festival_truth when festival truth exists.",
             "Call get_template_truth when template truth exists.",
             "Always call get_exact_asset_contract before finishing.",
             "Prefer tool output over assumptions.",
             "Summarize only image-relevant facts, not full manifests.",
-            "Asset Decision must list the exact asset ids chosen as truth anchors, exact assets, or supporting references.",
+            "Asset Decision must list only the single chosen hero asset id, the logo (if enabled), and the RERA QR (if enabled). Do NOT list multiple reference images.",
             "If postTypeContract.playbookKey is present, mention that exact playbook key in Strategy Route and do not introduce other playbook families.",
             ANALYST_OUTPUT_INSTRUCTION,
         ],
@@ -488,6 +721,7 @@ def build_request_summary(payload: dict[str, Any]) -> str:
     festival = bundle.get("festivalTruth") or {}
     project = bundle.get("projectTruth") or {}
     exact_assets = bundle.get("exactAssetContract") or {}
+    amenity_resolution = bundle.get("amenityResolution") or {}
     candidate_assets = bundle.get("candidateAssets") or []
     selected = {
         "brand": brand.get("name"),
@@ -504,6 +738,15 @@ def build_request_summary(payload: dict[str, Any]) -> str:
         "exactText": brief.get("exactText"),
         "variationCount": resolve_variation_count(payload),
         "templateType": brief.get("templateType"),
+        "amenityFocus": post_type.get("amenityFocus"),
+        "availableAmenities": [
+            option.get("name")
+            for option in (amenity_resolution.get("availableAmenities") or [])
+            if isinstance(option, dict) and option.get("name")
+        ],
+        "selectedAmenity": amenity_resolution.get("selectedAmenity"),
+        "selectedAmenityAssetIds": amenity_resolution.get("selectedAssetIds") or [],
+        "amenityHasExactAssetMatch": amenity_resolution.get("hasExactAssetMatch"),
         "candidateAssetCount": len(candidate_assets),
         "truthAnchorAssetId": exact_assets.get("requiredProjectAnchorAssetId"),
         "logoAssetId": exact_assets.get("logoAssetId"),
@@ -520,6 +763,7 @@ def build_crafter_context(payload: dict[str, Any]) -> str:
     brand = bundle.get("brandTruth") or {}
     project = bundle.get("projectTruth") or {}
     post_type = bundle.get("postTypeContract") or {}
+    amenity_resolution = bundle.get("amenityResolution") or {}
     generation = bundle.get("generationContract") or {}
     exact_assets = bundle.get("exactAssetContract") or {}
 
@@ -529,6 +773,11 @@ def build_crafter_context(payload: dict[str, Any]) -> str:
         "visualSystem": {
             "styleDescriptors": brand.get("styleDescriptors"),
             "typographyMood": (brand.get("visualSystem") or {}).get("typographyMood"),
+            "headlineFontFamily": (brand.get("visualSystem") or {}).get(
+                "headlineFontFamily"
+            ),
+            "bodyFontFamily": (brand.get("visualSystem") or {}).get("bodyFontFamily"),
+            "typographyNotes": (brand.get("visualSystem") or {}).get("typographyNotes"),
             "textDensity": (brand.get("visualSystem") or {}).get("textDensity"),
             "realismLevel": (brand.get("visualSystem") or {}).get("realismLevel"),
             "imageTreatment": (brand.get("visualSystem") or {}).get("imageTreatment"),
@@ -536,6 +785,15 @@ def build_crafter_context(payload: dict[str, Any]) -> str:
         "projectName": project.get("name"),
         "postTypeCode": post_type.get("code"),
         "playbookKey": post_type.get("playbookKey"),
+        "amenityFocus": post_type.get("amenityFocus"),
+        "availableAmenities": [
+            option.get("name")
+            for option in (amenity_resolution.get("availableAmenities") or [])
+            if isinstance(option, dict) and option.get("name")
+        ],
+        "selectedAmenity": amenity_resolution.get("selectedAmenity"),
+        "selectedAmenityAssetIds": amenity_resolution.get("selectedAssetIds") or [],
+        "amenityHasExactAssetMatch": amenity_resolution.get("hasExactAssetMatch"),
         "briefPrompt": brief.get("prompt"),
         "exactText": brief.get("exactText"),
         "offer": brief.get("offer"),
@@ -546,7 +804,9 @@ def build_crafter_context(payload: dict[str, Any]) -> str:
     return compact_json(context)
 
 
-def normalize_prompt_package(result: dict[str, Any], payload: dict[str, Any], analyst_output: str) -> dict[str, Any]:
+def normalize_prompt_package(
+    result: dict[str, Any], payload: dict[str, Any], analyst_output: str
+) -> dict[str, Any]:
     variation_count = resolve_variation_count(payload)
     variations = result.get("variations")
     if not isinstance(variations, list):
@@ -567,12 +827,15 @@ def normalize_prompt_package(result: dict[str, Any], payload: dict[str, Any], an
                 "strategy": str(variation.get("strategy") or "Distinct creative route"),
                 "seedPrompt": seed_prompt,
                 "finalPrompt": final_prompt,
-                "referenceStrategy": variation.get("referenceStrategy") or resolve_reference_strategy(payload),
+                "referenceStrategy": variation.get("referenceStrategy")
+                or resolve_reference_strategy(payload),
                 "differenceFromOthers": variation.get("differenceFromOthers"),
                 "resolvedConstraints": variation.get("resolvedConstraints")
                 if isinstance(variation.get("resolvedConstraints"), dict)
                 else {},
-                "compilerTrace": variation.get("compilerTrace") if isinstance(variation.get("compilerTrace"), dict) else {},
+                "compilerTrace": variation.get("compilerTrace")
+                if isinstance(variation.get("compilerTrace"), dict)
+                else {},
             }
         )
 
@@ -598,8 +861,12 @@ def normalize_prompt_package(result: dict[str, Any], payload: dict[str, Any], an
     result["variations"] = normalized_variations
     result["seedPrompt"] = first_variation["seedPrompt"]
     result["finalPrompt"] = first_variation["finalPrompt"]
-    result["aspectRatio"] = (bundle.get("generationContract") or {}).get("aspectRatio") or derive_aspect_ratio(request_context.get("format"))
-    result["chosenModel"] = (bundle.get("generationContract") or {}).get("chosenModel") or choose_image_model()
+    result["aspectRatio"] = (bundle.get("generationContract") or {}).get(
+        "aspectRatio"
+    ) or derive_aspect_ratio(request_context.get("format"))
+    result["chosenModel"] = (bundle.get("generationContract") or {}).get(
+        "chosenModel"
+    ) or choose_image_model()
     result["referenceStrategy"] = resolve_reference_strategy(payload)
     result["templateType"] = resolve_template_type(payload)
 
@@ -615,8 +882,14 @@ def normalize_prompt_package(result: dict[str, Any], payload: dict[str, Any], an
             "format": request_context.get("format"),
             "includeBrandLogo": request_context.get("includeBrandLogo", False),
             "includeReraQr": request_context.get("includeReraQr", False),
-            "candidateAssetIds": [asset.get("id") for asset in (bundle.get("candidateAssets") or []) if asset.get("id")],
-            "projectAnchorAssetId": exact_asset_contract.get("requiredProjectAnchorAssetId"),
+            "candidateAssetIds": [
+                asset.get("id")
+                for asset in (bundle.get("candidateAssets") or [])
+                if asset.get("id")
+            ],
+            "projectAnchorAssetId": exact_asset_contract.get(
+                "requiredProjectAnchorAssetId"
+            ),
             "brandLogoAssetId": exact_asset_contract.get("logoAssetId"),
             "reraQrAssetId": exact_asset_contract.get("reraQrAssetId"),
             "variationCount": variation_count,
@@ -639,12 +912,20 @@ def normalize_prompt_package(result: dict[str, Any], payload: dict[str, Any], an
             "returnedVariationCount": len(normalized_variations),
             "truthBundleSummary": {
                 "postTypeCode": (bundle.get("postTypeContract") or {}).get("code"),
-                "playbookKey": (bundle.get("postTypeContract") or {}).get("playbookKey"),
-                "candidateAssetIds": [asset.get("id") for asset in (bundle.get("candidateAssets") or []) if asset.get("id")],
+                "playbookKey": (bundle.get("postTypeContract") or {}).get(
+                    "playbookKey"
+                ),
+                "candidateAssetIds": [
+                    asset.get("id")
+                    for asset in (bundle.get("candidateAssets") or [])
+                    if asset.get("id")
+                ],
                 "exactAssetIds": {
                     "logo": exact_asset_contract.get("logoAssetId"),
                     "reraQr": exact_asset_contract.get("reraQrAssetId"),
-                    "projectAnchor": exact_asset_contract.get("requiredProjectAnchorAssetId"),
+                    "projectAnchor": exact_asset_contract.get(
+                        "requiredProjectAnchorAssetId"
+                    ),
                 },
             },
         }
@@ -668,7 +949,11 @@ def extract_json_object(raw: str) -> str:
 def parse_prompt_package(raw: Any) -> dict[str, Any]:
     def with_alias_prompts(value: dict[str, Any]) -> dict[str, Any]:
         variations = value.get("variations")
-        if isinstance(variations, list) and variations and isinstance(variations[0], dict):
+        if (
+            isinstance(variations, list)
+            and variations
+            and isinstance(variations[0], dict)
+        ):
             first = variations[0]
             if not value.get("seedPrompt") and first.get("seedPrompt"):
                 value["seedPrompt"] = first["seedPrompt"]
@@ -682,7 +967,9 @@ def parse_prompt_package(raw: Any) -> dict[str, Any]:
         return PromptPackageOutput.model_validate(with_alias_prompts(raw)).model_dump()
     if isinstance(raw, str):
         parsed = json.loads(extract_json_object(raw))
-        return PromptPackageOutput.model_validate(with_alias_prompts(parsed)).model_dump()
+        return PromptPackageOutput.model_validate(
+            with_alias_prompts(parsed)
+        ).model_dump()
     raise TypeError(f"Unexpected Agno output type: {type(raw)!r}")
 
 
@@ -691,20 +978,24 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     token = CURRENT_PAYLOAD.set(payload)
     try:
         analyst_run = brief_analyst.run(build_request_summary(payload))
-        analyst_output = analyst_run.content if isinstance(analyst_run.content, str) else str(analyst_run.content)
+        analyst_output = (
+            analyst_run.content
+            if isinstance(analyst_run.content, str)
+            else str(analyst_run.content)
+        )
         skill_names, skill_packet = build_skill_packet(payload)
 
         crafter_input = (
             "Using the analyzed brief and preloaded skills below, return the final prompt package JSON.\n"
             f"Create exactly {resolve_variation_count(payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
             "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n\n"
-        "## Loaded Skills\n"
-        f"{skill_packet}\n\n"
-        "## Request Truth Context\n"
-        f"{build_crafter_context(payload)}\n\n"
-        "## Analyzed Brief\n"
-        f"{analyst_output}\n"
-    )
+            "## Loaded Skills\n"
+            f"{skill_packet}\n\n"
+            "## Request Truth Context\n"
+            f"{build_crafter_context(payload)}\n\n"
+            "## Analyzed Brief\n"
+            f"{analyst_output}\n"
+        )
         crafter_run = prompt_crafter.run(crafter_input)
         parsed = parse_prompt_package(crafter_run.content)
         return normalize_prompt_package(parsed, payload, analyst_output)
@@ -712,27 +1003,33 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         CURRENT_PAYLOAD.reset(token)
 
 
-def execute_with_trace(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+def execute_with_trace(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     brief_analyst, prompt_crafter = build_agents()
     token = CURRENT_PAYLOAD.set(payload)
     tool_calls: list[dict[str, Any]] = []
     tool_token = CURRENT_TOOL_CALLS.set(tool_calls)
     try:
         analyst_run = brief_analyst.run(build_request_summary(payload))
-        analyst_output = analyst_run.content if isinstance(analyst_run.content, str) else str(analyst_run.content)
+        analyst_output = (
+            analyst_run.content
+            if isinstance(analyst_run.content, str)
+            else str(analyst_run.content)
+        )
         skill_names, skill_packet = build_skill_packet(payload)
 
         crafter_input = (
             "Using the analyzed brief and preloaded skills below, return the final prompt package JSON.\n"
             f"Create exactly {resolve_variation_count(payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
             "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n\n"
-        "## Loaded Skills\n"
-        f"{skill_packet}\n\n"
-        "## Request Truth Context\n"
-        f"{build_crafter_context(payload)}\n\n"
-        "## Analyzed Brief\n"
-        f"{analyst_output}\n"
-    )
+            "## Loaded Skills\n"
+            f"{skill_packet}\n\n"
+            "## Request Truth Context\n"
+            f"{build_crafter_context(payload)}\n\n"
+            "## Analyzed Brief\n"
+            f"{analyst_output}\n"
+        )
         crafter_run = prompt_crafter.run(crafter_input)
         parsed = parse_prompt_package(crafter_run.content)
         normalized = normalize_prompt_package(parsed, payload, analyst_output)
@@ -796,8 +1093,13 @@ def run_persistent() -> None:
 
         try:
             result = execute(request["payload"])
-            print(json.dumps({"request_id": request_id, "ok": True, "result": result}), flush=True)
-        except Exception as exc:  # pragma: no cover - exercised only through integration
+            print(
+                json.dumps({"request_id": request_id, "ok": True, "result": result}),
+                flush=True,
+            )
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - exercised only through integration
             print(
                 json.dumps(
                     {

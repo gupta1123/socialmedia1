@@ -281,4 +281,29 @@ export async function registerBrandRoutes(app: FastifyInstance) {
 
     return { id: assetId, storagePath };
   });
+
+  app.delete("/api/brands/:brandId/assets/:assetId", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    const { brandId, assetId } = request.params as { brandId: string; assetId: string };
+    const brand = await getBrand(brandId);
+    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
+
+    const { error } = await supabaseAdmin
+      .from("brand_assets")
+      .delete()
+      .eq("id", assetId)
+      .eq("brand_id", brandId);
+
+    if (error) {
+      throw error;
+    }
+
+    invalidateRuntimeCache(`brand-asset-counts:${brand.id}`);
+
+    return { success: true };
+  });
 }

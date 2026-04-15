@@ -18,6 +18,13 @@ import type {
 } from "@image-lab/contracts";
 import { env } from "./config.js";
 import { appendMissingPromptClauses, buildBrandPromptGuidance } from "./brand-prompt-guidance.js";
+import {
+  buildInferredReferenceSelection,
+  buildProjectAmenityCatalog,
+  inferAmenityNameFromAssetParts,
+  isAmenityFocusedPostType,
+  resolveAmenityFocus,
+} from "./creative-reference-selection.js";
 import { buildFestivalPromptGuidance } from "./festival-prompt-guidance.js";
 import { compilePromptPackageMock } from "./mock-creative-director.js";
 import { buildPostTypePromptGuidance } from "./post-type-prompt-guidance.js";
@@ -99,6 +106,8 @@ type CompilerResult = {
   referenceStrategy: (typeof ALLOWED_REFERENCE_STRATEGIES)[number];
   templateType: ((typeof ALLOWED_TEMPLATE_TYPES)[number]) | undefined;
   variations?: PromptVariationResult[];
+  selectedAmenity?: string | null;
+  amenityImageAssetIds?: string[];
 };
 
 type PromptVariationResult = {
@@ -133,6 +142,7 @@ type V1AgentPayload = Input & {
 
 type V2AgentPayload = {
   truthBundle: CreativeTruthBundle;
+  projectId?: string | null;
 };
 
 type PendingRequest = {
@@ -155,14 +165,15 @@ let v2WorkerRequestCount = 0;
 type Input = CreativeDirectorInput;
 
 export async function compilePromptPackage(input: Input) {
+  const normalizedInput = normalizeCreativeDirectorInput(input);
   const mode = resolveCompilerMode();
 
   if (mode === "mock") {
-    return compilePromptPackageMock(input);
+    return compilePromptPackageMock(normalizedInput);
   }
 
   try {
-    return await runAgnoCreativeDirector(input);
+    return await runAgnoCreativeDirector(normalizedInput);
   } catch (error) {
     if (!isTransientAgnoError(error) && env.CREATIVE_DIRECTOR_MODE === "agno") {
       throw error;
@@ -177,7 +188,7 @@ export async function compilePromptPackage(input: Input) {
       );
     }
 
-    return buildMockFallbackResult(input, error);
+    return buildMockFallbackResult(normalizedInput, error);
   }
 }
 
@@ -188,8 +199,10 @@ export async function compilePromptPackageV2(input: Input) {
     return buildV2MockResult(input);
   }
 
+  const normalizedInput = normalizeCreativeDirectorInput(input);
+
   try {
-    return await runAgnoCreativeDirectorV2(input);
+    return await runAgnoCreativeDirectorV2(normalizedInput);
   } catch (error) {
     resetV2WorkerState();
     throw error;
@@ -218,6 +231,99 @@ function resolveCompilerV2Mode() {
   }
 
   return env.OPENAI_API_KEY ? "agno" : "mock";
+}
+
+function normalizeCreativeDirectorInput(input: Input): Input {
+  return {
+    ...input,
+    brandProfile: normalizeBrandProfile(input.brandProfile)
+  };
+}
+
+function normalizeBrandProfile(profile: BrandProfile): BrandProfile {
+  const root = asRecord(profile);
+  const identity = asRecord(root.identity);
+  const voice = asRecord(root.voice);
+  const palette = asRecord(root.palette);
+  const visualSystem = asRecord(root.visualSystem);
+  const compliance = asRecord(root.compliance);
+  const referenceCanon = asRecord(root.referenceCanon);
+
+  return {
+    identity: {
+      positioning: asString(identity.positioning),
+      promise: asString(identity.promise),
+      audienceSummary: asString(identity.audienceSummary)
+    },
+    voice: {
+      summary: asString(voice.summary, "premium"),
+      adjectives: toStringArray(voice.adjectives),
+      approvedVocabulary: toStringArray(voice.approvedVocabulary),
+      bannedPhrases: toStringArray(voice.bannedPhrases)
+    },
+    palette: {
+      primary: asString(palette.primary, "#111111"),
+      secondary: asString(palette.secondary, "#6b7280"),
+      accent: asString(palette.accent, "#c49a6c"),
+      neutrals: toStringArray(palette.neutrals)
+    },
+    styleDescriptors: toStringArray(root.styleDescriptors),
+    visualSystem: {
+      typographyMood: asString(visualSystem.typographyMood),
+      headlineFontFamily: asString(visualSystem.headlineFontFamily),
+      bodyFontFamily: asString(visualSystem.bodyFontFamily),
+      typographyNotes: toStringArray(visualSystem.typographyNotes),
+      compositionPrinciples: toStringArray(visualSystem.compositionPrinciples),
+      imageTreatment: toStringArray(visualSystem.imageTreatment),
+      textDensity: normalizeTextDensity(visualSystem.textDensity),
+      realismLevel: normalizeRealismLevel(visualSystem.realismLevel)
+    },
+    doRules: toStringArray(root.doRules),
+    dontRules: toStringArray(root.dontRules),
+    bannedPatterns: toStringArray(root.bannedPatterns),
+    compliance: {
+      bannedClaims: toStringArray(compliance.bannedClaims),
+      reviewChecks: toStringArray(compliance.reviewChecks)
+    },
+    referenceAssetIds: toStringArray(root.referenceAssetIds),
+    referenceCanon: {
+      antiReferenceNotes: toStringArray(referenceCanon.antiReferenceNotes),
+      usageNotes: toStringArray(referenceCanon.usageNotes)
+    }
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asString(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function toStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeTextDensity(value: unknown): BrandProfile["visualSystem"]["textDensity"] {
+  return value === "minimal" || value === "balanced" || value === "dense"
+    ? value
+    : "balanced";
+}
+
+function normalizeRealismLevel(value: unknown): BrandProfile["visualSystem"]["realismLevel"] {
+  return value === "documentary" || value === "elevated_real" || value === "stylized"
+    ? value
+    : "elevated_real";
 }
 
 async function runAgnoCreativeDirector(input: Input) {
@@ -717,7 +823,8 @@ function getWorkerEnv() {
     OPENAI_MODEL: env.OPENAI_MODEL,
     OPENAI_BASE_URL: env.OPENAI_BASE_URL,
     AGNO_OPENAI_TIMEOUT_SEC: String(env.AGNO_OPENAI_TIMEOUT_SEC),
-    AGNO_OPENAI_MAX_RETRIES: String(env.AGNO_OPENAI_MAX_RETRIES)
+    AGNO_OPENAI_MAX_RETRIES: String(env.AGNO_OPENAI_MAX_RETRIES),
+    AGNO_RESTRICT_TO_AMENITIES_WITH_IMAGES: String(env.AGNO_RESTRICT_TO_AMENITIES_WITH_IMAGES)
   };
 }
 
@@ -780,6 +887,14 @@ function buildV2MockResult(input: Input): CompilerResult {
   const variationCount = clampVariationCount(input.variationCount);
   const variations = buildMockVariations(result, variationCount);
   const truthBundle = buildV2CreativeTruthBundle(input);
+  const amenityResolutionSummary = truthBundle.amenityResolution
+    ? {
+        availableAmenities: truthBundle.amenityResolution.availableAmenities.map((option) => option.name),
+        selectedAmenity: truthBundle.amenityResolution.selectedAmenity,
+        selectedAssetIds: truthBundle.amenityResolution.selectedAssetIds,
+        hasExactAssetMatch: truthBundle.amenityResolution.hasExactAssetMatch,
+      }
+    : null;
 
   return {
     ...result,
@@ -795,6 +910,7 @@ function buildV2MockResult(input: Input): CompilerResult {
         available: false,
         reason: "Compile v2 is running in mock mode, so Agno tool and skill events are not available."
       },
+      amenityResolutionSummary,
       truthBundleSummary: {
         postTypeCode: truthBundle.postTypeContract.code,
         playbookKey: truthBundle.postTypeContract.playbookKey,
@@ -985,7 +1101,9 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
     brief: input.brief,
     postType: input.postType,
     projectName: useProjectContext ? input.projectName : null,
-    projectProfile: useProjectContext ? input.projectProfile : null
+    projectProfile: useProjectContext ? input.projectProfile : null,
+    brandAssets: input.brandAssets ?? [],
+    projectId: useProjectContext ? input.projectId : null
   });
   const referenceStrategy = normalizeReferenceStrategy(raw.referenceStrategy, input);
   const templateType = normalizeTemplateType(raw.templateType, input);
@@ -1004,6 +1122,24 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
     finalPrompt: refineV2PromptForPostType(variation.finalPrompt, input, truthBundle),
   }));
   const firstVariation = variations[0];
+
+  const agentSelectedAmenity = typeof raw.selectedAmenity === "string" && raw.selectedAmenity.length > 0 ? raw.selectedAmenity : null;
+  const agentAmenityImageAssetIds = Array.isArray(raw.amenityImageAssetIds) ? raw.amenityImageAssetIds.filter((id): id is string => typeof id === "string" && id.length > 0) : [];
+
+  const amenityResolutionSummary = truthBundle.amenityResolution
+    ? {
+        availableAmenities: truthBundle.amenityResolution.availableAmenities.map((option) => option.name),
+        selectedAmenity: agentSelectedAmenity ?? truthBundle.amenityResolution.selectedAmenity,
+        selectedAssetIds: agentAmenityImageAssetIds.length > 0 ? agentAmenityImageAssetIds : truthBundle.amenityResolution.selectedAssetIds,
+        hasExactAssetMatch: agentAmenityImageAssetIds.length > 0 || truthBundle.amenityResolution.hasExactAssetMatch,
+        selectionSource: agentSelectedAmenity ? "agent" as const : truthBundle.amenityResolution.selectionSource,
+      }
+    : null;
+
+  const resolvedConstraintsOverride = {
+    ...normalizedResolvedConstraints,
+    amenityImageAssetIds: agentAmenityImageAssetIds.length > 0 ? agentAmenityImageAssetIds : normalizedResolvedConstraints.amenityImageAssetIds,
+  };
 
   return {
     ...raw,
@@ -1030,6 +1166,14 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
       festivalGuidanceManifest: festivalGuidance.manifest,
       projectGuidanceManifest: projectGuidance.manifest,
       postTypeGuidanceManifest: postTypeGuidance.manifest,
+      amenityResolutionSummary: truthBundle.amenityResolution
+        ? {
+            availableAmenities: truthBundle.amenityResolution.availableAmenities.map((option) => option.name),
+            selectedAmenity: truthBundle.amenityResolution.selectedAmenity,
+            selectedAssetIds: truthBundle.amenityResolution.selectedAssetIds,
+            hasExactAssetMatch: truthBundle.amenityResolution.hasExactAssetMatch,
+          }
+        : null,
       truthBundleSummary: {
         postTypeCode: truthBundle.postTypeContract.code,
         playbookKey: truthBundle.postTypeContract.playbookKey,
@@ -1201,7 +1345,9 @@ function buildPromptGuardrailClauses(input: Input) {
     brief: input.brief,
     postType: input.postType,
     projectName: useProjectContext ? input.projectName : null,
-    projectProfile: useProjectContext ? input.projectProfile : null
+    projectProfile: useProjectContext ? input.projectProfile : null,
+    brandAssets: input.brandAssets ?? [],
+    projectId: useProjectContext ? input.projectId : null
   });
   const seedClauses = [
     ...brandGuidance.seedClauses,
@@ -1304,25 +1450,7 @@ function normalizeAssetTags(label: string, metadataJson: Record<string, unknown>
 }
 
 function inferAmenityName(label: string, metadataJson: Record<string, unknown>) {
-  if (typeof metadataJson.amenityName === "string" && metadataJson.amenityName.trim()) {
-    return metadataJson.amenityName.trim();
-  }
-
-  const lower = label.toLowerCase();
-  const amenityMatches = [
-    "clubhouse",
-    "pool",
-    "lap pool",
-    "gym",
-    "lobby",
-    "garden",
-    "kids play area",
-    "kids",
-    "theatre",
-    "jacuzzi",
-    "entrance plaza",
-  ];
-  return amenityMatches.find((item) => lower.includes(item)) ?? undefined;
+  return inferAmenityNameFromAssetParts(label, metadataJson);
 }
 
 function inferAssetSubjectType(
@@ -1417,6 +1545,16 @@ function inferAssetQualityTier(asset: BrandAssetRecord, metadataJson: Record<str
 }
 
 function buildV2CandidateAssets(input: Input) {
+  const useProjectContext = !isFestivalGreetingInput(input);
+  const postTypeGuidance = buildPostTypePromptGuidance({
+    brandName: input.brandName,
+    brief: input.brief,
+    postType: input.postType,
+    projectName: useProjectContext ? input.projectName : null,
+    projectProfile: useProjectContext ? input.projectProfile : null,
+    brandAssets: input.brandAssets ?? [],
+    projectId: useProjectContext ? input.projectId : null
+  });
   const templateLinkedAssets = input.template?.linkedAssets ?? input.templateAssets ?? [];
   const templateRoleMap = new Map<string, Array<Pick<CreativeTemplateAssetRecord, "assetId" | "role">>>();
   for (const entry of templateLinkedAssets) {
@@ -1435,13 +1573,38 @@ function buildV2CandidateAssets(input: Input) {
   const reraQrId = input.brief.includeReraQr
     ? input.brandAssets?.find((asset) => asset.kind === "rera_qr")?.id ?? null
     : null;
+  const inferredReferenceSelection = buildInferredReferenceSelection({
+    postTypeCode: input.postType?.code ?? null,
+    isFestiveGreeting: isFestivalGreetingInput(input),
+    explicitReferenceAssetIds: selectedReferenceIds,
+    projectImageAssetIds: projectImageIds,
+    sampleFlatImageIds,
+    brandReferenceAssetIds: brandDefaultReferenceIds,
+    allAssets: input.brandAssets ?? [],
+    projectId: input.projectId ?? null,
+    focusAmenity: postTypeGuidance.manifest.amenityFocus ?? null,
+  });
+  const amenityFocusedPost = isAmenityFocusedPostType(input.postType?.code ?? null);
+  const projectAmenityCandidateIds = amenityFocusedPost
+    ? dedupeStrings(
+        (input.brandAssets ?? [])
+          .filter((asset) => asset.projectId === input.projectId)
+          .filter((asset) => {
+            const metadata = asset.metadataJson ?? {};
+            return (
+              inferAssetSubjectType(asset, metadata, templateRoleMap.get(asset.id) ?? []) === "amenity" ||
+              Boolean(inferAmenityName(asset.label, metadata))
+            );
+          })
+          .map((asset) => asset.id)
+      )
+    : [];
 
   const candidateIds = dedupeStrings([
-    ...selectedReferenceIds,
-    ...projectImageIds,
-    ...sampleFlatImageIds,
-    ...brandDefaultReferenceIds,
+    ...(amenityFocusedPost ? projectAmenityCandidateIds : []),
+    ...inferredReferenceSelection.referenceAssetIds,
     ...templateLinkedAssets.map((entry) => entry.assetId),
+    ...(amenityFocusedPost ? projectImageIds : []),
     ...(brandLogoId ? [brandLogoId] : []),
     ...(reraQrId ? [reraQrId] : []),
   ]);
@@ -1558,6 +1721,16 @@ function buildV2GenerationContract(input: Input) {
 }
 
 function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
+  const useProjectContext = !isFestivalGreetingInput(input);
+  const postTypeGuidance = buildPostTypePromptGuidance({
+    brandName: input.brandName,
+    brief: input.brief,
+    postType: input.postType,
+    projectName: useProjectContext ? input.projectName : null,
+    projectProfile: useProjectContext ? input.projectProfile : null,
+    brandAssets: input.brandAssets ?? [],
+    projectId: useProjectContext ? input.projectId : null
+  });
   const candidateAssetState = buildV2CandidateAssets(input);
   return {
     requestContext: {
@@ -1567,6 +1740,7 @@ function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
       goal: input.brief.goal,
       prompt: input.brief.prompt,
       audience: input.brief.audience,
+      copyMode: input.brief.copyMode,
       offer: input.brief.offer,
       exactText: input.brief.exactText,
       templateType: input.brief.templateType,
@@ -1626,6 +1800,8 @@ function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
       playbookKey: inferPlaybookKey(input.postType?.code),
       requiredFields: input.postType?.config?.requiredBriefFields ?? [],
       safeZoneGuidance: input.postType?.config?.safeZoneGuidance ?? [],
+      amenityFocus: postTypeGuidance.manifest.amenityFocus ?? null,
+      amenitySelectionSource: postTypeGuidance.manifest.amenitySelectionSource ?? "none",
     },
     festivalTruth: input.festival
       ? {
@@ -1663,6 +1839,7 @@ function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
         }
       : null,
     candidateAssets: candidateAssetState.candidateAssets,
+    amenityResolution: buildTruthBundleAmenityResolution(input, postTypeGuidance.manifest.amenityFocus ?? null),
     exactAssetContract: {
       logoAssetId: candidateAssetState.brandLogoId,
       reraQrAssetId: candidateAssetState.reraQrId,
@@ -1672,6 +1849,56 @@ function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
       preserveProjectIdentity: Boolean(candidateAssetState.requiredProjectAnchorAssetId),
     },
     generationContract: buildV2GenerationContract(input),
+  };
+}
+
+function buildTruthBundleAmenityResolution(
+  input: Input,
+  selectedAmenity: string | null
+) {
+  const projectAmenityNames = [
+    ...(input.projectProfile?.heroAmenities ?? []),
+    ...(input.projectProfile?.amenities ?? []),
+  ];
+  const availableAmenities = buildProjectAmenityCatalog({
+    projectAmenityNames,
+    allAssets: input.brandAssets ?? [],
+    projectId: input.projectId ?? null,
+  });
+  if (!isAmenityFocusedPostType(input.postType?.code ?? null)) {
+    return availableAmenities.length > 0
+      ? {
+          availableAmenities,
+          selectedAmenity: null,
+          selectionSource: "none" as const,
+          selectedAssetIds: [],
+          hasExactAssetMatch: false,
+        }
+      : null;
+  }
+
+  const selection = resolveAmenityFocus({
+    briefText: [input.brief.goal, input.brief.prompt, input.brief.exactText ?? ""].join(" "),
+    projectAmenityNames,
+    allAssets: input.brandAssets ?? [],
+    projectId: input.projectId ?? null,
+    seed: [
+      input.postType?.code ?? "",
+      input.projectName ?? "",
+      input.brief.goal,
+      input.brief.prompt,
+      input.brief.channel,
+      input.brief.format,
+      input.brief.templateType ?? "",
+    ].join("|"),
+  });
+
+  return {
+    availableAmenities,
+    selectedAmenity: selectedAmenity ?? selection.focusAmenity ?? null,
+    selectionSource: selection.source,
+    selectedAssetIds: selection.amenityAssetIds,
+    hasExactAssetMatch: selection.amenityAssetIds.length > 0,
   };
 }
 
@@ -1687,7 +1914,9 @@ function buildV1AgentPayload(input: Input): V1AgentPayload {
     brief: input.brief,
     postType: input.postType,
     projectName: useProjectContext ? input.projectName : null,
-    projectProfile: useProjectContext ? input.projectProfile : null
+    projectProfile: useProjectContext ? input.projectProfile : null,
+    brandAssets: input.brandAssets ?? [],
+    projectId: useProjectContext ? input.projectId : null
   });
 
   return {
@@ -1719,13 +1948,26 @@ function buildV1AgentPayload(input: Input): V1AgentPayload {
 
 function buildV2AgentPayload(input: Input): V2AgentPayload {
   return {
-    truthBundle: buildV2CreativeTruthBundle(input)
+    truthBundle: buildV2CreativeTruthBundle(input),
+    ...(input.projectId !== undefined ? { projectId: input.projectId } : {})
   };
 }
 
 function buildBrandPaletteClause(input: Input) {
   const { primary, secondary, accent } = input.brandProfile.palette;
   return `Use the saved brand palette for graphic elements: primary ${primary}, secondary ${secondary}, accent ${accent}. Apply these to typography, overlays, divider lines, and restrained highlights instead of generic colors.`;
+}
+
+function buildBrandTypographyClause(input: Input) {
+  const { typographyMood, headlineFontFamily, bodyFontFamily, typographyNotes } = input.brandProfile.visualSystem;
+  const clauses = [
+    typographyMood ? `Typography mood should follow this brand direction: ${typographyMood}.` : null,
+    headlineFontFamily ? `When rendering headline text, align the styling with the saved brand headline font family: ${headlineFontFamily}.` : null,
+    bodyFontFamily ? `When rendering supporting copy, align the styling with the saved brand body font family: ${bodyFontFamily}.` : null,
+    typographyNotes.length > 0 ? `Typography rules: ${typographyNotes.join("; ")}.` : null
+  ].filter((value): value is string => Boolean(value));
+
+  return clauses.join(" ");
 }
 
 function buildV2CompactGuardrailClauses(input: Input) {
@@ -1745,13 +1987,17 @@ function buildV2CompactGuardrailClauses(input: Input) {
           "If on-canvas text is used, keep it sparse and limited to project name, Construction Update/Progress Update/Site Progress labels, exact requested text, and brief-provided progress/status cues.",
           progressCue ? `The only allowed specific progress cue is: ${progressCue}.` : "Do not invent a progress percentage, date, possession claim, phone number, price, or RERA fact."
         ].join(" ")
+      : input.brief.copyMode === "auto"
+        ? "Write concise on-image copy only if it materially improves the concept. Choose suitable headline or CTA language yourself based on the brief, post type, and brand tone. Keep it sparse, premium, and platform-appropriate. Treat the image as final consumer-facing creative: never use placeholders, bracketed instructions, sample contact information, sample URLs, sample QR references, sample calendar text, dummy phone numbers, or 'replace this' style scaffolding. If a required factual detail is unavailable, omit that line instead of inventing filler."
       : exactText
         ? `Use only this requested on-image text: "${exactText}".`
         : null;
 
   const sharedClauses = [
     "One complete image only.",
+    "If any supplied reference is an amenity image, use exactly one amenity image as the subject-truth reference for that output. Do not merge multiple amenity references or different facilities into the same scene.",
     buildBrandPaletteClause(input),
+    buildBrandTypographyClause(input),
     textGuardrail,
     bannedClaims.length > 0 ? `Avoid unsupported claims: ${bannedClaims.join(", ")}.` : null,
     projectImageRequired ? "Preserve the supplied project/building reference as subject truth." : null,
@@ -1901,8 +2147,9 @@ function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: Cr
 
 function buildAssetUsageSeedClauses(brief: CreativeBrief) {
   return [
+    "If any supplied reference is an amenity image, use exactly one amenity image as the subject-truth reference for that output. Do not merge multiple amenity references or different facilities into the same scene.",
     brief.includeBrandLogo
-      ? "If a supplied brand logo reference is attached, use that exact logo as a small footer or signature element. Match the exact lockup, shape, colors, and spacing from the supplied logo reference. If it is not shown cleanly, keep a restrained footer or signature zone blank instead. Never invent a substitute logo, emblem, badge, or placeholder mark."
+      ? "If a supplied brand logo reference is attached, use that exact logo as a small footer or signature element. Match the exact lockup, shape, colors, and spacing from the supplied logo reference. Integrate it into the composition as a natural brand-signature zone with proper margin, scale, and tonal harmony; it must never feel like a sticker, pasted overlay, or floating badge on top of the image. If it is not shown cleanly, keep a restrained footer or signature zone blank instead. Never invent a substitute logo, emblem, badge, or placeholder mark."
       : null,
     brief.includeReraQr
       ? "If a supplied RERA QR reference is attached, use that exact QR as a small compliance element. Match the exact QR matrix from the supplied reference. If it is not shown cleanly, keep a small compliance-safe corner or footer zone blank instead. Never invent a substitute QR, barcode, badge, or placeholder block."
@@ -1912,8 +2159,9 @@ function buildAssetUsageSeedClauses(brief: CreativeBrief) {
 
 function buildAssetUsageFinalClauses(brief: CreativeBrief) {
   return [
+    "If any supplied reference is an amenity image, use exactly one amenity image as the subject-truth reference for that output. Do not merge multiple amenity references or different facilities into the same scene.",
     brief.includeBrandLogo
-      ? "Include the supplied brand logo exactly as provided. Treat it as a small footer or signature element. Match the exact lockup, shape, colors, and spacing from the supplied logo reference. Do not redraw, reinterpret, stylize, or invent a new logo mark. If you cannot preserve it faithfully, leave the zone blank instead of generating a substitute."
+      ? "Include the supplied brand logo exactly as provided. Treat it as a small footer or signature element. Match the exact lockup, shape, colors, and spacing from the supplied logo reference. Integrate it into a quiet designed signature zone with proper margin, scale, and contrast so it feels built into the layout rather than pasted on top. Do not redraw, reinterpret, stylize, invent a new logo mark, add glow/shadows, place it as a sticker, or let it dominate the frame. If you cannot preserve it faithfully, leave the zone blank instead of generating a substitute."
       : null,
     brief.includeReraQr
       ? "Include the supplied RERA QR exactly as provided as a small compliance element. Match the exact QR matrix from the supplied reference. Keep it flat, unobstructed, high-contrast, and legible. Do not stylize, repaint, distort, or decorate the QR. If you cannot preserve it faithfully, leave the zone blank instead of inventing a fake QR."

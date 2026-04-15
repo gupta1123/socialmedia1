@@ -1,4 +1,5 @@
-import type { CreativeBrief, PostTypeRecord, ProjectProfile } from "@image-lab/contracts";
+import type { BrandAssetRecord, CreativeBrief, PostTypeRecord, ProjectProfile } from "@image-lab/contracts";
+import { resolveAmenityFocus } from "./creative-reference-selection.js";
 import { deriveAspectRatio } from "./utils.js";
 
 type PostTypePromptInput = {
@@ -7,6 +8,8 @@ type PostTypePromptInput = {
   postType: Pick<PostTypeRecord, "code" | "name" | "config"> | null | undefined;
   projectName: string | null | undefined;
   projectProfile: ProjectProfile | null | undefined;
+  brandAssets?: BrandAssetRecord[] | null | undefined;
+  projectId?: string | null | undefined;
 };
 
 type PostTypeVisualRecipe = {
@@ -158,19 +161,20 @@ function buildConstructionUpdateGuidance(
   const variableCopyLine =
     "Do not repeat one fixed stock headline, date, or progress percentage on every run. Keep the same premium construction-update structure, but adapt the headline wording, support line, metric labels, and date badge to the brief and available project facts.";
 
-  return {
+return {
     seedClauses: compactStrings([
       `Construction-update direction family: ${recipe.direction}`,
       projectImageLine,
       `Hero image rule: ${recipe.hero}`,
       `Layout rule: ${recipe.layout}`,
       `Typography rule: ${recipe.typography}`,
-      `Progress-system rule: ${recipe.supportingSystem}`,
+      `Progress panel rule: ${recipe.supportingSystem}`,
       `Footer rule: ${recipe.footer}`,
       `Style and mood: ${recipe.styleMood}`,
       `Generate materially different progress directions by varying overlay treatment, metric-panel styling, and headline pacing while keeping the project image central.`,
       variableCopyLine,
-      `Negative prompt cues: ${recipe.negativePrompt}`
+      `Negative prompt cues: ${recipe.negativePrompt}`,
+      `IMPORTANT: Only mention ONE image in the prompt. Do NOT say "Image 1", "Image 2" or list multiple filenames.`
     ]),
     finalClauses: compactStrings([
       `Write this as a detailed premium construction-progress image prompt, not a generic summary.`,
@@ -186,7 +190,8 @@ function buildConstructionUpdateGuidance(
       input.brief.exactText
         ? `If explicit metrics, dates, or copy are supplied in the brief, preserve them exactly and build the visual system around them.`
         : `If exact metrics are not supplied, keep copy concise and credible. Use short milestone language rather than inventing overly specific technical numbers.`,
-      `Negative prompt: ${recipe.negativePrompt}`
+      `Negative prompt: ${recipe.negativePrompt}`,
+      `CRITICAL: Only reference ONE image in the prompt. Never say "Image 1 is X, Image 2 is Y". Just describe what you want.`
     ]),
     manifest: {
       code: input.postType?.code ?? null,
@@ -246,16 +251,23 @@ function buildAmenitySpotlightGuidance(
   );
 
   const amenityChoice = chooseAmenityFocus(input);
+  const uniqueAmenityPool = Array.from(new Set([
+    ...(input.projectProfile?.heroAmenities ?? []),
+    ...(input.projectProfile?.amenities ?? [])
+  ]));
   const amenityLine = amenityChoice.focusAmenity
     ? amenityChoice.source === "explicit"
       ? `The brief already names the amenity "${amenityChoice.focusAmenity}". Spotlight that specific amenity and do not switch to a different one.`
-      : `Choose "${amenityChoice.focusAmenity}" as the single amenity focus for this run. Do not combine it with multiple other amenities in the same image.`
-    : `Choose exactly one amenity from the project's available amenity set and spotlight only that one in this image. Do not combine multiple amenities in one frame.`;
+      : `You MUST spotlight exactly this amenity: "${amenityChoice.focusAmenity}". Do NOT select any other amenity. The available amenity pool is: ${uniqueAmenityPool.slice(0, 10).join(", ")}${uniqueAmenityPool.length > 10 ? "..." : ""}.`
+    : `CRITICAL: You must pick exactly ONE amenity from this list only: ${uniqueAmenityPool.join(", ")}. Do NOT invent or assume any amenity not in this list. Pick the most suitable one based on the brief.`;
+
+  const availableAmenitiesClause = `Available amenities for this project: ${uniqueAmenityPool.slice(0, 20).join(", ")}${uniqueAmenityPool.length > 20 ? ", and " + (uniqueAmenityPool.length - 20) + " more" : ""}. You MUST select from this list only.`;
 
   return {
     seedClauses: compactStrings([
       `Amenity-spotlight direction family: ${recipe.direction}`,
       amenityLine,
+      availableAmenitiesClause,
       `Hero image rule: ${recipe.hero}`,
       `Layout rule: ${recipe.layout}`,
       `Typography rule: ${recipe.typography}`,
@@ -263,11 +275,13 @@ function buildAmenitySpotlightGuidance(
       `Footer rule: ${recipe.footer}`,
       `Style and mood: ${recipe.styleMood}`,
       `If the project profile contains many amenities, treat them as the choice pool, not as a checklist to show all at once.`,
-      `Negative prompt cues: ${recipe.negativePrompt}`
+      `Negative prompt cues: ${recipe.negativePrompt}`,
+      `IMPORTANT: Only mention ONE image in the prompt. Do NOT say "Image 1", "Image 2", "the first image", "the second image", or list multiple filenames. Describe what you want in plain text.`
     ]),
     finalClauses: compactStrings([
       `Write this as a detailed single-amenity spotlight prompt, not a generic amenities poster.`,
       amenityLine,
+      availableAmenitiesClause,
       `Composition family: ${recipe.direction}`,
       `Hero direction: ${recipe.hero}`,
       `Layout and composition: ${recipe.layout}`,
@@ -276,7 +290,8 @@ function buildAmenitySpotlightGuidance(
       `Footer treatment: ${recipe.footer}`,
       `Style and mood: ${recipe.styleMood}`,
       `Keep the output focused on one amenity per image. Do not merge the pool, gym, clubhouse, and garden into one crowded layout unless the brief explicitly asks for a multi-amenity collage.`,
-      `Negative prompt: ${recipe.negativePrompt}`
+      `Negative prompt: ${recipe.negativePrompt}`,
+      `CRITICAL: Only reference ONE image in the prompt. Never say "Image 1 is X, Image 2 is Y". Just describe what the image should show.`
     ]),
     manifest: {
       code: input.postType?.code ?? null,
@@ -374,7 +389,8 @@ function buildProjectLaunchGuidance(
       `Style and mood: ${recipe.styleMood}`,
       `Explore launch directions by varying the negative space, overlay treatment, and title pacing while keeping the project image as the primary hero.`,
       variableCopyLine,
-      `Negative prompt cues: ${recipe.negativePrompt}`
+      `Negative prompt cues: ${recipe.negativePrompt}`,
+      `IMPORTANT: Only mention ONE image in the prompt. Do NOT say "Image 1", "Image 2" or list multiple filenames.`
     ]),
     finalClauses: compactStrings([
       `Write this as a detailed premium property-image / project-launch prompt, not a generic concept note.`,
@@ -390,7 +406,8 @@ function buildProjectLaunchGuidance(
       input.brief.exactText
         ? `If exact launch copy is supplied, preserve it and organize the hierarchy around it rather than inventing replacement copy.`
         : `Keep supporting copy concise. Prioritize the building image and project-name hierarchy over dense claims or too many facts.`,
-      `Negative prompt: ${recipe.negativePrompt}`
+      `Negative prompt: ${recipe.negativePrompt}`,
+      `CRITICAL: Only reference ONE image in the prompt. Never say "Image 1 is X, Image 2 is Y". Just describe what you want.`
     ]),
     manifest: {
       code: input.postType?.code ?? null,
@@ -542,27 +559,20 @@ function compactStrings(values: Array<string | null | undefined>) {
 function chooseAmenityFocus(
   input: PostTypePromptInput
 ): { focusAmenity: string | null; source: "explicit" | "inferred" | "none" } {
-  const amenityPool = dedupeStrings([
-    ...(input.projectProfile?.heroAmenities ?? []),
-    ...(input.projectProfile?.amenities ?? [])
-  ]);
-
-  if (amenityPool.length === 0) {
-    return { focusAmenity: null, source: "none" };
-  }
-
-  const briefText = [input.brief.goal, input.brief.prompt, input.brief.exactText ?? ""]
-    .join(" ")
-    .toLowerCase();
-
-  const explicitAmenity = amenityPool.find((amenity) => briefText.includes(amenity.toLowerCase()));
-  if (explicitAmenity) {
-    return { focusAmenity: explicitAmenity, source: "explicit" };
-  }
+  const selection = resolveAmenityFocus({
+    briefText: [input.brief.goal, input.brief.prompt, input.brief.exactText ?? ""].join(" "),
+    projectAmenityNames: [
+      ...(input.projectProfile?.heroAmenities ?? []),
+      ...(input.projectProfile?.amenities ?? [])
+    ],
+    allAssets: input.brandAssets ?? [],
+    projectId: input.projectId ?? null,
+    seed: buildSeed(input),
+  });
 
   return {
-    focusAmenity: chooseRecipe(amenityPool, buildSeed(input)),
-    source: "inferred"
+    focusAmenity: selection.focusAmenity,
+    source: selection.source
   };
 }
 

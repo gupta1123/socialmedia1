@@ -31,6 +31,9 @@ function buildBrandProfile(): BrandProfile {
     styleDescriptors: ["premium", "architectural", "restrained"],
     visualSystem: {
       typographyMood: "Editorial sans serif",
+      headlineFontFamily: "Cormorant Garamond",
+      bodyFontFamily: "Avenir Next",
+      typographyNotes: ["Elegant serif headlines", "Restrained sans supporting copy"],
       compositionPrinciples: ["Use generous whitespace"],
       imageTreatment: ["Warm natural light"],
       textDensity: "minimal" as const,
@@ -58,6 +61,7 @@ function buildBrandAsset(input: {
   id?: string;
   kind: "reference" | "logo" | "rera_qr" | "inspiration";
   label: string;
+  metadataJson?: Record<string, unknown>;
 }): BrandAssetRecord {
   const assetId = input.id ?? crypto.randomUUID();
   return {
@@ -70,7 +74,7 @@ function buildBrandAsset(input: {
     fileName: `${input.label.toLowerCase().replace(/[^a-z0-9]+/g, "_")}.png`,
     mimeType: "image/png",
     storagePath: `brand-assets/${assetId}.png`,
-    metadataJson: {}
+    metadataJson: input.metadataJson ?? {}
   };
 }
 
@@ -154,6 +158,7 @@ describe("compilePromptPackageV2", () => {
         referenceAssetIds: [],
         includeBrandLogo: false,
         includeReraQr: false,
+        logoAssetId: null,
         templateType: "hero"
       },
       referenceLabels: [],
@@ -250,6 +255,7 @@ describe("compilePromptPackageV2", () => {
         referenceAssetIds: [],
         includeBrandLogo: true,
         includeReraQr: false,
+        logoAssetId: null,
         templateType: "hero"
       },
       referenceLabels: [],
@@ -289,6 +295,225 @@ describe("compilePromptPackageV2", () => {
     expect(truthBundleSummary.candidateAssetIds).not.toContain(foreignProjectAssetId);
     expect(truthBundleSummary.exactAssetIds.projectAnchor).toBe(localProjectAssetId);
     expect(truthBundleSummary.exactAssetIds.logo).toBe(logoAssetId);
+  });
+
+  it("adds project amenity assets to amenity spotlight candidate bundles before sample flats", async () => {
+    const workspaceId = crypto.randomUUID();
+    const brandId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+    const projectExteriorAssetId = crypto.randomUUID();
+    const sampleFlatAssetId = crypto.randomUUID();
+    const amenityAssetId = crypto.randomUUID();
+
+    const output = await compilePromptPackageV2({
+      workspaceId,
+      brandName: "Briefly Social Demo",
+      brandProfile: buildBrandProfile(),
+      brandAssets: [
+        buildBrandAsset({
+          id: projectExteriorAssetId,
+          workspaceId,
+          brandId,
+          projectId,
+          kind: "reference",
+          label: "Miami elevation hero",
+          metadataJson: {
+            subjectType: "project_exterior",
+            usageIntent: "truth_anchor",
+            qualityTier: "hero"
+          }
+        }),
+        buildBrandAsset({
+          id: sampleFlatAssetId,
+          workspaceId,
+          brandId,
+          projectId,
+          kind: "reference",
+          label: "Miami sample flat living room",
+          metadataJson: {
+            subjectType: "sample_flat"
+          }
+        }),
+        buildBrandAsset({
+          id: amenityAssetId,
+          workspaceId,
+          brandId,
+          projectId,
+          kind: "reference",
+          label: "Miami Sky Lounge hero",
+          metadataJson: {
+            subjectType: "amenity",
+            amenityName: "Sky Lounge",
+            qualityTier: "hero"
+          }
+        })
+      ],
+      brief: {
+        brandId,
+        createMode: "post",
+        channel: "instagram-feed",
+        format: "portrait",
+        goal: "Build interest in a key project amenity",
+        prompt: "Spotlight the Sky Lounge with an aspirational lifestyle angle.",
+        audience: "Homebuyers",
+        offer: "",
+        exactText: "Amenity Spotlight",
+        referenceAssetIds: [],
+        includeBrandLogo: false,
+        includeReraQr: false,
+        logoAssetId: null,
+        templateType: "product-focus"
+      },
+      referenceLabels: [],
+      projectId,
+      projectName: "Miami",
+      projectStage: "launch",
+      projectProfile: buildProjectProfile({
+        heroAmenities: ["Sky Lounge", "Gym"],
+        actualProjectImageIds: [projectExteriorAssetId],
+        sampleFlatImageIds: [sampleFlatAssetId]
+      }),
+      festival: null,
+      postType: {
+        code: "amenity-spotlight",
+        name: "Amenity spotlight",
+        config: {
+          defaultChannels: ["instagram-feed"],
+          allowedFormats: ["portrait"],
+          recommendedTemplateTypes: ["product-focus"],
+          requiredBriefFields: ["goal", "prompt"],
+          safeZoneGuidance: ["Keep amenity title readable without blocking the hero scene"],
+          ctaStyle: "soft-enquiry",
+          copyDensity: "minimal"
+        }
+      },
+      template: null,
+      series: null,
+      calendarItem: null,
+      deliverableSnapshot: null
+    });
+
+    const truthBundleSummary = getTruthBundleSummary(output);
+    expect(truthBundleSummary.candidateAssetIds).toContain(amenityAssetId);
+    expect(truthBundleSummary.candidateAssetIds).not.toContain(projectExteriorAssetId);
+    expect(truthBundleSummary.candidateAssetIds).not.toContain(sampleFlatAssetId);
+  });
+
+  it("keeps only the amenity asset that matches the requested amenity focus", async () => {
+    const workspaceId = crypto.randomUUID();
+    const brandId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+    const projectExteriorAssetId = crypto.randomUUID();
+    const poolAssetId = crypto.randomUUID();
+    const parkAssetId = crypto.randomUUID();
+
+    const output = await compilePromptPackageV2({
+      workspaceId,
+      brandName: "Briefly Social Demo",
+      brandProfile: buildBrandProfile(),
+      brandAssets: [
+        buildBrandAsset({
+          id: projectExteriorAssetId,
+          workspaceId,
+          brandId,
+          projectId,
+          kind: "reference",
+          label: "Miami elevation hero",
+          metadataJson: {
+            subjectType: "project_exterior",
+            usageIntent: "truth_anchor",
+            qualityTier: "hero"
+          }
+        }),
+        buildBrandAsset({
+          id: poolAssetId,
+          workspaceId,
+          brandId,
+          projectId,
+          kind: "reference",
+          label: "Miami pool hero",
+          metadataJson: {
+            subjectType: "amenity",
+            amenityName: "Swimming Pool",
+            qualityTier: "hero"
+          }
+        }),
+        buildBrandAsset({
+          id: parkAssetId,
+          workspaceId,
+          brandId,
+          projectId,
+          kind: "reference",
+          label: "Miami park hero",
+          metadataJson: {
+            subjectType: "amenity",
+            amenityName: "Park",
+            qualityTier: "hero"
+          }
+        })
+      ],
+      brief: {
+        brandId,
+        createMode: "post",
+        channel: "instagram-feed",
+        format: "portrait",
+        goal: "Build interest in the swimming pool amenity",
+        prompt: "Spotlight the swimming pool with an aspirational lifestyle angle.",
+        audience: "Homebuyers",
+        offer: "",
+        exactText: "Amenity Spotlight",
+        referenceAssetIds: [],
+        includeBrandLogo: false,
+        includeReraQr: false,
+        logoAssetId: null,
+        templateType: "product-focus"
+      },
+      referenceLabels: [],
+      projectId,
+      projectName: "Miami",
+      projectStage: "launch",
+      projectProfile: buildProjectProfile({
+        heroAmenities: ["Swimming Pool", "Park"],
+        actualProjectImageIds: [projectExteriorAssetId],
+      }),
+      festival: null,
+      postType: {
+        code: "amenity-spotlight",
+        name: "Amenity spotlight",
+        config: {
+          defaultChannels: ["instagram-feed"],
+          allowedFormats: ["portrait"],
+          recommendedTemplateTypes: ["product-focus"],
+          requiredBriefFields: ["goal", "prompt"],
+          safeZoneGuidance: ["Keep amenity title readable without blocking the hero scene"],
+          ctaStyle: "soft-enquiry",
+          copyDensity: "minimal"
+        }
+      },
+      template: null,
+      series: null,
+      calendarItem: null,
+      deliverableSnapshot: null
+    });
+
+    const truthBundleSummary = getTruthBundleSummary(output);
+    expect(truthBundleSummary.candidateAssetIds).toContain(poolAssetId);
+    expect(truthBundleSummary.candidateAssetIds).not.toContain(projectExteriorAssetId);
+    expect(truthBundleSummary.candidateAssetIds).not.toContain(parkAssetId);
+    expect(output.compilerTrace.postTypeGuidanceManifest).toMatchObject({
+      code: "amenity-spotlight",
+      amenityFocus: "Swimming Pool",
+      amenitySelectionSource: "explicit"
+    });
+    const amenityResolutionSummary = (output.compilerTrace as Record<string, any>).amenityResolutionSummary;
+    expect(amenityResolutionSummary).toMatchObject({
+      selectedAmenity: "Swimming Pool",
+      selectedAssetIds: [poolAssetId],
+      hasExactAssetMatch: true,
+    });
+    expect(amenityResolutionSummary.availableAmenities).toEqual(
+      expect.arrayContaining(["Swimming Pool", "Park"])
+    );
   });
 
   it("keeps festive prompts project-free unless a project asset is explicitly selected", async () => {
@@ -338,6 +563,7 @@ describe("compilePromptPackageV2", () => {
         referenceAssetIds: [],
         includeBrandLogo: true,
         includeReraQr: false,
+        logoAssetId: null,
         templateType: "quote"
       },
       referenceLabels: [],
@@ -379,5 +605,167 @@ describe("compilePromptPackageV2", () => {
     expect(truthBundleSummary.candidateAssetIds).toContain(logoAssetId);
     expect(truthBundleSummary.candidateAssetIds).not.toContain(foreignProjectAssetId);
     expect(truthBundleSummary.exactAssetIds.projectAnchor).toBeNull();
+  });
+
+  it("generates single-image prompts for amenity spotlight", async () => {
+    const workspaceId = crypto.randomUUID();
+    const brandId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+    const amenityAssetId = crypto.randomUUID();
+    const projectExteriorAssetId = crypto.randomUUID();
+
+    const output = await compilePromptPackageV2({
+      workspaceId,
+      brandName: "Pride Group",
+      brandProfile: buildBrandProfile(),
+      brandAssets: [
+        buildBrandAsset({
+          id: amenityAssetId,
+          workspaceId,
+          brandId,
+          projectId,
+          kind: "reference",
+          label: "Sky Lounge Hero",
+          metadataJson: {
+            subjectType: "amenity",
+            amenityName: "Sky Lounge",
+            qualityTier: "hero"
+          }
+        }),
+        buildBrandAsset({
+          id: projectExteriorAssetId,
+          workspaceId,
+          brandId,
+          projectId,
+          kind: "reference",
+          label: "Project exterior",
+          metadataJson: {
+            subjectType: "project_exterior"
+          }
+        })
+      ],
+      brief: {
+        brandId,
+        createMode: "post",
+        channel: "instagram-feed",
+        format: "portrait",
+        goal: "Build interest in a key project amenity",
+        prompt: "Spotlight the Sky Lounge with an aspirational lifestyle angle.",
+        audience: "Homebuyers",
+        offer: "",
+        exactText: "Sky Lounge",
+        referenceAssetIds: [],
+        includeBrandLogo: false,
+        includeReraQr: false,
+        logoAssetId: null,
+        templateType: "product-focus"
+      },
+      referenceLabels: [],
+      projectId,
+      projectName: "Miami",
+      projectStage: "launch",
+      projectProfile: buildProjectProfile({
+        heroAmenities: ["Sky Lounge", "Gym"],
+        amenities: ["Sky Lounge", "Gym", "Pool"],
+        actualProjectImageIds: [projectExteriorAssetId],
+        sampleFlatImageIds: []
+      }),
+      festival: null,
+      postType: {
+        code: "amenity-spotlight",
+        name: "Amenity spotlight",
+        config: {
+          defaultChannels: ["instagram-feed"],
+          allowedFormats: ["portrait"],
+          recommendedTemplateTypes: ["product-focus"],
+          requiredBriefFields: ["goal", "prompt"],
+          safeZoneGuidance: ["Keep amenity title readable without blocking the hero scene"],
+          ctaStyle: "soft-enquiry",
+          copyDensity: "minimal"
+        }
+      },
+      template: null,
+      series: null,
+      calendarItem: null,
+      deliverableSnapshot: null
+    });
+
+    console.log("=== INPUT ===");
+    console.log("Brand: Pride Group");
+    console.log("Project: Miami");
+    console.log("Post Type: Amenity spotlight");
+    console.log("Brief Prompt: Spotlight the Sky Lounge with an aspirational lifestyle angle.");
+    console.log("");
+    console.log("=== OUTPUT ===");
+    console.log("Seed Prompt:");
+    console.log(output.seedPrompt);
+    console.log("");
+    console.log("Final Prompt:");
+    console.log(output.finalPrompt);
+
+    expect(output.seedPrompt).toBeTruthy();
+    expect(output.finalPrompt).toBeTruthy();
+    const imageRefPattern = /(?:Image \d+ is [^.]+\.(?:jpg|jpeg|png|webp)[^,]*(?:,|and)|filename.*(?:jpg|jpeg|png|webp).*Image \d+)/i;
+    const hasActualImageRefs = imageRefPattern.test(output.finalPrompt);
+    expect(hasActualImageRefs).toBe(false);
+  });
+
+  it("filters references correctly for amenity spotlight", async () => {
+    type RoleAwareReferencePlan = {
+      primaryAnchor: { role: string; label: string; storagePath: string } | null;
+      sourcePost: { role: string; label: string; storagePath: string } | null;
+      amenityAnchor: { role: string; label: string; storagePath: string; amenityName?: string | null } | null;
+      projectAnchor: { role: string; label: string; storagePath: string } | null;
+      brandLogo: { role: string; label: string; storagePath: string } | null;
+      complianceQr: { role: string; label: string; storagePath: string } | null;
+      references: Array<{ role: string; label: string; storagePath: string }>;
+    };
+
+    function filterReferenceStoragePathsForPrompt(
+      plan: RoleAwareReferencePlan,
+      prompt: string,
+      postTypeCode: string
+    ): string[] {
+      const alwaysInclude = [
+        plan.brandLogo?.storagePath,
+        plan.complianceQr?.storagePath
+      ].filter((v): v is string => typeof v === "string" && v.length > 0);
+
+      const heroReference: string[] = [];
+      if (postTypeCode === "amenity-spotlight") {
+        if (plan.amenityAnchor?.storagePath) {
+          heroReference.push(plan.amenityAnchor.storagePath);
+        }
+      }
+
+      return [...heroReference, ...alwaysInclude];
+    }
+
+    const plan: RoleAwareReferencePlan = {
+      primaryAnchor: null,
+      sourcePost: null,
+      amenityAnchor: { role: "amenity_image", label: "Pool amenity", storagePath: "amenities/pool.jpg", amenityName: null },
+      projectAnchor: { role: "project_image", label: "Building", storagePath: "project/building.jpg" },
+      brandLogo: { role: "brand_logo", label: "Logo", storagePath: "brand/logo.png" },
+      complianceQr: null,
+      references: [
+        { role: "reference", label: "Interior", storagePath: "interior/kids.png" },
+        { role: "reference", label: "Mood", storagePath: "mood/lounge.png" }
+      ]
+    };
+
+    const filtered = filterReferenceStoragePathsForPrompt(plan, "", "amenity-spotlight");
+    console.log("Filtered refs for amenity-spotlight:", filtered);
+    expect(filtered.length).toBe(2);
+    expect(filtered).toContain("amenities/pool.jpg");
+    expect(filtered).toContain("brand/logo.png");
+    expect(filtered).not.toContain("project/building.jpg");
+
+    const noAmenityPlan: RoleAwareReferencePlan = {
+      ...plan,
+      amenityAnchor: null,
+    };
+    const filteredWithoutAmenity = filterReferenceStoragePathsForPrompt(noAmenityPlan, "", "amenity-spotlight");
+    expect(filteredWithoutAmenity).toEqual(["brand/logo.png"]);
   });
 });

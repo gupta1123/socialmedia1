@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
   type CreativeJobRecord,
+  type BrandAssetRecord,
   CreativeRunDetailSchema,
   CreativeRunSummarySchema,
   CreativeBriefSchema,
@@ -44,6 +45,13 @@ import {
   recordOutputFeedback,
   resolveOrCreateAdHocDeliverable
 } from "../lib/deliverable-flow.js";
+import {
+  buildInferredReferenceSelection,
+  inferAmenityNameFromAssetParts,
+  isAmenityFocusedPostType,
+  isAmenityReferenceAsset
+} from "../lib/creative-reference-selection.js";
+import { buildPostTypePromptGuidance } from "../lib/post-type-prompt-guidance.js";
 import { getCreativeRunDetail, listWorkspaceRuns } from "../lib/runs.js";
 import { compilePromptPackageV2 } from "../lib/creative-director.js";
 
@@ -59,11 +67,134 @@ const StyleSeedV2RequestSchema = z.object({
 type RoleAwareReferencePlan = {
   primaryAnchor: { role: "template" | "source_post"; label: string; storagePath: string } | null;
   sourcePost: { role: "source_post"; label: string; storagePath: string } | null;
+  amenityAnchor: { role: "amenity_image"; label: string; storagePath: string; amenityName: string | null } | null;
   projectAnchor: { role: "project_image"; label: string; storagePath: string } | null;
   brandLogo: { role: "brand_logo"; label: string; storagePath: string } | null;
   complianceQr: { role: "rera_qr"; label: string; storagePath: string } | null;
   references: Array<{ role: "reference"; label: string; storagePath: string }>;
 };
+
+function scoreProjectAnchorAsset(asset: BrandAssetRecord) {
+  const metadata = asset.metadataJson ?? {};
+  let score = 0;
+
+  const usageIntent = typeof metadata.usageIntent === "string" ? metadata.usageIntent.toLowerCase() : "";
+  if (usageIntent === "truth_anchor") score += 200;
+
+  const qualityTier = typeof metadata.qualityTier === "string" ? metadata.qualityTier.toLowerCase() : "";
+  if (qualityTier === "hero") score += 40;
+
+  const viewType = typeof metadata.viewType === "string" ? metadata.viewType.toLowerCase() : "";
+  if (["wide", "facade", "aerial", "street", "site"].includes(viewType)) score += 20;
+  if (["close_up", "detail"].includes(viewType)) score -= 15;
+
+  const subjectType = typeof metadata.subjectType === "string" ? metadata.subjectType.toLowerCase() : "";
+  if (["project_exterior", "construction_progress"].includes(subjectType)) score += 30;
+  if (["amenity", "interior", "sample_flat", "lifestyle"].includes(subjectType)) score -= 20;
+
+  const label = asset.label.toLowerCase();
+  if (/(hero|facade|elevation|tower|front|wide|aerial)/.test(label)) score += 15;
+  if (/(close|detail|interior|amenity|lobby)/.test(label)) score -= 10;
+  if (/(construction|site)/.test(label)) score += 5;
+
+  return score;
+}
+
+function resolveProjectAnchorAsset(
+  brandAssets: BrandAssetRecord[],
+  projectImageAssetIds: string[],
+  supportingReferenceAssetIds: string[]
+) {
+  if (projectImageAssetIds.length === 0) return null;
+  const rank = new Map(projectImageAssetIds.map((id, index) => [id, index]));
+  const projectAssets = brandAssets.filter((asset) => projectImageAssetIds.includes(asset.id));
+  if (projectAssets.length === 0) return null;
+
+  const explicitProjectRefs = supportingReferenceAssetIds.filter((id) => projectImageAssetIds.includes(id));
+  const explicitAssets = projectAssets.filter((asset) => explicitProjectRefs.includes(asset.id));
+  const candidates = explicitAssets.length > 0 ? explicitAssets : projectAssets;
+
+  return (
+    candidates.reduce<{ asset: BrandAssetRecord; score: number } | null>((best, asset) => {
+      const score = scoreProjectAnchorAsset(asset);
+      if (!best) return { asset, score };
+      if (score > best.score) return { asset, score };
+      if (score === best.score && (rank.get(asset.id) ?? 999) < (rank.get(best.asset.id) ?? 999)) {
+        return { asset, score };
+      }
+      return best;
+    }, null)?.asset ?? null
+  );
+}
+
+function scoreAmenityAnchorAsset(asset: BrandAssetRecord, focusAmenity: string | null) {
+  const metadata = asset.metadataJson ?? {};
+  let score = 0;
+
+  const subjectType = typeof metadata.subjectType === "string" ? metadata.subjectType.toLowerCase() : "";
+  if (subjectType === "amenity") score += 200;
+
+  const amenityName = inferAmenityNameFromAssetParts(asset.label, metadata);
+  if (amenityName) score += 80;
+
+  const qualityTier = typeof metadata.qualityTier === "string" ? metadata.qualityTier.toLowerCase() : "";
+  if (qualityTier === "hero") score += 40;
+
+  const usageIntent = typeof metadata.usageIntent === "string" ? metadata.usageIntent.toLowerCase() : "";
+  if (usageIntent === "truth_anchor") score += 20;
+
+  const viewType = typeof metadata.viewType === "string" ? metadata.viewType.toLowerCase() : "";
+  if (["interior", "wide", "street"].includes(viewType)) score += 10;
+
+  const tags = Array.isArray(metadata.tags)
+    ? metadata.tags.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  const haystack = `${asset.label} ${amenityName ?? ""} ${tags.join(" ")}`.toLowerCase();
+  if (focusAmenity) {
+    const normalizedFocus = focusAmenity.trim().toLowerCase();
+    if (haystack.includes(normalizedFocus)) {
+      score += 250;
+    } else {
+      const partialMatches = normalizedFocus
+        .split(/[^a-z0-9]+/g)
+        .filter((token) => token.length > 2 && haystack.includes(token)).length;
+      score += partialMatches * 35;
+    }
+  }
+
+  if (/(pool|gym|lounge|clubhouse|terrace|garden|amphitheater|theatre|cafe|deck|play|plaza|cricket|jacuzzi)/.test(haystack)) {
+    score += 20;
+  }
+
+  return score;
+}
+
+function resolveAmenityAnchorAsset(
+  orderedReferenceAssets: BrandAssetRecord[],
+  amenityAssetIds: string[],
+  focusAmenity: string | null
+) {
+  if (orderedReferenceAssets.length === 0) return null;
+  if (focusAmenity && amenityAssetIds.length === 0) return null;
+
+  const rank = new Map(orderedReferenceAssets.map((asset, index) => [asset.id, index]));
+  const candidates = amenityAssetIds.length > 0
+    ? orderedReferenceAssets.filter((asset) => amenityAssetIds.includes(asset.id))
+    : orderedReferenceAssets.filter((asset) => isAmenityReferenceAsset(asset));
+  if (candidates.length === 0) return null;
+
+  return (
+    candidates.reduce<{ asset: BrandAssetRecord; score: number } | null>((best, asset) => {
+      const score = scoreAmenityAnchorAsset(asset, focusAmenity);
+      if (!best) return { asset, score };
+      if (score > best.score) return { asset, score };
+      if (score === best.score && (rank.get(asset.id) ?? 999) < (rank.get(best.asset.id) ?? 999)) {
+        return { asset, score };
+      }
+      return best;
+    }, null)?.asset ?? null
+  );
+}
 
 export async function registerCreativeRoutes(app: FastifyInstance) {
   app.get("/api/creative/runs", { preHandler: app.authenticate }, async (request, reply) => {
@@ -337,14 +468,51 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     ]);
 
     const isFestiveGreeting = postType.code === "festive-greeting" && Boolean(festival);
-    const inferredReferenceAssetIds = dedupeStrings([
-      ...brief.referenceAssetIds,
-      ...(isFestiveGreeting ? [] : projectProfileVersion?.profile.actualProjectImageIds ?? []),
-      ...(isFestiveGreeting ? [] : projectProfileVersion?.profile.sampleFlatImageIds ?? []),
-      ...(isFestiveGreeting ? [] : brandProfileVersion.profile.referenceAssetIds)
-    ]);
-    const referenceAssets = allAssets.filter((asset) => inferredReferenceAssetIds.includes(asset.id));
-    const selectedBrandLogoAsset = brief.includeBrandLogo ? allAssets.find((asset) => asset.kind === "logo") ?? null : null;
+    const projectActualImages = Array.isArray(projectProfileVersion?.profile.actualProjectImageIds)
+      ? projectProfileVersion?.profile.actualProjectImageIds
+      : [];
+    const projectSampleImages = Array.isArray(projectProfileVersion?.profile.sampleFlatImageIds)
+      ? projectProfileVersion?.profile.sampleFlatImageIds
+      : [];
+    const brandReferenceImages = Array.isArray(brandProfileVersion.profile.referenceAssetIds)
+      ? brandProfileVersion.profile.referenceAssetIds
+      : [];
+    const postTypeGuidance = buildPostTypePromptGuidance({
+      brandName: brand.name,
+      brief,
+      postType: {
+        code: postType.code,
+        name: postType.name,
+        config: postType.config
+      },
+      projectName: project?.name ?? null,
+      projectProfile: projectProfileVersion?.profile ?? null,
+      brandAssets: allAssets,
+      projectId: project?.id ?? null
+    });
+    const inferredReferenceSelection = buildInferredReferenceSelection({
+      postTypeCode: postType.code,
+      isFestiveGreeting,
+      explicitReferenceAssetIds: brief.referenceAssetIds,
+      projectImageAssetIds: projectActualImages,
+      sampleFlatImageIds: projectSampleImages,
+      brandReferenceAssetIds: brandReferenceImages,
+      allAssets,
+      projectId: project?.id ?? null,
+      focusAmenity: postTypeGuidance.manifest.amenityFocus ?? null,
+    });
+    const inferredReferenceAssetIds = inferredReferenceSelection.referenceAssetIds;
+    const referenceAssets = sortAssetsByIdOrder(
+      allAssets.filter((asset) => inferredReferenceAssetIds.includes(asset.id)),
+      inferredReferenceAssetIds
+    );
+    const explicitLogoAsset =
+      brief.logoAssetId
+        ? allAssets.find((asset) => asset.id === brief.logoAssetId && asset.kind === "logo") ?? null
+        : null;
+    const selectedBrandLogoAsset = brief.includeBrandLogo
+      ? explicitLogoAsset ?? allAssets.find((asset) => asset.kind === "logo") ?? null
+      : null;
     const selectedReraQrAsset = brief.includeReraQr ? allAssets.find((asset) => asset.kind === "rera_qr") ?? null : null;
 
     let compiled;
@@ -424,6 +592,11 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       deliverableId: null,
       projectId: project?.id ?? null,
       postTypeId: postType.id,
+      postType: {
+        code: postType.code,
+        name: postType.name,
+        config: postType.config
+      },
       creativeTemplateId: reusableTemplate?.id ?? null,
       calendarItemId: calendarItem?.id ?? null,
       creativeRequestId: randomId(),
@@ -441,6 +614,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         ...compiled.resolvedConstraints,
         projectImageAssetIds: projectProfileVersion?.profile.actualProjectImageIds ?? [],
         sampleFlatImageIds: projectProfileVersion?.profile.sampleFlatImageIds ?? [],
+        amenityImageAssetIds: inferredReferenceSelection.amenityAssetIds,
         includeBrandLogo: brief.includeBrandLogo,
         includeReraQr: brief.includeReraQr,
         brandLogoAssetId: selectedBrandLogoAsset?.id ?? null,
@@ -454,7 +628,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         preview: true,
         previewId: `preview_v2_${now}`,
         endpoint: "/api/creative/compile-v2",
-        persisted: false
+        persisted: false,
+        postTypeCode: postType.code
       }
     };
 
@@ -598,15 +773,14 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
     const brandAssets = await listBrandAssets(promptPackage.brandId);
     const sourceBrief = getPromptPackageSourceBrief(promptPackage);
-    const supportingReferenceAssetIds = sourceBrief?.referenceAssetIds ?? [];
-    const supportingReferenceAssets = sortAssetsByIdOrder(
-      brandAssets.filter((asset) => supportingReferenceAssetIds.includes(asset.id)),
-      supportingReferenceAssetIds
-    ).slice(0, MAX_SUPPORTING_REFERENCE_IMAGES);
-    const projectImageAssetIds = getPromptPackageProjectImageAssetIds(promptPackage);
-    const usesProjectImage = getPromptPackageUsesProjectImage(promptPackage);
-    const brandLogoAssetId = getPromptPackageResolvedAssetId(promptPackage, "brandLogoAssetId");
-    const reraQrAssetId = getPromptPackageResolvedAssetId(promptPackage, "reraQrAssetId");
+    const supportingReferenceAssetIds = promptPackage.referenceAssetIds ?? sourceBrief?.referenceAssetIds ?? [];
+    const {
+      amenityAnchorAsset,
+      projectAnchorAsset,
+      secondaryReferenceAssets,
+      brandLogoAsset,
+      complianceQrAsset
+    } = resolvePromptPackageReferenceAssets(promptPackage, brandAssets, supportingReferenceAssetIds);
     const reusableTemplate =
       promptPackage.creativeTemplateId
         ? await getReusableTemplate(promptPackage.creativeTemplateId).catch(() => null)
@@ -624,21 +798,6 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     if (sourceOutput && (sourceOutput.workspace_id !== promptPackage.workspaceId || sourceOutput.brand_id !== promptPackage.brandId)) {
       return reply.badRequest("Source post does not belong to the current workspace");
     }
-
-    const projectAnchorAsset =
-      usesProjectImage && projectImageAssetIds.length > 0
-        ? sortAssetsByIdOrder(
-            brandAssets.filter((asset) => projectImageAssetIds.includes(asset.id)),
-            projectImageAssetIds
-          )[0] ?? null
-        : null;
-    const secondaryReferenceAssets = projectAnchorAsset
-      ? supportingReferenceAssets.filter((asset) => asset.id !== projectAnchorAsset.id)
-      : supportingReferenceAssets;
-    const brandLogoAsset =
-      brandLogoAssetId ? brandAssets.find((asset) => asset.id === brandLogoAssetId) ?? null : null;
-    const complianceQrAsset =
-      reraQrAssetId ? brandAssets.find((asset) => asset.id === reraQrAssetId) ?? null : null;
 
     const referencePlan: RoleAwareReferencePlan = {
       primaryAnchor:
@@ -663,6 +822,14 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
               storagePath: sourceOutput.storage_path
             }
           : null,
+      amenityAnchor: amenityAnchorAsset
+        ? {
+            role: "amenity_image" as const,
+            label: amenityAnchorAsset.label,
+            storagePath: amenityAnchorAsset.storagePath,
+            amenityName: inferAmenityNameFromAssetParts(amenityAnchorAsset.label, amenityAnchorAsset.metadataJson ?? {}) ?? null
+          }
+        : null,
       projectAnchor: projectAnchorAsset
         ? {
             role: "project_image" as const,
@@ -692,17 +859,20 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     };
 
     const referenceStoragePaths = collectReferenceStoragePaths(referencePlan);
-    const finalReferenceCount = referenceStoragePaths.length;
+    const filteredRefs = filterReferenceStoragePathsForPrompt(
+      referencePlan,
+      variations[0]?.finalPrompt ?? "",
+      getPostTypeCode(promptPackage) ?? "default"
+    );
+    const finalReferenceCount = filteredRefs.length;
     const optionProvider = resolveImageGenerationProvider();
-    const optionProviderModel = getFinalProviderModel();
-    const jobs: Array<{ id: string; variationId: string; variationTitle: string; requestId: string | null }> = [];
+    const optionProviderModel = getFinalProviderModel(finalReferenceCount);
     const v2OptionBatchId = randomId();
-
-    for (const variation of variations) {
+    const preparedOptionJobs = variations.map((variation) => {
       const jobId = randomId();
       const optionPromptWithRoles =
         finalReferenceCount > 0
-          ? buildV2RoleAwarePrompt(variation.finalPrompt, referencePlan, "final")
+          ? buildV2RoleAwarePrompt(variation.finalPrompt, referencePlan, "final", getPostTypeCode(promptPackage))
           : variation.finalPrompt;
       const optionJob: CreativeJobRecord = {
         id: jobId,
@@ -726,7 +896,18 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         error: null
       };
 
-      const { error } = await supabaseAdmin.from("creative_jobs").insert({
+      return {
+        jobId,
+        variationId: variation.id,
+        variationTitle: variation.title,
+        variationStrategy: variation.strategy,
+        optionPromptWithRoles,
+        optionJob
+      };
+    });
+
+    const { error } = await supabaseAdmin.from("creative_jobs").insert(
+      preparedOptionJobs.map(({ jobId, variationId, variationTitle, variationStrategy, optionPromptWithRoles }) => ({
         id: jobId,
         workspace_id: promptPackage.workspaceId,
         brand_id: promptPackage.brandId,
@@ -747,21 +928,25 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           aspectRatio: promptPackage.aspectRatio,
           count: 1,
           v2OptionBatchId,
-          variationId: variation.id,
-          variationTitle: variation.title,
-          variationStrategy: variation.strategy,
+          variationId,
+          variationTitle,
+          variationStrategy,
           referenceCount: finalReferenceCount
         },
         created_by: viewer.userId
-      });
+      }))
+    );
 
-      if (error) {
-        throw error;
-      }
+    if (error) {
+      throw error;
+    }
 
-      let requestInfo: { request_id: string } | null = null;
+    const jobs: Array<{ id: string; variationId: string; variationTitle: string; requestId: string | null }> = [];
 
-      if (optionProvider === "openrouter") {
+    if (optionProvider === "openrouter") {
+      for (const { jobId, variationId, variationTitle, optionPromptWithRoles, optionJob } of preparedOptionJobs) {
+        let requestInfo: { request_id: string } | null = null;
+
         requestInfo = { request_id: `openrouter-v2-option-${jobId}` };
 
         const { error: optionJobUpdateError } = await supabaseAdmin
@@ -791,64 +976,104 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           prompt: optionPromptWithRoles,
           aspectRatio: promptPackage.aspectRatio,
           referenceStoragePaths,
-          mode: "final"
+          mode: "final",
+          referencePlan,
+          postTypeCode: getPostTypeCode(promptPackage)
         });
-      } else {
-        try {
-          requestInfo = await submitFinalGeneration(
-            optionJob,
-            {
-              prompt: optionPromptWithRoles,
-              aspectRatio: promptPackage.aspectRatio
-            },
-            referenceStoragePaths
-          );
-        } catch (submissionError) {
-          const serialized = await failJobSubmission(jobId, submissionError);
-          return reply.code(503).send({
-            statusCode: 503,
-            error: "Service Unavailable",
-            message: serialized.message
-          });
-        }
 
-        const { error: optionJobUpdateError } = await supabaseAdmin
-          .from("creative_jobs")
-          .update({
-            provider_request_id: requestInfo?.request_id ?? null,
-            status: "processing",
-            submitted_at: new Date().toISOString()
-          })
-          .eq("id", jobId);
-
-        if (optionJobUpdateError) {
-          const serialized = await failJobSubmission(jobId, optionJobUpdateError);
-          return reply.code(503).send({
-            statusCode: 503,
-            error: "Service Unavailable",
-            message: serialized.message
-          });
-        }
+        jobs.push({
+          id: jobId,
+          variationId,
+          variationTitle,
+          requestId: requestInfo?.request_id ?? null
+        });
       }
+    } else {
+      const submissionResults = await Promise.all(
+        preparedOptionJobs.map(async ({ jobId, variationId, variationTitle, optionPromptWithRoles, optionJob }) => {
+          try {
+            const requestInfo = await submitFinalGeneration(
+              optionJob,
+              {
+                prompt: optionPromptWithRoles,
+                aspectRatio: promptPackage.aspectRatio
+              },
+              filteredRefs
+            );
 
-      jobs.push({
-        id: jobId,
-        variationId: variation.id,
-        variationTitle: variation.title,
-        requestId: requestInfo?.request_id ?? null
-      });
+            const { error: optionJobUpdateError } = await supabaseAdmin
+              .from("creative_jobs")
+              .update({
+                provider_request_id: requestInfo?.request_id ?? null,
+                status: "processing",
+                submitted_at: new Date().toISOString()
+              })
+              .eq("id", jobId);
+
+            if (optionJobUpdateError) {
+              const serialized = await failJobSubmission(jobId, optionJobUpdateError);
+              return {
+                status: "failed" as const,
+                id: jobId,
+                variationId,
+                variationTitle,
+                requestId: null,
+                error: serialized
+              };
+            }
+
+            return {
+              status: "accepted" as const,
+              id: jobId,
+              variationId,
+              variationTitle,
+              requestId: requestInfo?.request_id ?? null
+            };
+          } catch (submissionError) {
+            const serialized = await failJobSubmission(jobId, submissionError);
+            return {
+              status: "failed" as const,
+              id: jobId,
+              variationId,
+              variationTitle,
+              requestId: null,
+              error: serialized
+            };
+          }
+        })
+      );
+
+      jobs.push(
+        ...submissionResults.map(({ id, variationId, variationTitle, requestId }) => ({
+          id,
+          variationId,
+          variationTitle,
+          requestId
+        }))
+      );
+
+      if (!submissionResults.some((result) => result.status === "accepted")) {
+        const firstFailure = submissionResults.find((result) => result.status === "failed");
+        return reply.code(503).send({
+          statusCode: 503,
+          error: "Service Unavailable",
+          message: firstFailure?.error.message ?? "Image generation request failed"
+        });
+      }
     }
 
-    await supabaseAdmin
-      .from("deliverables")
-      .update({ status: "generating" })
-      .eq("id", deliverable.id);
-
-    if (promptPackage.calendarItemId) {
+    if (jobs.some((job) => job.requestId)) {
       await supabaseAdmin
-        .from("calendar_items")
+        .from("deliverables")
         .update({ status: "generating" })
-        .eq("id", promptPackage.calendarItemId);
+        .eq("id", deliverable.id);
+
+      if (promptPackage.calendarItemId) {
+        await supabaseAdmin
+          .from("calendar_items")
+          .update({ status: "generating" })
+          .eq("id", promptPackage.calendarItemId);
+      }
     }
 
     return {
@@ -869,15 +1094,14 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
     const brandAssets = await listBrandAssets(promptPackage.brandId);
     const sourceBrief = getPromptPackageSourceBrief(promptPackage);
-    const supportingReferenceAssetIds = sourceBrief?.referenceAssetIds ?? [];
-    const supportingReferenceAssets = sortAssetsByIdOrder(
-      brandAssets.filter((asset) => supportingReferenceAssetIds.includes(asset.id)),
-      supportingReferenceAssetIds
-    ).slice(0, MAX_SUPPORTING_REFERENCE_IMAGES);
-    const projectImageAssetIds = getPromptPackageProjectImageAssetIds(promptPackage);
-    const usesProjectImage = getPromptPackageUsesProjectImage(promptPackage);
-    const brandLogoAssetId = getPromptPackageResolvedAssetId(promptPackage, "brandLogoAssetId");
-    const reraQrAssetId = getPromptPackageResolvedAssetId(promptPackage, "reraQrAssetId");
+    const supportingReferenceAssetIds = promptPackage.referenceAssetIds ?? sourceBrief?.referenceAssetIds ?? [];
+    const {
+      amenityAnchorAsset,
+      projectAnchorAsset,
+      secondaryReferenceAssets,
+      brandLogoAsset,
+      complianceQrAsset
+    } = resolvePromptPackageReferenceAssets(promptPackage, brandAssets, supportingReferenceAssetIds);
     const reusableTemplate =
       promptPackage.creativeTemplateId
         ? await getReusableTemplate(promptPackage.creativeTemplateId).catch(() => null)
@@ -895,21 +1119,6 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     if (sourceOutput && (sourceOutput.workspace_id !== promptPackage.workspaceId || sourceOutput.brand_id !== promptPackage.brandId)) {
       return reply.badRequest("Source post does not belong to the current workspace");
     }
-
-    const projectAnchorAsset =
-      usesProjectImage && projectImageAssetIds.length > 0
-        ? sortAssetsByIdOrder(
-            brandAssets.filter((asset) => projectImageAssetIds.includes(asset.id)),
-            projectImageAssetIds
-          )[0] ?? null
-        : null;
-    const secondaryReferenceAssets = projectAnchorAsset
-      ? supportingReferenceAssets.filter((asset) => asset.id !== projectAnchorAsset.id)
-      : supportingReferenceAssets;
-    const brandLogoAsset =
-      brandLogoAssetId ? brandAssets.find((asset) => asset.id === brandLogoAssetId) ?? null : null;
-    const complianceQrAsset =
-      reraQrAssetId ? brandAssets.find((asset) => asset.id === reraQrAssetId) ?? null : null;
 
     const referencePlan: RoleAwareReferencePlan = {
       primaryAnchor:
@@ -934,6 +1143,14 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
               storagePath: sourceOutput.storage_path
             }
           : null,
+      amenityAnchor: amenityAnchorAsset
+        ? {
+            role: "amenity_image" as const,
+            label: amenityAnchorAsset.label,
+            storagePath: amenityAnchorAsset.storagePath,
+            amenityName: inferAmenityNameFromAssetParts(amenityAnchorAsset.label, amenityAnchorAsset.metadataJson ?? {}) ?? null
+          }
+        : null,
       projectAnchor: projectAnchorAsset
         ? {
             role: "project_image" as const,
@@ -961,24 +1178,17 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         storagePath: asset.storagePath
       }))
     };
-
-    const seedReferenceCount =
-      (referencePlan.primaryAnchor ? 1 : 0) +
-      (referencePlan.sourcePost ? 1 : 0) +
-      (referencePlan.projectAnchor ? 1 : 0) +
-      (referencePlan.brandLogo ? 1 : 0) +
-      (referencePlan.complianceQr ? 1 : 0) +
-      referencePlan.references.length;
+    const referenceStoragePaths = collectReferenceStoragePaths(referencePlan);
+    const seedReferenceCount = referenceStoragePaths.length;
     const seedPromptWithRoles =
       seedReferenceCount > 0
         ? isV2PromptPackage(promptPackage)
-          ? buildV2RoleAwarePrompt(promptPackage.seedPrompt, referencePlan, "seed")
+          ? buildV2RoleAwarePrompt(promptPackage.seedPrompt, referencePlan, "seed", getPostTypeCode(promptPackage))
           : buildRoleAwarePrompt(promptPackage.seedPrompt, referencePlan, "seed")
         : promptPackage.seedPrompt;
     const seedProvider = resolveImageGenerationProvider();
     const seedProviderModel = getStyleSeedProviderModel(seedReferenceCount);
     const jobId = randomId();
-    const referenceStoragePaths = collectReferenceStoragePaths(referencePlan);
     const styleSeedJob: CreativeJobRecord = {
       id: jobId,
       workspaceId: promptPackage.workspaceId,
@@ -1026,6 +1236,9 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           primaryAnchorRole: referencePlan.primaryAnchor?.role ?? null,
           primaryAnchorLabel: referencePlan.primaryAnchor?.label ?? null,
           sourcePostIncluded: Boolean(referencePlan.sourcePost),
+          amenityAnchorIncluded: Boolean(referencePlan.amenityAnchor),
+          amenityAnchorLabel: referencePlan.amenityAnchor?.label ?? null,
+          amenityAnchorName: referencePlan.amenityAnchor?.amenityName ?? null,
           projectAnchorIncluded: Boolean(referencePlan.projectAnchor),
           projectAnchorLabel: referencePlan.projectAnchor?.label ?? null,
           brandLogoIncluded: Boolean(referencePlan.brandLogo),
@@ -1074,9 +1287,12 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         prompt: seedPromptWithRoles,
         aspectRatio: promptPackage.aspectRatio,
         referenceStoragePaths,
-        mode: "seed"
+        mode: "seed",
+        referencePlan,
+        postTypeCode: getPostTypeCode(promptPackage)
       });
     } else {
+      const filteredRefs = filterReferenceStoragePathsForPrompt(referencePlan, seedPromptWithRoles, getPostTypeCode(promptPackage) ?? "default");
       try {
         requestInfo = await submitStyleSeedGeneration(
           styleSeedJob,
@@ -1084,7 +1300,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
             prompt: seedPromptWithRoles,
             aspectRatio: promptPackage.aspectRatio
           },
-          referenceStoragePaths
+          filteredRefs
         );
       } catch (submissionError) {
         const serialized = await failJobSubmission(jobId, submissionError);
@@ -1144,14 +1360,13 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const jobId = randomId();
     const brandAssets = await listBrandAssets(promptPackage.brandId);
     const supportingReferenceAssetIds = promptPackage.referenceAssetIds ?? [];
-    const supportingReferenceAssets = sortAssetsByIdOrder(
-      brandAssets.filter((asset) => supportingReferenceAssetIds.includes(asset.id)),
-      supportingReferenceAssetIds
-    ).slice(0, MAX_SUPPORTING_REFERENCE_IMAGES);
-    const projectImageAssetIds = getPromptPackageProjectImageAssetIds(promptPackage);
-    const usesProjectImage = getPromptPackageUsesProjectImage(promptPackage);
-    const brandLogoAssetId = getPromptPackageResolvedAssetId(promptPackage, "brandLogoAssetId");
-    const reraQrAssetId = getPromptPackageResolvedAssetId(promptPackage, "reraQrAssetId");
+    const {
+      amenityAnchorAsset,
+      projectAnchorAsset,
+      secondaryReferenceAssets,
+      brandLogoAsset,
+      complianceQrAsset
+    } = resolvePromptPackageReferenceAssets(promptPackage, brandAssets, supportingReferenceAssetIds);
     const selectedTemplate = body.selectedTemplateId ? await getStyleTemplate(body.selectedTemplateId) : null;
     const reusableTemplate =
       !body.selectedTemplateId && promptPackage.creativeTemplateId
@@ -1174,18 +1389,6 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     if (sourceOutput && (sourceOutput.workspace_id !== promptPackage.workspaceId || sourceOutput.brand_id !== promptPackage.brandId)) {
       return reply.badRequest("Source post does not belong to the current workspace");
     }
-
-    const projectAnchorAsset =
-      usesProjectImage && projectImageAssetIds.length > 0
-        ? supportingReferenceAssets.find((asset) => projectImageAssetIds.includes(asset.id)) ?? null
-        : null;
-    const secondaryReferenceAssets = projectAnchorAsset
-      ? supportingReferenceAssets.filter((asset) => asset.id !== projectAnchorAsset.id)
-      : supportingReferenceAssets;
-    const brandLogoAsset =
-      brandLogoAssetId ? brandAssets.find((asset) => asset.id === brandLogoAssetId) ?? null : null;
-    const complianceQrAsset =
-      reraQrAssetId ? brandAssets.find((asset) => asset.id === reraQrAssetId) ?? null : null;
 
     const referencePlan: RoleAwareReferencePlan = {
       primaryAnchor:
@@ -1217,6 +1420,14 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
               storagePath: sourceOutput.storage_path
             }
           : null,
+      amenityAnchor: amenityAnchorAsset
+        ? {
+            role: "amenity_image" as const,
+            label: amenityAnchorAsset.label,
+            storagePath: amenityAnchorAsset.storagePath,
+            amenityName: inferAmenityNameFromAssetParts(amenityAnchorAsset.label, amenityAnchorAsset.metadataJson ?? {}) ?? null
+          }
+        : null,
       projectAnchor: projectAnchorAsset
         ? {
             role: "project_image" as const,
@@ -1244,25 +1455,18 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         storagePath: asset.storagePath
       }))
     };
-
-    const expectedReferenceCount =
-      (referencePlan.primaryAnchor ? 1 : 0) +
-      (referencePlan.sourcePost ? 1 : 0) +
-      (referencePlan.projectAnchor ? 1 : 0) +
-      (referencePlan.brandLogo ? 1 : 0) +
-      (referencePlan.complianceQr ? 1 : 0) +
-      referencePlan.references.length;
-
-    if (expectedReferenceCount === 0) {
-      return reply.badRequest("Final generation requires a selected template or uploaded references");
-    }
-
     const finalPromptWithRoles = isV2PromptPackage(promptPackage)
-      ? buildV2RoleAwarePrompt(promptPackage.finalPrompt, referencePlan, "final")
+      ? buildV2RoleAwarePrompt(promptPackage.finalPrompt, referencePlan, "final", getPostTypeCode(promptPackage))
       : buildRoleAwarePrompt(promptPackage.finalPrompt, referencePlan, "final");
-    const finalProvider = resolveImageGenerationProvider();
-    const finalProviderModel = getFinalProviderModel();
     const referenceStoragePaths = collectReferenceStoragePaths(referencePlan);
+    const filteredRefs = filterReferenceStoragePathsForPrompt(
+      referencePlan,
+      finalPromptWithRoles,
+      getPostTypeCode(promptPackage) ?? "default"
+    );
+    const expectedReferenceCount = filteredRefs.length;
+    const finalProvider = resolveImageGenerationProvider();
+    const finalProviderModel = getFinalProviderModel(expectedReferenceCount);
     const finalJobRecord: CreativeJobRecord = {
       id: jobId,
       workspaceId: promptPackage.workspaceId,
@@ -1311,6 +1515,9 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           primaryAnchorRole: referencePlan.primaryAnchor?.role ?? null,
           primaryAnchorLabel: referencePlan.primaryAnchor?.label ?? null,
           sourcePostIncluded: Boolean(referencePlan.sourcePost),
+          amenityAnchorIncluded: Boolean(referencePlan.amenityAnchor),
+          amenityAnchorLabel: referencePlan.amenityAnchor?.label ?? null,
+          amenityAnchorName: referencePlan.amenityAnchor?.amenityName ?? null,
           projectAnchorIncluded: Boolean(referencePlan.projectAnchor),
           projectAnchorLabel: referencePlan.projectAnchor?.label ?? null,
           supportingReferenceLabels: referencePlan.references.map((reference) => reference.label)
@@ -1355,7 +1562,9 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         prompt: finalPromptWithRoles,
         aspectRatio: promptPackage.aspectRatio,
         referenceStoragePaths,
-        mode: "final"
+        mode: "final",
+        referencePlan,
+        postTypeCode: getPostTypeCode(promptPackage)
       });
     } else {
       try {
@@ -1365,7 +1574,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
             prompt: finalPromptWithRoles,
             aspectRatio: promptPackage.aspectRatio
           },
-          referenceStoragePaths
+          filteredRefs
         );
       } catch (submissionError) {
         const serialized = await failJobSubmission(jobId, submissionError);
@@ -1719,59 +1928,45 @@ function buildRoleAwarePrompt(
     );
   }
 
-  if (plan.projectAnchor) {
-    const projectAnchorIndex = (plan.primaryAnchor ? 1 : 0) + (plan.sourcePost ? 1 : 0) + 1;
+  if (plan.amenityAnchor) {
     roleLines.push(
-      `Image ${projectAnchorIndex} is the actual project building reference (${plan.projectAnchor.label}). Preserve its tower identity, facade rhythm, massing, proportions, podium composition, balcony language, and overall silhouette. This image controls the truth of the building subject even when another image controls layout.`
+      `Use the amenity as the hero subject. Preserve its function, spatial cues, materiality, and lifestyle context. Do not switch to a different facility or amenity type.`
+    );
+  }
+
+  if (plan.projectAnchor) {
+    roleLines.push(
+      plan.amenityAnchor
+        ? `Use the project reference for building identity and architectural context only. It must not replace the amenity as the hero subject.`
+        : `Use the project building reference for subject truth. Preserve its tower identity, facade rhythm, massing, proportions, podium composition, balcony language, and overall silhouette.`
     );
   }
 
   if (plan.brandLogo) {
-    const logoIndex =
-      (plan.primaryAnchor ? 1 : 0) +
-      (plan.sourcePost ? 1 : 0) +
-      (plan.projectAnchor ? 1 : 0) +
-      1;
     roleLines.push(
-      `Image ${logoIndex} is the supplied brand logo (${plan.brandLogo.label}). Use it exactly as provided as a small footer or signature element when logo placement is needed. Match the exact lockup, shape, colors, and spacing from this reference. Do not redraw, stylize, simplify, distort, or invent a replacement logo. If you cannot preserve it faithfully, leave the zone blank instead of inventing a substitute.`
+      `Use the brand logo as a small integrated footer/signature element. Match the exact lockup, shape, colors, and spacing. Blend it into a quiet designed logo zone with proper margin, scale, and tonal harmony so it feels part of the composition, never like a pasted sticker or floating overlay. Do not redraw, stylize, or invent a replacement.`
     );
   }
 
   if (plan.complianceQr) {
-    const qrIndex =
-      (plan.primaryAnchor ? 1 : 0) +
-      (plan.sourcePost ? 1 : 0) +
-      (plan.projectAnchor ? 1 : 0) +
-      (plan.brandLogo ? 1 : 0) +
-      1;
     roleLines.push(
-      `Image ${qrIndex} is the supplied RERA QR (${plan.complianceQr.label}). Use it exactly as provided as a small compliance element when QR placement is needed. Match the exact QR matrix from this reference. Keep it flat, unobstructed, high-contrast, and legible. Do not stylize, repaint, crop aggressively, distort, or decorate the QR. If you cannot preserve it faithfully, leave the zone blank instead of inventing a fake QR.`
+      `Use the RERA QR as a small compliance element. Match the exact QR matrix. Keep it flat, unobstructed, and legible. Do not stylize or decorate.`
     );
   }
 
   if (plan.references.length > 0) {
-    const startingIndex =
-      (plan.primaryAnchor ? 1 : 0) +
-      (plan.sourcePost ? 1 : 0) +
-      (plan.projectAnchor ? 1 : 0) +
-      (plan.brandLogo ? 1 : 0) +
-      (plan.complianceQr ? 1 : 0) +
-      1;
-    const referenceLabels = plan.references
-      .map((reference, index) => `Image ${startingIndex + index}: ${reference.label}`)
-      .join("; ");
     roleLines.push(
-      `${referenceLabels}. Use these only as supporting references for architecture, materials, lighting, mood, and context. Do not let them override the template layout system.`
+      `Use any additional references only for architecture, materials, lighting, mood, and context. Do not let them override the hero subject.`
     );
   }
 
-  if (plan.projectAnchor && plan.primaryAnchor?.role === "template") {
+  if (plan.amenityAnchor && plan.projectAnchor) {
     roleLines.push(
-      "When images conflict, use the template anchor for layout, spacing, hierarchy, and graphic system, but use the actual project image for the building subject, facade, proportions, and recognizable tower identity."
+      "Use the amenity reference for the hero subject and the project reference only for brand-truth context."
     );
   } else if (plan.projectAnchor) {
     roleLines.push(
-      "When images conflict, preserve the actual project image for subject truth first, then use other references only for mood, realism, and finishing detail."
+      "When images conflict, preserve the project reference for subject truth first, then use other references only for mood, realism, and finishing detail."
     );
   } else {
     roleLines.push(
@@ -1782,8 +1977,8 @@ function buildRoleAwarePrompt(
   if (plan.brandLogo) {
     roleLines.push(
       mode === "seed"
-        ? "During style exploration, either place the supplied logo exactly as provided or keep its reserved area blank. Never generate a mock logo, substitute emblem, or placeholder footer mark."
-        : "If the logo cannot be rendered cleanly, keep it small and simple rather than inventing a distorted or incorrect logo mark."
+        ? "During style exploration, either place the supplied logo exactly as provided inside a quiet integrated footer/signature zone or keep its reserved area blank. It must never feel like a pasted sticker, floating badge, or top-layer overlay. Never generate a mock logo, substitute emblem, or placeholder footer mark."
+        : "Use the supplied logo only in a quiet integrated footer/signature zone with proper margin, scale, and tonal harmony. It must feel built into the layout, not pasted on top. If it cannot be rendered cleanly, keep it small and simple rather than inventing a distorted or incorrect logo mark."
     );
   }
 
@@ -1810,6 +2005,11 @@ function buildRoleAwarePrompt(
         "Even during style exploration, keep the actual building recognizable. Do not drift into a different generic tower or invented property facade."
       );
     }
+    if (plan.amenityAnchor) {
+      roleLines.push(
+        "Even during style exploration, keep the same amenity type. Do not turn the chosen lounge, pool, gym, or terrace into a different facility."
+      );
+    }
   } else {
     roleLines.push(
       "Return one finished design per output image. Never create multiple alternate posters, tiled mini-designs, contact sheets, mood boards, or side-by-side concepts inside the same frame."
@@ -1829,6 +2029,11 @@ function buildRoleAwarePrompt(
     if (plan.projectAnchor) {
       roleLines.push(
         "Do not replace the supplied project tower or facade with a different generic building. Keep the property identity visibly recognizable."
+      );
+    }
+    if (plan.amenityAnchor) {
+      roleLines.push(
+        "Do not swap the supplied amenity for a different one. Keep the chosen amenity visibly consistent with the reference."
       );
     }
   }
@@ -1851,54 +2056,63 @@ function isV2PromptPackage(promptPackage: { compilerTrace?: Record<string, unkno
 function buildV2RoleAwarePrompt(
   basePrompt: string,
   plan: RoleAwareReferencePlan,
-  mode: "seed" | "final"
+  mode: "seed" | "final",
+  postTypeCode?: string
 ) {
   const roleLines: string[] = [];
-  let imageIndex = 1;
+  
+  const heroRef = getHeroReferenceForPostType(plan, postTypeCode ?? "default");
+  const firstHeroRef = heroRef[0];
+  const heroAsset = firstHeroRef ? getAssetForPath(plan, firstHeroRef) : null;
 
-  if (plan.primaryAnchor?.role === "template") {
-    roleLines.push(
-      `Image ${imageIndex} is the template reference; use it only for layout rhythm and safe-zone discipline.`
-    );
-    imageIndex += 1;
-  } else if (plan.primaryAnchor?.role === "source_post") {
-    roleLines.push(
-      `Image ${imageIndex} is the source post; preserve its core subject and framing intent.`
-    );
-    imageIndex += 1;
+  if (heroAsset) {
+    const asset = heroAsset;
+    if (asset.role === "amenity_image") {
+      roleLines.push(
+        `Use the amenity as the hero subject. Preserve its function, spatial cues, materiality, and lifestyle context. Do not switch to a different facility or amenity type.`
+      );
+    } else if (asset.role === "project_image") {
+      roleLines.push(
+        `Use the project building as the primary reference. Preserve its tower identity, facade rhythm, massing, proportions, and overall silhouette.`
+      );
+    } else if (asset.role === "template") {
+      roleLines.push(
+        `Use the template for layout rhythm and safe-zone discipline.`
+      );
+    } else if (asset.role === "source_post") {
+      roleLines.push(
+        `Preserve the source post's core subject and framing intent.`
+      );
+    }
   }
 
-  if (plan.sourcePost) {
-    roleLines.push(`Image ${imageIndex} is the source post; use it as secondary structure only.`);
-    imageIndex += 1;
-  }
-
-  if (plan.projectAnchor) {
+  if (postTypeCode === "amenity-spotlight" && !plan.amenityAnchor && plan.projectAnchor) {
     roleLines.push(
-      `Image ${imageIndex} is the project truth reference (${plan.projectAnchor.label}); preserve the same property identity, facade rhythm, proportions, and recognizable tower subject.`
+      "No exact amenity reference image was supplied for the requested facility. Generate the amenity scene without using a mismatched amenity or building image as the hero reference."
     );
-    imageIndex += 1;
+    roleLines.push(
+      "Do not substitute a different amenity, facility, park, lawn, pool, plaza, or building facade from any reference image."
+    );
+  } else if (plan.projectAnchor && plan.amenityAnchor) {
+    roleLines.push(
+      "Use the amenity reference for the hero subject and use the project reference only for brand-truth context."
+    );
+  } else if (plan.projectAnchor && !heroAsset) {
+    roleLines.push(
+      `Use the project building reference (${plan.projectAnchor.label}) for project identity and architectural context.`
+    );
   }
 
   if (plan.brandLogo) {
     roleLines.push(
-      `Image ${imageIndex} is the brand logo; use it only as a small exact footer/corner signature, or leave that area blank.`
+      `Use the brand logo (${plan.brandLogo.label}) as a small integrated footer/signature element. Match the exact lockup, shape, colors, and spacing. Blend it into a quiet designed logo zone with proper margin, scale, and tonal harmony so it feels built into the layout, never pasted on top.`
     );
-    imageIndex += 1;
   }
 
   if (plan.complianceQr) {
     roleLines.push(
-      `Image ${imageIndex} is the RERA QR; use it exactly as a small compliance element only if needed, or leave that area blank.`
+      `Use the RERA QR (${plan.complianceQr.label}) as a small compliance element if needed.`
     );
-    imageIndex += 1;
-  }
-
-  for (const reference of plan.references) {
-    roleLines.push(
-      `Image ${imageIndex} is supporting reference (${reference.label}); use it only for mood/material cues, not subject identity.`
-    );
-    imageIndex += 1;
   }
 
   roleLines.push(
@@ -1914,10 +2128,32 @@ function buildV2RoleAwarePrompt(
   return `${basePrompt} ${roleLines.join(" ")}`.trim();
 }
 
+function getAssetForPath(plan: RoleAwareReferencePlan, storagePath: string): { role: string; label: string } | null {
+  if (plan.primaryAnchor?.storagePath === storagePath) return { role: plan.primaryAnchor.role, label: plan.primaryAnchor.label };
+  if (plan.sourcePost?.storagePath === storagePath) return { role: plan.sourcePost.role, label: plan.sourcePost.label };
+  if (plan.amenityAnchor?.storagePath === storagePath) return { role: "amenity_image", label: plan.amenityAnchor.label };
+  if (plan.projectAnchor?.storagePath === storagePath) return { role: "project_image", label: plan.projectAnchor.label };
+  return null;
+}
+
+function getPostTypeCode(promptPackage: { postType?: { code: string }; resolvedConstraints?: Record<string, unknown>; compilerTrace?: Record<string, unknown>; postTypeId?: string | null }): string {
+  if (promptPackage.postType?.code) {
+    return promptPackage.postType.code;
+  }
+  if (typeof promptPackage.resolvedConstraints?.postTypeCode === "string") {
+    return promptPackage.resolvedConstraints.postTypeCode;
+  }
+  if (typeof promptPackage.compilerTrace?.postTypeCode === "string") {
+    return promptPackage.compilerTrace.postTypeCode as string;
+  }
+  return "default";
+}
+
 function collectReferenceStoragePaths(plan: RoleAwareReferencePlan) {
   return [
     plan.primaryAnchor?.storagePath,
     plan.sourcePost?.storagePath,
+    plan.amenityAnchor?.storagePath,
     plan.projectAnchor?.storagePath,
     plan.brandLogo?.storagePath,
     plan.complianceQr?.storagePath,
@@ -1925,19 +2161,95 @@ function collectReferenceStoragePaths(plan: RoleAwareReferencePlan) {
   ].filter((value): value is string => typeof value === "string" && value.length > 0);
 }
 
+function filterReferenceStoragePathsForPrompt(
+  plan: RoleAwareReferencePlan,
+  prompt: string,
+  postTypeCode: string
+): string[] {
+  const alwaysInclude = [
+    plan.brandLogo?.storagePath,
+    plan.complianceQr?.storagePath
+  ].filter((v): v is string => typeof v === "string" && v.length > 0);
+
+  const heroReference: string[] = [];
+  if (postTypeCode === "amenity-spotlight") {
+    if (plan.amenityAnchor?.storagePath) {
+      heroReference.push(plan.amenityAnchor.storagePath);
+    }
+  } else if (postTypeCode === "construction-update" || postTypeCode === "project-launch") {
+    if (plan.projectAnchor?.storagePath) {
+      heroReference.push(plan.projectAnchor.storagePath);
+    }
+  } else if (postTypeCode === "sample-flat-showcase" || postTypeCode === "site-visit-invite") {
+    if (plan.projectAnchor?.storagePath) {
+      heroReference.push(plan.projectAnchor.storagePath);
+    }
+  } else if (postTypeCode === "festive-greeting") {
+    // No hero reference for festive greetings
+  } else {
+    // Default: include amenity and project
+    if (plan.amenityAnchor?.storagePath) heroReference.push(plan.amenityAnchor.storagePath);
+    if (plan.projectAnchor?.storagePath) heroReference.push(plan.projectAnchor.storagePath);
+  }
+
+  const result = [...heroReference, ...alwaysInclude];
+  console.log(`[filterReferenceStoragePathsForPrompt] postTypeCode=${postTypeCode}, heroRef=${heroReference.length}, alwaysInclude=${alwaysInclude.length}, total=${result.length}, paths=${JSON.stringify(result)}`);
+  return result;
+}
+
+function getHeroReferenceForPostType(plan: RoleAwareReferencePlan, postTypeCode: string): string[] {
+  switch (postTypeCode) {
+    case "amenity-spotlight":
+      return plan.amenityAnchor?.storagePath 
+        ? [plan.amenityAnchor.storagePath]
+        : [];
+    
+    case "construction-update":
+    case "project-launch":
+      return plan.projectAnchor?.storagePath
+        ? [plan.projectAnchor.storagePath]
+        : [];
+    
+    case "sample-flat-showcase":
+    case "site-visit-invite":
+      return plan.projectAnchor?.storagePath
+        ? [plan.projectAnchor.storagePath]
+        : [];
+    
+    case "festive-greeting":
+      return [];
+    
+    default:
+      return [
+        plan.amenityAnchor?.storagePath,
+        plan.projectAnchor?.storagePath,
+        plan.primaryAnchor?.storagePath
+      ].filter((v): v is string => typeof v === "string" && v.length > 0);
+  }
+}
+
 async function runImmediateProviderJob({
   job,
   prompt,
   aspectRatio,
   referenceStoragePaths,
-  mode
+  mode,
+  referencePlan,
+  postTypeCode
 }: {
   job: CreativeJobRecord;
   prompt: string;
   aspectRatio: string;
   referenceStoragePaths: string[];
   mode: "seed" | "final";
+  referencePlan?: RoleAwareReferencePlan;
+  postTypeCode?: string;
 }) {
+  console.log(`[runImmediateProviderJob] mode=${mode}, referencePlan=${!!referencePlan}, postTypeCode=${postTypeCode}, originalRefCount=${referenceStoragePaths.length}`);
+  const filteredRefs = (referencePlan && postTypeCode)
+    ? filterReferenceStoragePathsForPrompt(referencePlan, prompt, postTypeCode)
+    : referenceStoragePaths;
+  console.log(`[runImmediateProviderJob] filteredRefs count=${filteredRefs.length}: ${JSON.stringify(filteredRefs)}`);
   try {
     const result =
       mode === "seed"
@@ -1947,7 +2259,7 @@ async function runImmediateProviderJob({
               prompt,
               aspectRatio
             },
-            referenceStoragePaths
+            filteredRefs
           )
         : await submitFinalGeneration(
             job,
@@ -1955,7 +2267,7 @@ async function runImmediateProviderJob({
               prompt,
               aspectRatio
             },
-            referenceStoragePaths
+            filteredRefs
           );
 
     if (!result.images || result.images.length === 0) {
@@ -2008,10 +2320,6 @@ function isCompilerConnectionError(message: string) {
   );
 }
 
-function dedupeStrings(values: string[]) {
-  return Array.from(new Set(values.filter(Boolean)));
-}
-
 function getPromptPackageCreateContextValue(
   compilerTrace: Record<string, unknown> | null | undefined,
   key: "sourceOutputId"
@@ -2031,6 +2339,15 @@ function getPromptPackageProjectImageAssetIds(promptPackage: { resolvedConstrain
       ? promptPackage.resolvedConstraints
       : {};
   const value = resolvedConstraints.projectImageAssetIds;
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0) : [];
+}
+
+function getPromptPackageAmenityImageAssetIds(promptPackage: { resolvedConstraints?: Record<string, unknown> | null | undefined }) {
+  const resolvedConstraints =
+    promptPackage.resolvedConstraints && typeof promptPackage.resolvedConstraints === "object"
+      ? promptPackage.resolvedConstraints
+      : {};
+  const value = resolvedConstraints.amenityImageAssetIds;
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0) : [];
 }
 
@@ -2058,11 +2375,70 @@ function getPromptPackageUsesProjectImage(promptPackage: { resolvedConstraints?:
   return postTypeGuidance?.usesProjectImage === true;
 }
 
+function getPromptPackagePostTypeGuidance(promptPackage: { resolvedConstraints?: Record<string, unknown> | null | undefined }) {
+  const resolvedConstraints =
+    promptPackage.resolvedConstraints && typeof promptPackage.resolvedConstraints === "object"
+      ? promptPackage.resolvedConstraints
+      : {};
+  return resolvedConstraints.postTypeGuidance && typeof resolvedConstraints.postTypeGuidance === "object"
+    ? (resolvedConstraints.postTypeGuidance as Record<string, unknown>)
+    : null;
+}
+
+function getPromptPackagePostTypeCode(promptPackage: { resolvedConstraints?: Record<string, unknown> | null | undefined }) {
+  const postTypeGuidance = getPromptPackagePostTypeGuidance(promptPackage);
+  return typeof postTypeGuidance?.code === "string" && postTypeGuidance.code.length > 0 ? postTypeGuidance.code : null;
+}
+
+function getPromptPackageAmenityFocus(promptPackage: { resolvedConstraints?: Record<string, unknown> | null | undefined }) {
+  const postTypeGuidance = getPromptPackagePostTypeGuidance(promptPackage);
+  return typeof postTypeGuidance?.amenityFocus === "string" && postTypeGuidance.amenityFocus.trim().length > 0
+    ? postTypeGuidance.amenityFocus.trim()
+    : null;
+}
+
 function getPromptPackageSourceBrief(
   promptPackage: { compilerTrace?: Record<string, unknown> | null | undefined }
 ) {
   const parsed = CreativeBriefSchema.safeParse(promptPackage.compilerTrace?.sourceBrief);
   return parsed.success ? parsed.data : null;
+}
+
+function resolvePromptPackageReferenceAssets(
+  promptPackage: { resolvedConstraints?: Record<string, unknown> | null | undefined },
+  brandAssets: BrandAssetRecord[],
+  supportingReferenceAssetIds: string[]
+) {
+  const orderedReferenceAssets = sortAssetsByIdOrder(
+    brandAssets.filter((asset) => supportingReferenceAssetIds.includes(asset.id)),
+    supportingReferenceAssetIds
+  );
+  const postTypeCode = getPromptPackagePostTypeCode(promptPackage);
+  const amenityAssetIds = getPromptPackageAmenityImageAssetIds(promptPackage);
+  const amenityFocus = getPromptPackageAmenityFocus(promptPackage);
+  const amenityAnchorAsset =
+    isAmenityFocusedPostType(postTypeCode)
+      ? resolveAmenityAnchorAsset(orderedReferenceAssets, amenityAssetIds, amenityFocus)
+      : null;
+  const projectImageAssetIds = getPromptPackageProjectImageAssetIds(promptPackage);
+  const usesProjectImage = getPromptPackageUsesProjectImage(promptPackage);
+  const projectAnchorAsset =
+    usesProjectImage && projectImageAssetIds.length > 0
+      ? resolveProjectAnchorAsset(brandAssets, projectImageAssetIds, supportingReferenceAssetIds)
+      : null;
+  const secondaryReferenceAssets = orderedReferenceAssets
+    .filter((asset) => asset.id !== amenityAnchorAsset?.id && asset.id !== projectAnchorAsset?.id)
+    .slice(0, MAX_SUPPORTING_REFERENCE_IMAGES);
+  const brandLogoAssetId = getPromptPackageResolvedAssetId(promptPackage, "brandLogoAssetId");
+  const reraQrAssetId = getPromptPackageResolvedAssetId(promptPackage, "reraQrAssetId");
+
+  return {
+    amenityAnchorAsset,
+    projectAnchorAsset,
+    secondaryReferenceAssets,
+    brandLogoAsset: brandLogoAssetId ? brandAssets.find((asset) => asset.id === brandLogoAssetId) ?? null : null,
+    complianceQrAsset: reraQrAssetId ? brandAssets.find((asset) => asset.id === reraQrAssetId) ?? null : null,
+  };
 }
 
 async function failJobSubmission(jobId: string, error: unknown) {

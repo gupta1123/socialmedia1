@@ -16,21 +16,44 @@ except ImportError as exc:  # pragma: no cover - exercised only when deps missin
 
 try:
     from agno.skills import LocalSkills, Skills
-except ImportError:  # pragma: no cover - exercised only when optional skills support is unavailable
+except (
+    ImportError
+):  # pragma: no cover - exercised only when optional skills support is unavailable
     LocalSkills = None
     Skills = None
 
+try:
+    from amenity_tools import get_amenity_tools
+except (
+    ImportError
+):  # pragma: no cover - exercised only when amenity tools are unavailable
+    get_amenity_tools = None
+
 
 class PromptPackageOutput(BaseModel):
-    promptSummary: str = Field(..., description="One line description of the creative direction.")
-    seedPrompt: str = Field(..., description="Prompt used to create style seed templates.")
+    promptSummary: str = Field(
+        ..., description="One line description of the creative direction."
+    )
+    seedPrompt: str = Field(
+        ..., description="Prompt used to create style seed templates."
+    )
     finalPrompt: str = Field(..., description="Prompt used to create final creatives.")
-    aspectRatio: str = Field(..., description="Target aspect ratio for the requested format.")
+    aspectRatio: str = Field(
+        ..., description="Target aspect ratio for the requested format."
+    )
     chosenModel: str = Field(..., description="Recommended Fal model id.")
     templateType: Optional[str] = Field(default=None)
     referenceStrategy: str = Field(..., description="How references should be used.")
     resolvedConstraints: dict[str, Any] = Field(default_factory=dict)
     compilerTrace: dict[str, Any] = Field(default_factory=dict)
+    selectedAmenity: Optional[str] = Field(
+        default=None,
+        description="The amenity name selected by the agent for amenity-spotlight post types. Must be populated when tools are used.",
+    )
+    amenityImageAssetIds: list[str] = Field(
+        default_factory=list,
+        description="List of brand asset IDs for the selected amenity's reference images.",
+    )
 
 
 OUTPUT_FORMAT_INSTRUCTION = """
@@ -44,9 +67,12 @@ Return only valid JSON with this exact shape:
   "templateType": string or null,
   "referenceStrategy": string,
   "resolvedConstraints": object,
-  "compilerTrace": object
+  "compilerTrace": object,
+  "selectedAmenity": string or null,
+  "amenityImageAssetIds": list of strings
 }
 Do not wrap the JSON in markdown fences.
+For amenity-spotlight post types, you MUST populate selectedAmenity and amenityImageAssetIds.
 """.strip()
 
 EXPECTED_OUTPUT_INSTRUCTION = """
@@ -85,7 +111,12 @@ Do not paste tool JSON into the answer. Synthesize the skill guidance into the p
 
 
 def build_agent() -> Agent:
-    skills_dir = Path(os.getenv("AGNO_AGENT_SKILLS_DIR", Path(__file__).resolve().parents[3] / "skills" / "prompt" / "v1"))
+    skills_dir = Path(
+        os.getenv(
+            "AGNO_AGENT_SKILLS_DIR",
+            Path(__file__).resolve().parents[3] / "skills" / "prompt" / "v1",
+        )
+    )
     base_url = os.getenv("OPENAI_BASE_URL")
     skill_first_mode = os.getenv("AGNO_SKILL_FIRST_MODE", "0") == "1"
     model_kwargs: dict[str, Any] = {
@@ -158,6 +189,29 @@ def build_agent() -> Agent:
             "Local skill loading is unavailable in this runtime, so rely on the structured request context and produce concise, differentiated prompt packages without external helpers."
         )
 
+    if get_amenity_tools is not None:
+        agent_kwargs["tools"] = get_amenity_tools()
+
+        restrict_to_amenities_with_images = (
+            os.getenv("AGNO_RESTRICT_TO_AMENITIES_WITH_IMAGES", "0") == "1"
+        )
+
+        amenity_instructions = [
+            "For amenity-spotlight post types, you MUST use the provided tools to select the amenity and fetch its images.",
+            "WORKFLOW:",
+            "1. Call get_project_amenities to get the list of available amenities.",
+            "2. Based on the brief, select the most suitable amenity from the list.",
+            "3. Call get_amenity_images for the selected amenity to get relevant reference images.",
+            f"4. AGNO_RESTRICT_TO_AMENITIES_WITH_IMAGES={'1' if restrict_to_amenities_with_images else '0'}: {'Only select amenities that have actual reference images. If no images exist for your chosen amenity, pick a different amenity that has images.' if restrict_to_amenities_with_images else 'You may select any amenity regardless of whether images exist, but prefer amenities with images when available.'}.",
+            "5. In your response, populate:",
+            "   - selectedAmenity: the exact amenity name you selected",
+            "   - amenityImageAssetIds: list of asset IDs from get_amenity_images response",
+            "6. Use the fetched amenity images in your prompt generation when available.",
+            "Do NOT guess amenity names or assume images exist - always use the tools to verify.",
+        ]
+
+        instructions[:0] = amenity_instructions
+
     return Agent(**agent_kwargs)
 
 
@@ -192,8 +246,13 @@ def run_persistent() -> None:
 
         try:
             result = execute(agent, request["payload"])
-            print(json.dumps({"request_id": request_id, "ok": True, "result": result}), flush=True)
-        except Exception as exc:  # pragma: no cover - exercised only through integration
+            print(
+                json.dumps({"request_id": request_id, "ok": True, "result": result}),
+                flush=True,
+            )
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - exercised only through integration
             print(
                 json.dumps(
                     {
@@ -212,6 +271,7 @@ def execute(agent: Agent, payload: dict[str, Any]) -> dict[str, Any]:
             {
                 "brand_name": payload["brandName"],
                 "brand_profile": payload["brandProfile"],
+                "project_id": payload.get("projectId"),
                 "project_name": payload.get("projectName"),
                 "project_profile": payload.get("projectProfile"),
                 "festival": payload.get("festival"),

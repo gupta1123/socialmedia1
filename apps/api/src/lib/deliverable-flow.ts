@@ -6,6 +6,8 @@ import type {
   PostVersionRecord
 } from "@image-lab/contracts";
 import { compilePromptPackage } from "./creative-director.js";
+import { buildInferredReferenceSelection } from "./creative-reference-selection.js";
+import { buildPostTypePromptGuidance } from "./post-type-prompt-guidance.js";
 import { deriveLegacyCreativeFormat, inferDeliverableStatusFromExecution } from "./deliverable-utils.js";
 import {
   buildDeliverableSnapshot,
@@ -61,15 +63,6 @@ export async function compileDeliverablePromptPackage(params: {
     params.briefOverride?.includeReraQr
       ? allAssets.find((asset) => asset.kind === "rera_qr") ?? null
       : null;
-
-  const inferredReferenceAssetIds = dedupeStrings([
-    ...(params.briefOverride?.referenceAssetIds ?? []),
-    ...(isFestiveGreeting ? [] : projectProfileVersion?.profile.actualProjectImageIds ?? []),
-    ...(isFestiveGreeting ? [] : projectProfileVersion?.profile.sampleFlatImageIds ?? []),
-    ...(isFestiveGreeting ? [] : brandProfileVersion.profile.referenceAssetIds)
-  ]);
-
-  const referenceAssets = allAssets.filter((asset) => inferredReferenceAssetIds.includes(asset.id));
   const brief = buildCreativeBrief({
     brandId: deliverable.brandId,
     deliverableId: deliverable.id,
@@ -78,10 +71,42 @@ export async function compileDeliverablePromptPackage(params: {
     personaName: snapshot.persona?.name ?? null,
     ...(params.briefOverride ? { briefOverride: params.briefOverride } : {})
   });
+  const postTypeGuidance = buildPostTypePromptGuidance({
+    brandName: brand.name,
+    brief,
+    postType: {
+      code: postType.code,
+      name: postType.name,
+      config: postType.config
+    },
+    projectName: project?.name ?? null,
+    projectProfile: projectProfileVersion?.profile ?? null,
+    brandAssets: allAssets,
+    projectId: project?.id ?? null
+  });
 
+  const inferredReferenceSelection = buildInferredReferenceSelection({
+    postTypeCode: postType.code,
+    isFestiveGreeting,
+    explicitReferenceAssetIds: params.briefOverride?.referenceAssetIds ?? [],
+    projectImageAssetIds: projectProfileVersion?.profile.actualProjectImageIds ?? [],
+    sampleFlatImageIds: projectProfileVersion?.profile.sampleFlatImageIds ?? [],
+    brandReferenceAssetIds: brandProfileVersion.profile.referenceAssetIds,
+    allAssets,
+    projectId: project?.id ?? null,
+    focusAmenity: postTypeGuidance.manifest.amenityFocus ?? null,
+  });
+  const inferredReferenceAssetIds = inferredReferenceSelection.referenceAssetIds;
+
+  const referenceAssets = sortAssetsByIdOrder(
+    allAssets.filter((asset) => inferredReferenceAssetIds.includes(asset.id)),
+    inferredReferenceAssetIds
+  );
   const compiled = await compilePromptPackage({
     brandName: brand.name,
     brandProfile: brandProfileVersion.profile,
+    brandAssets: allAssets,
+    projectId: project?.id ?? null,
     projectName: project?.name ?? null,
     projectProfile: projectProfileVersion?.profile ?? null,
     festival,
@@ -198,6 +223,7 @@ export async function compileDeliverablePromptPackage(params: {
       ...compiled.resolvedConstraints,
       projectImageAssetIds: projectProfileVersion?.profile.actualProjectImageIds ?? [],
       sampleFlatImageIds: projectProfileVersion?.profile.sampleFlatImageIds ?? [],
+      amenityImageAssetIds: inferredReferenceSelection.amenityAssetIds,
       includeBrandLogo: params.briefOverride?.includeBrandLogo ?? false,
       includeReraQr: params.briefOverride?.includeReraQr ?? false,
       brandLogoAssetId: selectedBrandLogoAsset?.id ?? null,
@@ -246,6 +272,7 @@ export async function compileDeliverablePromptPackage(params: {
       ...compiled.resolvedConstraints,
       projectImageAssetIds: projectProfileVersion?.profile.actualProjectImageIds ?? [],
       sampleFlatImageIds: projectProfileVersion?.profile.sampleFlatImageIds ?? [],
+      amenityImageAssetIds: inferredReferenceSelection.amenityAssetIds,
       includeBrandLogo: params.briefOverride?.includeBrandLogo ?? false,
       includeReraQr: params.briefOverride?.includeReraQr ?? false,
       brandLogoAssetId: selectedBrandLogoAsset?.id ?? null,
@@ -621,6 +648,7 @@ function buildCreativeBrief(params: {
     referenceAssetIds: params.briefOverride?.referenceAssetIds ?? [],
     includeBrandLogo: params.briefOverride?.includeBrandLogo ?? false,
     includeReraQr: params.briefOverride?.includeReraQr ?? false,
+    logoAssetId: params.briefOverride?.logoAssetId ?? null,
     templateType: params.briefOverride?.templateType
   };
 }
@@ -663,8 +691,9 @@ function buildCreateContext(params: {
   };
 }
 
-function dedupeStrings(values: string[]) {
-  return Array.from(new Set(values.filter(Boolean)));
+function sortAssetsByIdOrder<T extends { id: string }>(assets: T[], orderedIds: string[]) {
+  const rank = new Map(orderedIds.map((id, index) => [id, index]));
+  return [...assets].sort((left, right) => (rank.get(left.id) ?? 999) - (rank.get(right.id) ?? 999));
 }
 
 export function resolveApprovalState(

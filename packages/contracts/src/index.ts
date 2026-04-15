@@ -121,6 +121,9 @@ const BrandVoiceSchema = z.object({
 
 const BrandVisualSystemSchema = z.object({
   typographyMood: z.string().default(""),
+  headlineFontFamily: z.string().default(""),
+  bodyFontFamily: z.string().default(""),
+  typographyNotes: z.array(z.string()).default([]),
   compositionPrinciples: z.array(z.string()).default([]),
   imageTreatment: z.array(z.string()).default([]),
   textDensity: z.enum(["minimal", "balanced", "dense"]).default("balanced"),
@@ -153,6 +156,9 @@ export const BrandProfileSchema = z.object({
   styleDescriptors: z.array(z.string()).min(3),
   visualSystem: BrandVisualSystemSchema.default({
     typographyMood: "",
+    headlineFontFamily: "",
+    bodyFontFamily: "",
+    typographyNotes: [],
     compositionPrinciples: [],
     imageTreatment: [],
     textDensity: "balanced",
@@ -668,11 +674,13 @@ export const CreativeBriefSchema = z.object({
   goal: z.string().min(3),
   prompt: z.string().min(10),
   audience: z.string().optional(),
+  copyMode: z.enum(["manual", "auto"]).default("manual"),
   offer: z.string().optional(),
   exactText: z.string().optional(),
   referenceAssetIds: z.array(z.string().uuid()).default([]),
   includeBrandLogo: z.boolean().default(false),
   includeReraQr: z.boolean().default(false),
+  logoAssetId: z.string().uuid().nullable().default(null),
   templateType: TemplateTypeSchema.optional()
 });
 
@@ -734,6 +742,54 @@ export const FeedbackResultSchema = z.object({
   reviewState: OutputReviewStateSchema,
   deliverableId: z.string().uuid(),
   postVersionId: z.string().uuid()
+});
+
+export const ImageEditIntentSchema = z.enum([
+  "remove",
+  "replace",
+  "recolor",
+  "cleanup",
+  "insert",
+  "background-change",
+  "other"
+]);
+
+export const ImageEditSegmentationHintsSchema = z.object({
+  requiresPointSelection: z.boolean().default(false),
+  suggestedTargetPointLabel: z.string().nullable().default(null),
+  notes: z.array(z.string()).default([])
+});
+
+export const ImageEditPlanResponseSchema = z.object({
+  targetObject: z.string(),
+  editIntent: ImageEditIntentSchema,
+  rewrittenPrompt: z.string(),
+  segmentationHints: ImageEditSegmentationHintsSchema,
+  ambiguityNotes: z.array(z.string()).default([]),
+  plannerTrace: z.record(z.unknown()).default({})
+});
+
+export const AiSegmentationResponseSchema = z.object({
+  maskUrl: z.string(),
+  maskDataUrl: z.string().optional(),
+  model: z.string(),
+  path: z.string().optional(),
+  bbox: z
+    .object({
+      xMin: z.number(),
+      yMin: z.number(),
+      xMax: z.number(),
+      yMax: z.number()
+    })
+    .optional()
+});
+
+export const AiImageEditResponseSchema = z.object({
+  imageUrl: z.string(),
+  imageDataUrl: z.string().optional(),
+  model: z.string(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional()
 });
 
 export const WorkspaceSchema = z.object({
@@ -914,6 +970,7 @@ export const CreativeRequestContextSchema = z.object({
   goal: z.string(),
   prompt: z.string(),
   audience: z.string().optional(),
+  copyMode: z.enum(["manual", "auto"]).default("manual"),
   offer: z.string().optional(),
   exactText: z.string().optional(),
   templateType: TemplateTypeSchema.optional(),
@@ -933,6 +990,9 @@ export const BrandTruthSchema = z.object({
   styleDescriptors: z.array(z.string()).default([]),
   visualSystem: BrandVisualSystemSchema.default({
     typographyMood: "",
+    headlineFontFamily: "",
+    bodyFontFamily: "",
+    typographyNotes: [],
     compositionPrinciples: [],
     imageTreatment: [],
     textDensity: "balanced",
@@ -982,7 +1042,9 @@ export const PostTypeContractSchema = z.object({
   config: PostTypeConfigSchema,
   playbookKey: z.string(),
   requiredFields: z.array(z.string()).default([]),
-  safeZoneGuidance: z.array(z.string()).default([])
+  safeZoneGuidance: z.array(z.string()).default([]),
+  amenityFocus: z.string().nullable().default(null),
+  amenitySelectionSource: z.enum(["explicit", "inferred", "none"]).default("none")
 });
 
 export const FestivalTruthSchema = z.object({
@@ -1030,6 +1092,21 @@ export const GenerationContractSchema = z.object({
   hardGuardrails: z.array(z.string()).default([])
 });
 
+export const AmenityOptionSchema = z.object({
+  name: z.string(),
+  assetIds: z.array(z.string().uuid()).default([]),
+  hasAssets: z.boolean().default(false),
+  sources: z.array(z.enum(["project_profile", "asset_metadata"])).default([])
+});
+
+export const AmenityResolutionSchema = z.object({
+  availableAmenities: z.array(AmenityOptionSchema).default([]),
+  selectedAmenity: z.string().nullable().default(null),
+  selectionSource: z.enum(["explicit", "inferred", "none"]).default("none"),
+  selectedAssetIds: z.array(z.string().uuid()).default([]),
+  hasExactAssetMatch: z.boolean().default(false)
+});
+
 export const CreativeTruthBundleSchema = z.object({
   requestContext: CreativeRequestContextSchema,
   brandTruth: BrandTruthSchema,
@@ -1038,6 +1115,7 @@ export const CreativeTruthBundleSchema = z.object({
   festivalTruth: FestivalTruthSchema.nullable().default(null),
   templateTruth: TemplateTruthSchema.nullable().default(null),
   candidateAssets: z.array(CandidateAssetSchema).default([]),
+  amenityResolution: AmenityResolutionSchema.nullable().default(null),
   exactAssetContract: ExactAssetContractSchema,
   generationContract: GenerationContractSchema
 });
@@ -1396,11 +1474,18 @@ export const CreativeRunDetailSchema = z.object({
   finalOutputs: z.array(CreativeOutputSchema)
 });
 
+export const AiEditFlowSchema = z.enum(["mask", "direct"]);
+
+export const AiEditConfigSchema = z.object({
+  flow: AiEditFlowSchema
+});
+
 export const BootstrapResponseSchema = z.object({
   viewer: z.object({
     id: z.string().uuid(),
     email: z.string().email().optional()
   }),
+  aiEdit: AiEditConfigSchema,
   workspace: WorkspaceSchema.nullable(),
   brands: z.array(BrandSchema),
   brandAssets: z.array(BrandAssetSchema),
@@ -1478,6 +1563,12 @@ export type StyleSeedRequest = z.infer<typeof StyleSeedRequestSchema>;
 export type FinalGenerationRequest = z.infer<typeof FinalGenerationRequestSchema>;
 export type FeedbackRequest = z.infer<typeof FeedbackRequestSchema>;
 export type FeedbackResult = z.infer<typeof FeedbackResultSchema>;
+export type AiEditFlow = z.infer<typeof AiEditFlowSchema>;
+export type AiEditConfig = z.infer<typeof AiEditConfigSchema>;
+export type ImageEditIntent = z.infer<typeof ImageEditIntentSchema>;
+export type ImageEditPlanResponse = z.infer<typeof ImageEditPlanResponseSchema>;
+export type AiSegmentationResponse = z.infer<typeof AiSegmentationResponseSchema>;
+export type AiImageEditResponse = z.infer<typeof AiImageEditResponseSchema>;
 export type WorkspaceSummary = z.infer<typeof WorkspaceSchema>;
 export type BrandRecord = z.infer<typeof BrandSchema>;
 export type BrandProfileVersionRecord = z.infer<typeof BrandProfileVersionSchema>;

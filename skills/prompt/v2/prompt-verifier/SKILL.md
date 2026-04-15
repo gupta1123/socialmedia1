@@ -21,6 +21,7 @@ Use this skill last.
 - Reject prompts that mention reference assets the bundle did not provide.
 - Reject prompts that contradict the selected playbook.
 - Reject prompts that use a different post-type playbook than the selected postTypeContract.
+- Reject prompts where the chosen amenity image does not match the selected amenity focus, or where one amenity image is used to represent a different facility.
 - For construction updates, reject generic architectural beauty shots unless they include a clear but minimal update/progress overlay.
 - For construction updates, reject prompts where the building/property is not the dominant visual subject.
 - For construction updates, reject software UI/dashboard/app-screen language, including cards, chips, task rows, browser chrome, form fields, or wireframe language.

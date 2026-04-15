@@ -51,6 +51,11 @@ export function buildBrandPromptGuidance(input: Input): BrandPromptGuidance {
       styleDescriptors.length > 0 ? `Visual direction: ${styleDescriptors.join(", ")}.` : null,
       `Palette anchors: ${input.brandProfile.palette.primary}, ${input.brandProfile.palette.secondary}, ${input.brandProfile.palette.accent}.`,
       input.brandProfile.visualSystem.typographyMood ? `Typography mood: ${input.brandProfile.visualSystem.typographyMood}.` : null,
+      input.brandProfile.visualSystem.headlineFontFamily ? `Preferred headline font family: ${input.brandProfile.visualSystem.headlineFontFamily}.` : null,
+      input.brandProfile.visualSystem.bodyFontFamily ? `Preferred body/supporting font family: ${input.brandProfile.visualSystem.bodyFontFamily}.` : null,
+      input.brandProfile.visualSystem.typographyNotes.length > 0
+        ? `Typography rules: ${input.brandProfile.visualSystem.typographyNotes.join("; ")}.`
+        : null,
       input.brandProfile.visualSystem.textDensity ? `Text density target: ${input.brandProfile.visualSystem.textDensity}.` : null,
       input.brandProfile.visualSystem.realismLevel ? `Realism level: ${input.brandProfile.visualSystem.realismLevel}.` : null,
       input.brandProfile.visualSystem.compositionPrinciples.length > 0
@@ -69,6 +74,16 @@ export function buildBrandPromptGuidance(input: Input): BrandPromptGuidance {
       styleDescriptors.length > 0 ? `Prioritize ${styleDescriptors.join(", ")}.` : null,
       input.brandProfile.identity.positioning ? `Express this market positioning: ${input.brandProfile.identity.positioning}.` : null,
       input.brandProfile.identity.promise ? `Protect this brand promise: ${input.brandProfile.identity.promise}.` : null,
+      input.brandProfile.visualSystem.typographyMood ? `Typography should feel like ${input.brandProfile.visualSystem.typographyMood}.` : null,
+      input.brandProfile.visualSystem.headlineFontFamily
+        ? `When text appears, make headline styling align with ${input.brandProfile.visualSystem.headlineFontFamily}.`
+        : null,
+      input.brandProfile.visualSystem.bodyFontFamily
+        ? `When text appears, make supporting copy styling align with ${input.brandProfile.visualSystem.bodyFontFamily}.`
+        : null,
+      input.brandProfile.visualSystem.typographyNotes.length > 0
+        ? `Typography behavior: ${input.brandProfile.visualSystem.typographyNotes.join("; ")}.`
+        : null,
       input.brandProfile.visualSystem.compositionPrinciples.length > 0
         ? `Composition rules: ${input.brandProfile.visualSystem.compositionPrinciples.join("; ")}.`
         : null,

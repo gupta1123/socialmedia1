@@ -1,4 +1,5 @@
 import type {
+  BrandAssetRecord,
   BrandProfile,
   CalendarItemRecord,
   CreativeBrief,
@@ -20,6 +21,8 @@ type Input = {
   brandProfile: BrandProfile;
   brief: CreativeBrief;
   referenceLabels: string[];
+  brandAssets?: BrandAssetRecord[] | null;
+  projectId?: string | null;
   projectName?: string | null;
   projectProfile?: ProjectProfile | null;
   festival?: Pick<FestivalRecord, "id" | "code" | "name" | "category" | "community" | "regions" | "meaning" | "dateLabel" | "nextOccursOn"> | null;
@@ -100,7 +103,9 @@ export function compilePromptPackageMock(input: Input) {
     brief: input.brief,
     postType: input.postType,
     projectName: useProjectContext ? input.projectName : null,
-    projectProfile: useProjectContext ? input.projectProfile : null
+    projectProfile: useProjectContext ? input.projectProfile : null,
+    brandAssets: input.brandAssets ?? [],
+    projectId: useProjectContext ? input.projectId : null
   });
   const { styleDescriptors, approvedVocabulary, bannedTerms: banned } = brandGuidance;
   const safeZoneNotes = dedupeStrings([
@@ -109,19 +114,23 @@ export function compilePromptPackageMock(input: Input) {
   ]);
   const exactTextInstruction = input.brief.exactText
     ? `Include this exact on-image text without paraphrasing: "${input.brief.exactText}".`
+    : input.brief.copyMode === "auto"
+      ? "Write concise on-image copy only if it improves the concept. Choose suitable premium headline or CTA language yourself. Treat the result as final consumer-facing creative: never use placeholders, bracketed notes, sample contact information, sample URLs, sample calendar text, dummy phone numbers, or any 'replace this later' scaffolding. If the real detail is not available, leave it out."
     : "Avoid adding dense text overlays unless it improves the concept.";
   const brandLogoSeedInstruction = input.brief.includeBrandLogo
-    ? "If a supplied brand logo reference is attached, use that exact logo as a small footer or signature element. Match the exact lockup, shape, colors, and spacing from the supplied logo reference. If the logo is not shown cleanly, keep a restrained blank footer or signature zone instead. During style exploration, never render an invented logo, monogram, emblem, footer mark, or placeholder brand symbol."
+    ? "If a supplied brand logo reference is attached, use that exact logo as a small footer or signature element. Match the exact lockup, shape, colors, and spacing from the supplied logo reference. Integrate it into the composition as a natural brand-signature zone with proper margin, scale, and tonal harmony; it must never feel like a sticker, pasted overlay, or floating badge on top of the image. If the logo is not shown cleanly, keep a restrained blank footer or signature zone instead. During style exploration, never render an invented logo, monogram, emblem, footer mark, or placeholder brand symbol."
     : null;
   const reraQrSeedInstruction = input.brief.includeReraQr
     ? "If a supplied RERA QR reference is attached, use that exact QR as a small compliance element. Match the exact QR matrix from the supplied reference. If the QR is not shown cleanly, keep a small blank compliance-safe corner or footer zone instead. During style exploration, never render an invented QR code, barcode, compliance badge, seal, or placeholder block."
     : null;
   const brandLogoFinalInstruction = input.brief.includeBrandLogo
-    ? "Include the supplied brand logo exactly as provided. Treat it as a small footer or signature element. Match the exact lockup, shape, colors, and spacing from the supplied logo reference. Do not redraw, reinterpret, stylize, or invent a new logo mark. If you cannot preserve it faithfully, leave the zone blank instead of generating a substitute."
+    ? "Include the supplied brand logo exactly as provided. Treat it as a small footer or signature element. Match the exact lockup, shape, colors, and spacing from the supplied logo reference. Integrate it into a quiet designed signature zone with proper margin, scale, and contrast so it feels built into the layout rather than pasted on top. Do not redraw, reinterpret, stylize, invent a new logo mark, add glow/shadows, place it as a sticker, or let it dominate the frame. If you cannot preserve it faithfully, leave the zone blank instead of generating a substitute."
     : null;
   const reraQrFinalInstruction = input.brief.includeReraQr
     ? "Include the supplied RERA QR exactly as provided as a small compliance element. Match the exact QR matrix from the supplied reference. Keep it flat, unobstructed, high-contrast, and legible. Do not stylize, repaint, distort, or decorate the QR. If you cannot preserve it faithfully, leave the zone blank instead of inventing a fake QR."
     : null;
+  const amenityImageReferenceInstruction =
+    "If any supplied reference is an amenity image, use exactly one amenity image as the subject-truth reference for that output. Do not merge multiple amenity references or different facilities into the same scene.";
   const briefFirstClassInstruction = briefDirective
     ? `User brief to honor exactly in spirit: ${briefDirective}. Treat explicit requests about lighting, time of day, atmosphere, mood, camera angle, framing, styling, or subject emphasis as first-class creative direction unless they conflict with compliance, factual project truth, or a required source image.`
     : null;
@@ -169,6 +178,7 @@ export function compilePromptPackageMock(input: Input) {
       : null,
     brandLogoSeedInstruction,
     reraQrSeedInstruction,
+    amenityImageReferenceInstruction,
     input.series?.description ? `Series concept: ${input.series.description}.` : null,
     input.deliverableSnapshot?.campaign?.keyMessage
       ? `Campaign message: ${input.deliverableSnapshot.campaign.keyMessage}.`
@@ -224,6 +234,7 @@ export function compilePromptPackageMock(input: Input) {
     ...postTypeGuidance.finalClauses,
     brandLogoFinalInstruction,
     reraQrFinalInstruction,
+    amenityImageReferenceInstruction,
     templateFamily ? `Anchor the output in the ${templateFamily} template family.` : null,
     carouselRecipe.length > 0 && seriesOutputKind === "carousel"
       ? `Use this carousel recipe: ${carouselRecipe.join("; ")}.`

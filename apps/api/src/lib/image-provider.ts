@@ -26,8 +26,12 @@ export function getStyleSeedProviderModel(referenceCount: number) {
   return referenceCount > 0 ? env.FAL_FINAL_MODEL : env.FAL_STYLE_SEED_MODEL;
 }
 
-export function getFinalProviderModel() {
-  return env.IMAGE_GENERATION_PROVIDER === "openrouter" ? env.OPENROUTER_FINAL_MODEL : env.FAL_FINAL_MODEL;
+export function getFinalProviderModel(referenceCount = 0) {
+  if (env.IMAGE_GENERATION_PROVIDER === "openrouter") {
+    return env.OPENROUTER_FINAL_MODEL;
+  }
+
+  return referenceCount > 0 ? env.FAL_FINAL_MODEL : env.FAL_STYLE_SEED_MODEL;
 }
 
 export async function submitStyleSeedGeneration(
@@ -74,7 +78,7 @@ export async function submitFinalGeneration(
   referencePaths: string[]
 ): Promise<ImageProviderSubmission> {
   const provider = resolveImageGenerationProvider();
-  const providerModel = getFinalProviderModel();
+  const providerModel = getFinalProviderModel(referencePaths.length);
 
   if (provider === "openrouter") {
     const result = await generateOpenRouterImages({
