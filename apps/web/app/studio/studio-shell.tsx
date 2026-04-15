@@ -47,7 +47,7 @@ const navigation = [
   },
   {
     href: "/studio/ai-edit",
-    label: "AI Edit",
+    label: "Editor",
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -123,8 +123,8 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
     subtitle: "Start from a post task or open an empty brief to create post options.",
   },
   "/studio/ai-edit": {
-    title: "AI Edit",
-    subtitle: "Upload an image, mask the exact area to change, and apply a focused AI edit.",
+    title: "Editor",
+    subtitle: "Compose posts with text, image layers, and focused AI edits.",
   },
   "/studio/projects": {
     title: "Projects",
@@ -193,12 +193,14 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   const [signingOut, setSigningOut] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [createSidebarExpanded, setCreateSidebarExpanded] = useState(false);
+  const [editorSidebarExpanded, setEditorSidebarExpanded] = useState(false);
   const [sidebarPrefsReady, setSidebarPrefsReady] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const topbarMenuRef = useRef<HTMLDivElement>(null);
   const isCreateRoute = pathname === "/studio/create" || pathname.startsWith("/studio/create/");
+  const isEditorRoute = pathname === "/studio/ai-edit" || pathname.startsWith("/studio/ai-edit/");
   const isCalendarRoute = pathname === "/studio/calendar" || pathname.startsWith("/studio/calendar/");
-  const shellCollapsed = isCreateRoute ? !createSidebarExpanded : collapsed;
+  const shellCollapsed = isCreateRoute ? !createSidebarExpanded : isEditorRoute ? !editorSidebarExpanded : collapsed;
   const pageMeta = resolvePageMeta(pathname);
 
   useEffect(() => {
@@ -225,6 +227,7 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setCollapsed(window.localStorage.getItem("studio-sidebar-collapsed") === "true");
     setCreateSidebarExpanded(window.localStorage.getItem("studio-create-sidebar-expanded") === "true");
+    setEditorSidebarExpanded(window.localStorage.getItem("studio-editor-sidebar-expanded") === "true");
     setSidebarPrefsReady(true);
   }, []);
 
@@ -238,6 +241,11 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
     window.localStorage.setItem("studio-create-sidebar-expanded", createSidebarExpanded ? "true" : "false");
   }, [createSidebarExpanded, sidebarPrefsReady]);
 
+  useEffect(() => {
+    if (!sidebarPrefsReady) return;
+    window.localStorage.setItem("studio-editor-sidebar-expanded", editorSidebarExpanded ? "true" : "false");
+  }, [editorSidebarExpanded, sidebarPrefsReady]);
+
   async function handleSignOut() {
     setSigningOut(true);
     await signOut();
@@ -246,6 +254,10 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   function handleSidebarToggle() {
     if (isCreateRoute) {
       setCreateSidebarExpanded((value) => !value);
+      return;
+    }
+    if (isEditorRoute) {
+      setEditorSidebarExpanded((value) => !value);
       return;
     }
     setCollapsed((value) => !value);
@@ -552,14 +564,31 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
         </header>
 
         <div className={`workspace-content ${isCreateRoute ? "is-create" : ""}`}>
-          {message && (
-            <div className="status-banner">
-              <span>{message}</span>
-              <button className="status-dismiss" onClick={() => setMessage(null)} type="button">Dismiss</button>
-            </div>
-          )}
-
           {children}
+        </div>
+        <div aria-atomic="true" aria-live="polite" className="studio-toast-viewport">
+          {message ? (
+            <div className="studio-toast" role="status">
+              <div aria-hidden="true" className="studio-toast-icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h14" />
+                  <path d="M12 5v14" />
+                </svg>
+              </div>
+              <p className="studio-toast-copy">{message}</p>
+              <button
+                aria-label="Dismiss notification"
+                className="studio-toast-close"
+                onClick={() => setMessage(null)}
+                type="button"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m18 6-12 12" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </div>
+          ) : null}
         </div>
       </main>
     </div>
@@ -631,7 +660,7 @@ function resolvePageMeta(pathname: string) {
   }
 
   if (pathname.startsWith("/studio/ai-edit")) {
-    return PAGE_META["/studio/ai-edit"] ?? { title: "AI Edit", subtitle: "" };
+    return PAGE_META["/studio/ai-edit"] ?? { title: "Editor", subtitle: "" };
   }
 
   if (pathname.startsWith("/studio/calendar")) {
@@ -646,14 +675,16 @@ function resolveBootstrapMode(pathname: string) {
     return "create" as const;
   }
 
+  if (pathname === "/studio/ai-edit" || pathname.startsWith("/studio/ai-edit/")) {
+    return "create" as const;
+  }
+
   if (
     pathname === "/studio" ||
     pathname === "/studio/plan" ||
     pathname.startsWith("/studio/plan/") ||
     pathname === "/studio/queue" ||
     pathname.startsWith("/studio/queue/") ||
-    pathname === "/studio/ai-edit" ||
-    pathname.startsWith("/studio/ai-edit/") ||
     pathname === "/studio/review" ||
     pathname.startsWith("/studio/review/") ||
     pathname === "/studio/library" ||

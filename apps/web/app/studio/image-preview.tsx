@@ -8,7 +8,17 @@ type ImagePreviewPayload = {
   src: string;
   alt: string;
   title?: string | undefined;
+  subtitle?: string | undefined;
   meta?: string | undefined;
+  badges?: string[] | undefined;
+  details?: Array<{ label: string; value: string }> | undefined;
+  sections?: Array<{ title: string; items: Array<{ label: string; value: string }> }> | undefined;
+  actions?: Array<{
+    label: string;
+    href: string;
+    external?: boolean | undefined;
+    tone?: "primary" | "ghost" | undefined;
+  }> | undefined;
 };
 
 type ImagePreviewContextValue = {
@@ -67,13 +77,13 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
               role="presentation"
             >
               <div
-                className="image-preview-dialog"
+                className={`image-preview-dialog ${hasInspectorContent(preview) ? "has-inspector" : ""}`}
                 onClick={(event) => event.stopPropagation()}
                 role="dialog"
                 aria-modal="true"
                 aria-label={preview.title ?? preview.alt}
               >
-                <div className="image-preview-frame">
+                <div className="image-preview-shell">
                   <button
                     aria-label="Close image preview"
                     className="image-preview-close"
@@ -85,16 +95,83 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                       <path d="m6 6 12 12" />
                     </svg>
                   </button>
-                  <div className="image-preview-media">
-                    <img alt={preview.alt} src={preview.src} />
+
+                  <div className="image-preview-frame">
+                    <div className="image-preview-media">
+                      <img alt={preview.alt} src={preview.src} />
+                    </div>
                   </div>
+
+                  {hasInspectorContent(preview) ? (
+                    <aside className="image-preview-inspector">
+                      <div className="image-preview-header">
+                        {preview.badges && preview.badges.length > 0 ? (
+                          <div className="image-preview-badges">
+                            {preview.badges.map((badge) => (
+                              <span className="image-preview-badge" key={badge}>
+                                {badge}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                        {preview.title ? <strong>{preview.title}</strong> : null}
+                        {preview.subtitle || preview.meta ? (
+                          <p>{preview.subtitle ?? preview.meta}</p>
+                        ) : null}
+                      </div>
+
+                      {preview.details && preview.details.length > 0 ? (
+                        <div className="image-preview-details">
+                          {preview.details.map((detail) => (
+                            <div className="image-preview-detail-row" key={`${detail.label}-${detail.value}`}>
+                              <span>{detail.label}</span>
+                              <strong>{detail.value}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {preview.sections?.map((section) => (
+                        <section className="image-preview-section" key={section.title}>
+                          <div className="image-preview-section-title">{section.title}</div>
+                          <div className="image-preview-section-body">
+                            {section.items.map((item) => (
+                              <div className="image-preview-detail-row" key={`${section.title}-${item.label}-${item.value}`}>
+                                <span>{item.label}</span>
+                                <strong>{item.value}</strong>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+
+                      <div className="image-preview-actions">
+                        <a className="button button-ghost" href={preview.src} rel="noreferrer" target="_blank">
+                          Open original
+                        </a>
+                        <a className="button button-ghost" download href={preview.src}>
+                          Download
+                        </a>
+                        {preview.actions?.map((action) => (
+                          <a
+                            className={`button ${action.tone === "primary" ? "button-primary" : "button-ghost"}`}
+                            href={action.href}
+                            key={`${action.label}-${action.href}`}
+                            rel={action.external ? "noreferrer" : undefined}
+                            target={action.external ? "_blank" : undefined}
+                          >
+                            {action.label}
+                          </a>
+                        ))}
+                      </div>
+                    </aside>
+                  ) : preview.title || preview.meta ? (
+                    <div className="image-preview-caption">
+                      {preview.title ? <strong>{preview.title}</strong> : null}
+                      {preview.meta ? <p>{preview.meta}</p> : null}
+                    </div>
+                  ) : null}
                 </div>
-                {preview.title || preview.meta ? (
-                  <div className="image-preview-caption">
-                    {preview.title ? <strong>{preview.title}</strong> : null}
-                    {preview.meta ? <p>{preview.meta}</p> : null}
-                  </div>
-                ) : null}
               </div>
             </div>,
             document.body
@@ -108,7 +185,17 @@ type ImagePreviewTriggerProps = {
   src?: string | null | undefined;
   alt: string;
   title?: string | undefined;
+  subtitle?: string | undefined;
   meta?: string | undefined;
+  badges?: string[] | undefined;
+  details?: Array<{ label: string; value: string }> | undefined;
+  sections?: Array<{ title: string; items: Array<{ label: string; value: string }> }> | undefined;
+  actions?: Array<{
+    label: string;
+    href: string;
+    external?: boolean | undefined;
+    tone?: "primary" | "ghost" | undefined;
+  }> | undefined;
   children: ReactNode;
   className?: string | undefined;
   mode?: "button" | "inline";
@@ -118,7 +205,12 @@ export function ImagePreviewTrigger({
   src,
   alt,
   title,
+  subtitle,
   meta,
+  badges,
+  details,
+  sections,
+  actions,
   children,
   className,
   mode = "button"
@@ -135,7 +227,7 @@ export function ImagePreviewTrigger({
   function handleActivate(event: React.MouseEvent<HTMLElement>) {
     event.preventDefault();
     event.stopPropagation();
-    previewContext.openPreview({ src: previewSrc, alt, title, meta });
+    previewContext.openPreview({ src: previewSrc, alt, title, subtitle, meta, badges, details, sections, actions });
   }
 
   if (mode === "inline") {
@@ -165,4 +257,14 @@ export function useImagePreview() {
   }
 
   return context;
+}
+
+function hasInspectorContent(preview: ImagePreviewPayload) {
+  return Boolean(
+    preview.subtitle ||
+      (preview.badges && preview.badges.length > 0) ||
+      (preview.details && preview.details.length > 0) ||
+      (preview.sections && preview.sections.length > 0) ||
+      (preview.actions && preview.actions.length > 0)
+  );
 }

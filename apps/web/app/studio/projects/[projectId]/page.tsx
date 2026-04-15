@@ -37,6 +37,15 @@ export default function ProjectDetailPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [formState, setFormState] = useState<ProjectFormState | null>(null);
   const [activeTab, setActiveTab] = useState<"overview" | "product" | "experience" | "compliance" | "faq">("overview");
+  const [mediaTab, setMediaTab] = useState<"elevations" | "amenities" | "interiors" | "all">("elevations");
+  const [mediaSearch, setMediaSearch] = useState("");
+  const [mediaFilters, setMediaFilters] = useState({
+    subjectType: "all",
+    viewType: "all",
+    usageIntent: "all",
+    qualityTier: "all"
+  });
+  const [mediaLimit, setMediaLimit] = useState(24);
 
   const applyFormState = useCallback((value: SetStateAction<ProjectFormState>) => {
     setFormState((current) => {
@@ -155,6 +164,7 @@ export default function ProjectDetailPage() {
   const profile = activeProfile.profile;
   const actualProjectImages = brandAssets.filter((asset) => profile.actualProjectImageIds.includes(asset.id));
   const sampleFlatImages = brandAssets.filter((asset) => profile.sampleFlatImageIds.includes(asset.id));
+  const amenityImages = brandAssets.filter((asset) => getAssetMeta(asset).subjectType === "amenity");
 
   async function handleSaveProject(event: React.FormEvent) {
     event.preventDefault();
@@ -506,10 +516,33 @@ export default function ProjectDetailPage() {
         {/* RIGHT PANEL FOR IMAGES */}
         <aside className="page-span-4 page-stack" style={{ borderLeft: "1px solid var(--line)", paddingLeft: "32px" }}>
           <section className="snapshot-sidebar" style={{ position: "sticky", top: "100px" }}>
-            <div className="project-block-head" style={{ marginBottom: "24px", paddingBottom: "10px", borderBottom: "none" }}>Project Assets</div>
-            
-            <ImageGalleryCard title="Actual project images" assets={actualProjectImages} emptyLabel="No image linked" />
-            <ImageGalleryCard title="Sample flat images" assets={sampleFlatImages} emptyLabel="No image linked" />
+            <div className="project-block-head" style={{ marginBottom: "16px", paddingBottom: "10px", borderBottom: "none" }}>
+              Project Assets
+            </div>
+
+            <ProjectMediaGallery
+              elevations={actualProjectImages}
+              amenities={amenityImages}
+              interiors={sampleFlatImages}
+              allAssets={brandAssets}
+              tab={mediaTab}
+              onTabChange={(next) => {
+                setMediaTab(next);
+                setMediaLimit(24);
+              }}
+              search={mediaSearch}
+              onSearchChange={(value) => {
+                setMediaSearch(value);
+                setMediaLimit(24);
+              }}
+              filters={mediaFilters}
+              onFilterChange={(next) => {
+                setMediaFilters(next);
+                setMediaLimit(24);
+              }}
+              limit={mediaLimit}
+              onLoadMore={() => setMediaLimit((prev) => prev + 24)}
+            />
           </section>
         </aside>
       </section>
@@ -590,39 +623,6 @@ export default function ProjectDetailPage() {
   );
 }
 
-function ImageGalleryCard({
-  title,
-  assets,
-  emptyLabel
-}: {
-  title: string;
-  assets: BrandAssetRecord[];
-  emptyLabel: string;
-}) {
-  return (
-    <div style={{ marginBottom: "32px" }}>
-      <p style={{ fontSize: "11px", fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "12px" }}>{title}</p>
-      {assets.length > 0 ? (
-        <div style={{ display: "grid", gap: "16px" }}>
-          {assets.map((asset) => (
-            <div key={asset.id} style={{ borderRadius: "12px", overflow: "hidden", border: "1px solid var(--line)", background: "var(--paper-strong)" }}>
-              {asset.previewUrl ? (
-                <ImagePreviewTrigger alt={asset.label} src={asset.previewUrl} title={asset.label}>
-                  <img alt={asset.label} src={asset.previewUrl} style={{ width: "100%", height: "auto", display: "block", aspectRatio: "4/3", objectFit: "cover" }} />
-                </ImagePreviewTrigger>
-              ) : (
-                <div style={{ padding: "32px", textAlign: "center", color: "var(--ink-soft)", fontSize: "12px" }}>{asset.label}</div>
-              )}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p style={{ fontSize: "12px", color: "var(--ink-soft)", fontStyle: "italic" }}>{emptyLabel}</p>
-      )}
-    </div>
-  );
-}
-
 function updateForm<K extends keyof ProjectFormState>(
   setForm: Dispatch<SetStateAction<ProjectFormState | null>>,
   key: K,
@@ -640,6 +640,349 @@ function ProjectDataField({ label, value, isLarge }: { label: string; value: str
     <div className="project-data-field">
       <span className="project-df-label">{label}</span>
       <div className={`project-df-value ${isLarge ? "is-large" : ""}`}>{value || "—"}</div>
+    </div>
+  );
+}
+
+type AssetMeta = {
+  subjectType?: string;
+  viewType?: string;
+  usageIntent?: string;
+  qualityTier?: string;
+  amenityName?: string;
+  tags?: string[];
+};
+
+function getAssetMeta(asset: BrandAssetRecord): AssetMeta {
+  const metadata = asset.metadataJson;
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    return metadata as AssetMeta;
+  }
+
+  return {};
+}
+
+function normalizeAssetTags(asset: BrandAssetRecord) {
+  const meta = getAssetMeta(asset);
+  const rawTags = Array.isArray(meta.tags) ? meta.tags : [];
+  return rawTags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0);
+}
+
+function formatFilterLabel(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function getAssetSubtitle(asset: BrandAssetRecord) {
+  const meta = getAssetMeta(asset);
+  const parts = [meta.viewType, meta.qualityTier, meta.usageIntent].filter((value): value is string => !!value);
+  return parts.length > 0 ? parts.map(formatFilterLabel).join(" · ") : "Project asset";
+}
+
+function inferInteriorGroup(asset: BrandAssetRecord) {
+  const label = asset.label?.toLowerCase() ?? "";
+  const tags = normalizeAssetTags(asset).map((tag) => tag.toLowerCase());
+  const haystack = `${label} ${tags.join(" ")}`;
+
+  const groups: Array<{ label: string; patterns: RegExp[] }> = [
+    { label: "Living", patterns: [/living/, /lounge/, /family/] },
+    { label: "Bedroom", patterns: [/bed/, /master/, /guest/, /kids/] },
+    { label: "Kitchen", patterns: [/kitchen/, /pantry/] },
+    { label: "Dining", patterns: [/dining/] },
+    { label: "Bathroom", patterns: [/bath/, /toilet/, /washroom/] },
+    { label: "Balcony", patterns: [/balcony/, /terrace/] },
+    { label: "Lobby", patterns: [/lobby/, /foyer/, /entrance/] },
+    { label: "Study", patterns: [/study/, /work/, /office/] },
+    { label: "Wardrobe", patterns: [/wardrobe/, /closet/, /dressing/] }
+  ];
+
+  const match = groups.find((group) => group.patterns.some((pattern) => pattern.test(haystack)));
+  return match ? match.label : "Other Interiors";
+}
+
+function ProjectMediaGallery({
+  elevations,
+  amenities,
+  interiors,
+  allAssets,
+  tab,
+  onTabChange,
+  search,
+  onSearchChange,
+  filters,
+  onFilterChange,
+  limit,
+  onLoadMore
+}: {
+  elevations: BrandAssetRecord[];
+  amenities: BrandAssetRecord[];
+  interiors: BrandAssetRecord[];
+  allAssets: BrandAssetRecord[];
+  tab: "elevations" | "amenities" | "interiors" | "all";
+  onTabChange: (next: "elevations" | "amenities" | "interiors" | "all") => void;
+  search: string;
+  onSearchChange: (value: string) => void;
+  filters: {
+    subjectType: string;
+    viewType: string;
+    usageIntent: string;
+    qualityTier: string;
+  };
+  onFilterChange: (next: {
+    subjectType: string;
+    viewType: string;
+    usageIntent: string;
+    qualityTier: string;
+  }) => void;
+  limit: number;
+  onLoadMore: () => void;
+}) {
+  const tabs = [
+    { key: "elevations" as const, label: "Elevations", count: elevations.length },
+    { key: "amenities" as const, label: "Amenities", count: amenities.length },
+    { key: "interiors" as const, label: "Interiors", count: interiors.length },
+    { key: "all" as const, label: "All", count: elevations.length + amenities.length + interiors.length }
+  ];
+
+  const combinedAssets = useMemo(() => {
+    const map = new Map<string, BrandAssetRecord>();
+    [...elevations, ...amenities, ...interiors].forEach((asset) => {
+      map.set(asset.id, asset);
+    });
+    return Array.from(map.values());
+  }, [amenities, elevations, interiors]);
+
+  const filterOptions = useMemo(() => {
+    const types = new Set<string>();
+    const views = new Set<string>();
+    const intents = new Set<string>();
+    const qualities = new Set<string>();
+
+    allAssets.forEach((asset) => {
+      const meta = getAssetMeta(asset);
+      if (meta.subjectType) types.add(meta.subjectType);
+      if (meta.viewType) views.add(meta.viewType);
+      if (meta.usageIntent) intents.add(meta.usageIntent);
+      if (meta.qualityTier) qualities.add(meta.qualityTier);
+    });
+
+    return {
+      subjectTypes: Array.from(types).sort(),
+      viewTypes: Array.from(views).sort(),
+      usageIntents: Array.from(intents).sort(),
+      qualityTiers: Array.from(qualities).sort()
+    };
+  }, [allAssets]);
+
+  const assetsForTab = useMemo(() => {
+    if (tab === "elevations") return elevations;
+    if (tab === "amenities") return amenities;
+    if (tab === "interiors") return interiors;
+    return combinedAssets;
+  }, [amenities, combinedAssets, elevations, interiors, tab]);
+
+  const filteredAssets = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return assetsForTab.filter((asset) => {
+      const meta = getAssetMeta(asset);
+
+      if (filters.subjectType !== "all" && meta.subjectType !== filters.subjectType) return false;
+      if (filters.viewType !== "all" && meta.viewType !== filters.viewType) return false;
+      if (filters.usageIntent !== "all" && meta.usageIntent !== filters.usageIntent) return false;
+      if (filters.qualityTier !== "all" && meta.qualityTier !== filters.qualityTier) return false;
+
+      if (!needle) return true;
+
+      const tags = normalizeAssetTags(asset).join(" ");
+      const amenityName = meta.amenityName ? meta.amenityName.toLowerCase() : "";
+      const label = asset.label?.toLowerCase() ?? "";
+      return `${label} ${amenityName} ${tags}`.includes(needle);
+    });
+  }, [assetsForTab, filters, search]);
+
+  const visibleAssets = filteredAssets.slice(0, limit);
+  const hasMore = filteredAssets.length > visibleAssets.length;
+
+  const interiorGroups = useMemo(() => {
+    if (tab !== "interiors") return [];
+    const groups = new Map<string, BrandAssetRecord[]>();
+    visibleAssets.forEach((asset) => {
+      const group = inferInteriorGroup(asset);
+      const bucket = groups.get(group) ?? [];
+      bucket.push(asset);
+      groups.set(group, bucket);
+    });
+    return Array.from(groups.entries());
+  }, [tab, visibleAssets]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          {tabs.map((item) => (
+            <button
+              key={item.key}
+              className={`tab-link ${tab === item.key ? "is-active" : ""}`}
+              onClick={() => onTabChange(item.key)}
+              type="button"
+              style={{ fontSize: "12px", padding: "6px 10px" }}
+            >
+              {item.label}
+              <span style={{ marginLeft: "6px", opacity: 0.6 }}>{item.count}</span>
+            </button>
+          ))}
+        </div>
+
+        <input
+          className="planner-input"
+          placeholder="Search assets, tags, or amenities…"
+          style={{ fontSize: "13px" }}
+          value={search}
+          onChange={(event) => onSearchChange(event.target.value)}
+        />
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" }}>
+          <select
+            className="planner-input"
+            value={filters.viewType}
+            onChange={(event) => onFilterChange({ ...filters, viewType: event.target.value })}
+          >
+            <option value="all">All views</option>
+            {filterOptions.viewTypes.map((value) => (
+              <option key={value} value={value}>{formatFilterLabel(value)}</option>
+            ))}
+          </select>
+          <select
+            className="planner-input"
+            value={filters.usageIntent}
+            onChange={(event) => onFilterChange({ ...filters, usageIntent: event.target.value })}
+          >
+            <option value="all">All intents</option>
+            {filterOptions.usageIntents.map((value) => (
+              <option key={value} value={value}>{formatFilterLabel(value)}</option>
+            ))}
+          </select>
+          <select
+            className="planner-input"
+            value={filters.qualityTier}
+            onChange={(event) => onFilterChange({ ...filters, qualityTier: event.target.value })}
+          >
+            <option value="all">All quality</option>
+            {filterOptions.qualityTiers.map((value) => (
+              <option key={value} value={value}>{formatFilterLabel(value)}</option>
+            ))}
+          </select>
+          <select
+            className="planner-input"
+            value={filters.subjectType}
+            onChange={(event) => onFilterChange({ ...filters, subjectType: event.target.value })}
+          >
+            <option value="all">All types</option>
+            {filterOptions.subjectTypes.map((value) => (
+              <option key={value} value={value}>{formatFilterLabel(value)}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div style={{ fontSize: "12px", color: "var(--ink-soft)" }}>
+        Showing {visibleAssets.length} of {filteredAssets.length} assets
+      </div>
+
+      {tab === "interiors" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {interiorGroups.map(([group, assets]) => (
+            <div key={group} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <div style={{ fontSize: "12px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-soft)" }}>
+                {group} · {assets.length}
+              </div>
+              <ProjectAssetGrid assets={assets} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <ProjectAssetGrid assets={visibleAssets} />
+      )}
+
+      {visibleAssets.length === 0 ? (
+        <div className="project-card" style={{ textAlign: "center", padding: "24px" }}>
+          <p style={{ fontSize: "12px", color: "var(--ink-soft)" }}>No assets match the current filters.</p>
+        </div>
+      ) : null}
+
+      {hasMore ? (
+        <button className="button button-ghost" type="button" onClick={onLoadMore}>
+          Load more assets
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function ProjectAssetGrid({ assets }: { assets: BrandAssetRecord[] }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "12px" }}>
+      {assets.map((asset) => {
+        const meta = getAssetMeta(asset);
+        const tags = normalizeAssetTags(asset);
+        return (
+          <div key={asset.id} style={{ borderRadius: "12px", border: "1px solid var(--line)", overflow: "hidden", background: "var(--paper-strong)" }}>
+            {asset.previewUrl ? (
+              <ImagePreviewTrigger
+                alt={asset.label}
+                badges={[
+                  meta.subjectType ? formatFilterLabel(meta.subjectType) : "Asset",
+                  meta.viewType ? formatFilterLabel(meta.viewType) : "Preview"
+                ]}
+                details={[
+                  { label: "Usage", value: meta.usageIntent ? formatFilterLabel(meta.usageIntent) : "Supporting reference" },
+                  { label: "Quality", value: meta.qualityTier ? formatFilterLabel(meta.qualityTier) : "Unspecified" }
+                ]}
+                sections={[
+                  {
+                    title: "Identity",
+                    items: [
+                      { label: "Label", value: asset.label },
+                      { label: "Type", value: meta.subjectType ? formatFilterLabel(meta.subjectType) : "Asset" }
+                    ]
+                  },
+                  ...(tags.length > 0
+                    ? [
+                        {
+                          title: "Tags",
+                          items: tags.map((tag) => ({ label: "Tag", value: tag }))
+                        }
+                      ]
+                    : [])
+                ]}
+                src={asset.previewUrl}
+                subtitle={getAssetSubtitle(asset)}
+                title={meta.amenityName || asset.label}
+              >
+                <img alt={asset.label} src={asset.previewUrl} style={{ width: "100%", aspectRatio: "4/3", objectFit: "cover", display: "block" }} />
+              </ImagePreviewTrigger>
+            ) : (
+              <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--ink-soft)" }}>{asset.label}</div>
+            )}
+            <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+              <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--ink)", lineHeight: 1.3 }}>
+                {meta.amenityName || asset.label}
+              </div>
+              <div style={{ fontSize: "11px", color: "var(--ink-soft)" }}>{getAssetSubtitle(asset)}</div>
+              {tags.length > 0 ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                  {tags.slice(0, 3).map((tag) => (
+                    <span key={tag} style={{ fontSize: "10px", padding: "2px 6px", borderRadius: "999px", background: "var(--paper)", color: "var(--ink-soft)" }}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

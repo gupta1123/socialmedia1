@@ -768,31 +768,28 @@ export default function CalendarPage() {
       {pickerDate ? (
         <div className="drawer-overlay" onClick={() => setPickerDate(null)}>
           <div className="drawer-content calendar-picker-drawer" onClick={(event) => event.stopPropagation()}>
-            <div className="drawer-header">
-              <div>
-                <p className="panel-label">Add Existing</p>
-                <h2>{formatAgendaHeading(pickerDate)}</h2>
+            <div className="drawer-header calendar-picker-header">
+              <div className="calendar-picker-title">
+                <h2>Schedule post · {formatAgendaHeading(pickerDate)}</h2>
+                <p>Select an approved task to place on the calendar.</p>
               </div>
-              <button className="drawer-close" onClick={() => setPickerDate(null)} type="button">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M18 6 6 18" />
-                  <path d="m6 6 12 12" />
-                </svg>
-              </button>
+              <div className="calendar-picker-header-actions">
+                <button className="button button-ghost button-sm" onClick={() => openUploadDrawer(pickerDate, "scheduled")} type="button">
+                  Upload post
+                </button>
+                <button className="button button-ghost button-sm" onClick={() => openCreateDrawer(pickerDate)} type="button">
+                  New task
+                </button>
+                <button className="drawer-close" onClick={() => setPickerDate(null)} type="button">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18" />
+                    <path d="m6 6 12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             <div className="drawer-body calendar-picker-body">
-              <div className="calendar-picker-toolbar">
-                <p>Pick from approved post tasks that are ready to schedule.</p>
-                <div className="calendar-picker-actions">
-                  <button className="button button-ghost" onClick={() => openUploadDrawer(pickerDate, "scheduled")} type="button">
-                    Upload post
-                  </button>
-                  <button className="button button-ghost" onClick={() => openCreateDrawer(pickerDate)} type="button">
-                    New post task
-                  </button>
-                </div>
-              </div>
 
               {availableApprovedPostTasks.length > 0 ? (
                 <div className="calendar-picker-list">
@@ -827,9 +824,10 @@ export default function CalendarPage() {
                   })}
                 </div>
               ) : (
-                <div className="empty-state empty-state-tall">
-                  <strong>No approved post tasks ready to schedule</strong>
-                  <p>Approve a candidate in Review first, then place it on the calendar.</p>
+                <div className="empty-state empty-state-centered">
+                  <strong>Nothing ready to schedule</strong>
+                  <p>Approve work in the Review tab first.</p>
+                  <Link className="button button-ghost button-sm" href="/studio/review">Go to Review</Link>
                 </div>
               )}
             </div>
@@ -1594,8 +1592,14 @@ function CalendarPreviewThumbnail({ deliverable }: { deliverable: DeliverableRec
   return deliverable.previewUrl ? (
     <ImagePreviewTrigger
       alt={`Preview for ${deliverable.title}`}
+      badges={[deliverable.placementCode, formatTime(deliverable.scheduledFor)]}
       className="calendar-event-thumb"
+      details={[
+        { label: "Status", value: deliverable.status },
+        { label: "Channel", value: deliverable.placementCode }
+      ]}
       meta={formatTime(deliverable.scheduledFor)}
+      subtitle={deliverable.briefText ?? "Scheduled creative"}
       src={deliverable.previewUrl}
       title={deliverable.title}
     >

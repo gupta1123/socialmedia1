@@ -541,10 +541,16 @@ export default function CreatePage() {
       referenceEligibleAssets.filter((asset) => briefForm.selectedReferenceAssetIds.includes(asset.id)),
     [briefForm.selectedReferenceAssetIds, referenceEligibleAssets]
   );
-  const latestBrandLogoAsset = useMemo(
-    () => activeAssets.find((asset) => asset.kind === "logo") ?? null,
+  const logoAssets = useMemo(
+    () => activeAssets.filter((asset) => asset.kind === "logo"),
     [activeAssets]
   );
+  const selectedLogoAsset = useMemo(() => {
+    if (briefForm.logoAssetId) {
+      return logoAssets.find((asset) => asset.id === briefForm.logoAssetId) ?? null;
+    }
+    return logoAssets[0] ?? null;
+  }, [briefForm.logoAssetId, logoAssets]);
   const normalizedPickerQuery = pickerQuery.trim().toLowerCase();
   const deliverablesForPostTaskPicker = useMemo(
     () =>
@@ -779,6 +785,7 @@ export default function CreatePage() {
   const isSeriesEpisodeMode = productionMode === "series_episode";
   const isCampaignAssetMode = productionMode === "campaign_asset";
   const isAdaptationMode = productionMode === "adaptation";
+  const isAutoCopyMode = briefForm.copyMode === "auto";
   const isFestiveGreeting = selectedPostType?.code === "festive-greeting";
   const isCampaignCreateMode = workspaceMode === "campaign";
   const isSeriesCreateMode = workspaceMode === "series";
@@ -842,10 +849,12 @@ export default function CreatePage() {
         goal: briefForm.goal,
         prompt: briefForm.prompt,
         audience: briefForm.audience ?? "",
+        copyMode: briefForm.copyMode,
         offer: briefForm.offer ?? "",
         exactText: briefForm.exactText ?? "",
         includeBrandLogo: briefForm.includeBrandLogo,
         includeReraQr: briefForm.includeReraQr,
+        logoAssetId: briefForm.logoAssetId,
         referenceAssetIds: briefForm.selectedReferenceAssetIds,
         creativeFlowVersion,
         styleVariationCount
@@ -856,12 +865,14 @@ export default function CreatePage() {
       briefForm.campaignId,
       briefForm.campaignPlanId,
       briefForm.channel,
+      briefForm.copyMode,
       briefForm.createMode,
       briefForm.creativeTemplateId,
       briefForm.deliverableId,
       briefForm.exactText,
       briefForm.includeBrandLogo,
       briefForm.includeReraQr,
+      briefForm.logoAssetId,
       briefForm.festivalId,
       briefForm.format,
       briefForm.goal,
@@ -963,7 +974,7 @@ export default function CreatePage() {
           : state.slideCount,
       goal: deliverable?.title ?? state.goal,
       prompt: deliverable?.briefText ?? state.prompt,
-      offer: deliverable?.ctaText ?? state.offer,
+      offer: state.copyMode === "auto" ? "" : deliverable?.ctaText ?? state.offer,
       templateType: postType?.config.recommendedTemplateTypes[0] ?? state.templateType
     }));
 
@@ -1522,8 +1533,8 @@ export default function CreatePage() {
         templateType: selected?.config.recommendedTemplateTypes[0] ?? state.templateType,
         goal: shouldResetGoal ? getPostTypeGoal(selected, nextFestival) : state.goal,
         prompt: nextPrompt,
-        offer: shouldResetOffer ? nextCopy.offer : state.offer,
-        exactText: shouldResetExactText ? nextCopy.exactText : state.exactText
+        offer: state.copyMode === "auto" ? "" : shouldResetOffer ? nextCopy.offer : state.offer,
+        exactText: state.copyMode === "auto" ? "" : shouldResetExactText ? nextCopy.exactText : state.exactText
       };
     });
   }
@@ -1542,11 +1553,13 @@ export default function CreatePage() {
         selected && (state.prompt.trim().length === 0 || isSystemSuggestedBrief(state.prompt, festivals))
           ? getFestivalBriefStarter(selected)
           : state.prompt,
-      offer: selected && isSystemSuggestedOffer(state.offer ?? "") ? "" : state.offer,
+      offer: state.copyMode === "auto" ? "" : selected && isSystemSuggestedOffer(state.offer ?? "") ? "" : state.offer,
       exactText:
-        selected && isSystemSuggestedExactText(state.exactText ?? "", festivals)
-          ? getFestivalHeadline(selected)
-          : state.exactText
+        state.copyMode === "auto"
+          ? ""
+          : selected && isSystemSuggestedExactText(state.exactText ?? "", festivals)
+            ? getFestivalHeadline(selected)
+            : state.exactText
     }));
   }
 
@@ -1617,7 +1630,7 @@ export default function CreatePage() {
           : state.slideCount,
       goal: selected?.title ?? state.goal,
       prompt: selected?.briefText ?? state.prompt,
-      offer: selected?.ctaText ?? state.offer
+      offer: state.copyMode === "auto" ? "" : selected?.ctaText ?? state.offer
     }));
   }
 
@@ -1751,8 +1764,8 @@ export default function CreatePage() {
       goal: seriesGoal,
       prompt: seriesPrompt,
       audience: seriesAudience,
-      offer: seriesOffer,
-      exactText: seriesExactText,
+      offer: state.copyMode === "auto" ? "" : seriesOffer,
+      exactText: state.copyMode === "auto" ? "" : seriesExactText,
       seriesOutputKind: seriesOutputKind,
       slideCount: seriesOutputKind === "carousel" ? seriesSlideCount : defaultSeriesSlideCount,
       templateType: seriesTemplateType
@@ -1781,7 +1794,7 @@ export default function CreatePage() {
       slideCount: defaultSeriesSlideCount,
       goal: selected?.name ?? "",
       audience: "",
-      offer: selected?.ctaText ?? "",
+      offer: state.copyMode === "auto" ? "" : selected?.ctaText ?? "",
       exactText: "",
       prompt: selected?.keyMessage ?? ""
     }));
@@ -1821,9 +1834,11 @@ export default function CreatePage() {
         selectedCampaign?.keyMessage ??
         "",
       offer:
-        selected?.ctaOverride ??
-        selectedCampaign?.ctaText ??
-        "",
+        state.copyMode === "auto"
+          ? ""
+          : selected?.ctaOverride ??
+            selectedCampaign?.ctaText ??
+            "",
       templateType:
         selected?.postTypeId
           ? postTypes.find((postType) => postType.id === selected.postTypeId)?.config.recommendedTemplateTypes[0] ??
@@ -1868,7 +1883,7 @@ export default function CreatePage() {
         ? "Create a new variation based on the selected post while preserving its premium feel and core message."
         : "",
       audience: "",
-      offer: sourceDeliverable?.ctaText ?? "",
+      offer: state.copyMode === "auto" ? "" : sourceDeliverable?.ctaText ?? "",
       exactText: ""
     }));
   }
@@ -2742,32 +2757,70 @@ export default function CreatePage() {
                 )}
               </div>
 
-              {latestBrandLogoAsset ? (
+              {logoAssets.length > 0 ? (
                 <div className="create-references-section">
                   <p className="create-references-label">Brand assets</p>
                   <div className="create-brand-asset-toggle-grid">
-                    {latestBrandLogoAsset ? (
-                      <button
-                        className={`create-brand-asset-toggle ${briefForm.includeBrandLogo ? "is-selected" : ""}`}
-                        onClick={() => setBriefForm((state) => ({ ...state, includeBrandLogo: !state.includeBrandLogo }))}
-                        type="button"
-                      >
-                        <div className="create-brand-asset-toggle-preview">
-                          {latestBrandLogoAsset.previewUrl ? (
-                            <img alt={latestBrandLogoAsset.label} src={latestBrandLogoAsset.previewUrl} />
-                          ) : (
-                            <span>{getInitials(latestBrandLogoAsset.label)}</span>
-                          )}
-                        </div>
-                        <div className="create-brand-asset-toggle-copy">
-                          <strong>Use brand logo</strong>
-                          <span>{latestBrandLogoAsset.label}</span>
-                        </div>
-                        <span className="create-brand-asset-toggle-state">
-                          {briefForm.includeBrandLogo ? "On" : "Off"}
-                        </span>
-                      </button>
-                    ) : null}
+                    <button
+                      className={`create-brand-asset-toggle ${briefForm.includeBrandLogo ? "is-selected" : ""}`}
+                      onClick={() =>
+                        setBriefForm((state) => ({
+                          ...state,
+                          includeBrandLogo: !state.includeBrandLogo,
+                          logoAssetId:
+                            !state.includeBrandLogo && !state.logoAssetId && logoAssets[0]
+                              ? logoAssets[0].id
+                              : state.logoAssetId
+                        }))
+                      }
+                      type="button"
+                    >
+                      <div className="create-brand-asset-toggle-preview">
+                        {selectedLogoAsset?.previewUrl ? (
+                          <img alt={selectedLogoAsset.label} src={selectedLogoAsset.previewUrl} />
+                        ) : selectedLogoAsset ? (
+                          <span>{getInitials(selectedLogoAsset.label)}</span>
+                        ) : (
+                          <span>LG</span>
+                        )}
+                      </div>
+                      <div className="create-brand-asset-toggle-copy">
+                        <strong>Use brand logo</strong>
+                        <span>{selectedLogoAsset?.label ?? "Select a logo"}</span>
+                      </div>
+                      <span className="create-brand-asset-toggle-state">
+                        {briefForm.includeBrandLogo ? "On" : "Off"}
+                      </span>
+                    </button>
+
+                    <div
+                      className="create-reference-selection-row"
+                      style={{ width: "100%", gap: "10px", flexWrap: "wrap", marginTop: "6px" }}
+                    >
+                      {logoAssets.map((asset) => {
+                        const isSelected = asset.id === selectedLogoAsset?.id;
+                        return (
+                          <button
+                            key={asset.id}
+                            className={`create-reference-pill ${isSelected ? "is-selected" : ""}`}
+                            onClick={() =>
+                              setBriefForm((state) => ({
+                                ...state,
+                                includeBrandLogo: true,
+                                logoAssetId: asset.id
+                              }))
+                            }
+                            type="button"
+                          >
+                            {asset.previewUrl ? (
+                              <img alt={asset.label} src={asset.previewUrl} />
+                            ) : (
+                              <span>{getInitials(asset.label)}</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -2872,25 +2925,80 @@ export default function CreatePage() {
                     </select>
                   </label>
 
-                  <label className="create-field-label">
-                    Offer / CTA
-                    <input
-                      value={briefForm.offer ?? ""}
-                      onChange={(e) => setBriefForm((s) => ({ ...s, offer: e.target.value }))}
-                      placeholder={getOfferPlaceholder(selectedPostType)}
-                      className="create-field-input"
-                    />
-                  </label>
+                  <div className="create-copy-mode-card">
+                    <div className="create-copy-mode-header">
+                      <div>
+                        <p className="create-copy-mode-label">On-image copy</p>
+                        <strong>{isAutoCopyMode ? "AI writes suitable copy" : "You control the copy"}</strong>
+                      </div>
+                      <div className="create-mode-switch" role="tablist" aria-label="On-image copy mode">
+                        <button
+                          className={`create-mode-option ${!isAutoCopyMode ? "is-active" : ""}`}
+                          onClick={() =>
+                            setBriefForm((state) => {
+                              if (state.copyMode === "manual") return state;
+                              const nextCopy = getPostTypeCopyDefaults(selectedPostType, selectedFestival);
+                              const nextOffer = state.offer?.trim() ? state.offer : nextCopy.offer;
+                              const nextExactText = state.exactText?.trim() ? state.exactText : nextCopy.exactText;
+                              return {
+                                ...state,
+                                copyMode: "manual",
+                                offer: nextOffer,
+                                exactText: nextExactText
+                              };
+                            })
+                          }
+                          role="tab"
+                          type="button"
+                        >
+                          Manual
+                        </button>
+                        <button
+                          className={`create-mode-option ${isAutoCopyMode ? "is-active" : ""}`}
+                          onClick={() =>
+                            setBriefForm((state) => ({
+                              ...state,
+                              copyMode: "auto",
+                              offer: "",
+                              exactText: ""
+                            }))
+                          }
+                          role="tab"
+                          type="button"
+                        >
+                          AI
+                        </button>
+                      </div>
+                    </div>
 
-                  <label className="create-field-label">
-                    On-image text
-                    <input
-                      value={briefForm.exactText ?? ""}
-                      onChange={(e) => setBriefForm((s) => ({ ...s, exactText: e.target.value }))}
-                      placeholder={getExactTextPlaceholder(selectedPostType, selectedFestival)}
-                      className="create-field-input"
-                    />
-                  </label>
+                    {isAutoCopyMode ? (
+                      <p className="create-hint">
+                        The agent will decide whether the image needs a headline or CTA, then write concise copy that fits the brief and format.
+                      </p>
+                    ) : (
+                      <div className="create-field-group-row">
+                        <label className="create-field-label">
+                          Offer / CTA
+                          <input
+                            value={briefForm.offer ?? ""}
+                            onChange={(e) => setBriefForm((s) => ({ ...s, offer: e.target.value }))}
+                            placeholder={getOfferPlaceholder(selectedPostType)}
+                            className="create-field-input"
+                          />
+                        </label>
+
+                        <label className="create-field-label">
+                          On-image text
+                          <input
+                            value={briefForm.exactText ?? ""}
+                            onChange={(e) => setBriefForm((s) => ({ ...s, exactText: e.target.value }))}
+                            placeholder={getExactTextPlaceholder(selectedPostType, selectedFestival)}
+                            className="create-field-input"
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -3036,7 +3144,12 @@ export default function CreatePage() {
                         {template.previewUrl ? (
                           <ImagePreviewTrigger
                             alt={template.label}
+                            badges={["Direction", template.label]}
+                            details={[
+                              { label: "Type", value: "Style exploration" }
+                            ]}
                             src={template.previewUrl}
+                            subtitle="Direction preview"
                             title={template.label}
                             meta="Direction preview"
                           >
@@ -3188,7 +3301,20 @@ export default function CreatePage() {
                       {output.previewUrl ? (
                         <ImagePreviewTrigger
                           alt={`Option ${output.outputIndex + 1} for ${promptPackage.promptSummary}`}
+                          actions={[
+                            { href: `/studio/ai-edit?outputId=${output.id}`, label: "Open in Editor", tone: "primary" },
+                            { href: currentReviewHref, label: "Open review", tone: "ghost" }
+                          ]}
+                          badges={[
+                            `Option ${output.outputIndex + 1}`,
+                            output.reviewState.replaceAll("_", " ")
+                          ]}
+                          details={[
+                            { label: "Prompt", value: promptPackage.promptSummary },
+                            { label: "State", value: output.reviewState.replaceAll("_", " ") }
+                          ]}
                           src={output.previewUrl}
+                          subtitle={promptPackage.promptSummary}
                           title={`Option ${output.outputIndex + 1}`}
                           meta={promptPackage.promptSummary}
                         >

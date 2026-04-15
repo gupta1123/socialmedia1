@@ -11,6 +11,7 @@ import type {
   ProjectRecord
 } from "@image-lab/contracts";
 import {
+  deleteBrandAsset,
   getBrandAssets,
   getPlanningTemplates,
   getPostingWindows,
@@ -62,6 +63,7 @@ export default function LibraryPage() {
   const [label, setLabel] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [assetKind, setAssetKind] = useState<AssetKind>("reference");
+  const [replacingAssetId, setReplacingAssetId] = useState<string | null>(null);
 
   const topbarActions = useMemo(
     () => (
@@ -219,8 +221,12 @@ export default function LibraryPage() {
     () => assets.filter((asset) => asset.kind === "inspiration"),
     [assets]
   );
+  const reraQrAssets = useMemo(
+    () => assets.filter((asset) => asset.kind === "rera_qr"),
+    [assets]
+  );
   const visibleMediaAssetCount = useMemo(
-    () => assets.filter((asset) => asset.kind !== "rera_qr").length,
+    () => assets.length,
     [assets]
   );
   const mediaSections = useMemo(
@@ -248,6 +254,17 @@ export default function LibraryPage() {
         assets: logoAssets
       },
       {
+        key: "rera-qr",
+        title: "RERA QR codes",
+        description: "Approved QR assets that must stay exact when included for compliance.",
+        emptyTitle: "No RERA QR codes yet",
+        emptyBody: "Upload approved RERA QR assets so they can be placed exactly when required.",
+        emptyActionLabel: "Upload RERA QR",
+        uploadKind: "rera_qr" as AssetKind,
+        tagLabel: "RERA QR",
+        assets: reraQrAssets
+      },
+      {
         key: "project-images",
         title: "Project images",
         description: "Building shots and other project-specific visuals linked on project profiles.",
@@ -270,12 +287,19 @@ export default function LibraryPage() {
         assets: inspirationAssets
       }
     ],
-    [inspirationAssets, logoAssets, productAssets, referenceAssets]
+    [inspirationAssets, logoAssets, productAssets, referenceAssets, reraQrAssets]
   );
 
   async function handleUpload(event: React.FormEvent) {
     event.preventDefault();
     if (!file) return;
+
+    if (replacingAssetId) {
+      if (sessionToken && activeBrandId) {
+        await deleteBrandAsset(sessionToken, activeBrandId, replacingAssetId);
+      }
+    }
+
     const success = await uploadBrandAssetFile(file, label || file.name, assetKind);
     if (success) {
       if (sessionToken && activeBrandId) {
@@ -290,6 +314,7 @@ export default function LibraryPage() {
       setFile(null);
       setAssetKind("reference");
       setIsDrawerOpen(false);
+      setReplacingAssetId(null);
     }
   }
 
@@ -466,7 +491,21 @@ export default function LibraryPage() {
                           {section.description}
                         </p>
                       </div>
-                      {section.assets.length > 0 ? <span className="panel-count">{section.assets.length} items</span> : null}
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        {section.assets.length > 0 ? <span className="panel-count">{section.assets.length} items</span> : null}
+                        {section.emptyActionLabel ? (
+                          <button
+                            className="button button-ghost"
+                            onClick={() => {
+                              setAssetKind(section.uploadKind);
+                              setIsDrawerOpen(true);
+                            }}
+                            type="button"
+                          >
+                            {section.emptyActionLabel}
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                     {section.assets.length > 0 ? (
                       <div className="gallery-grid library-gallery-grid library-media-grid">
@@ -474,7 +513,26 @@ export default function LibraryPage() {
                           <article className="review-card" key={asset.id} style={{ padding: "12px" }}>
                             <div className="creative-preview-frame" style={{ minHeight: "200px", padding: "8px" }}>
                               {asset.previewUrl ? (
-                                <ImagePreviewTrigger alt={asset.label} src={asset.previewUrl} title={asset.label}>
+                                <ImagePreviewTrigger
+                                  alt={asset.label}
+                                  badges={[section.tagLabel]}
+                                  details={[
+                                    { label: "Kind", value: asset.kind },
+                                    { label: "Label", value: asset.label }
+                                  ]}
+                                  sections={[
+                                    {
+                                      title: "Library context",
+                                      items: [
+                                        { label: "Section", value: section.title },
+                                        { label: "Description", value: section.description }
+                                      ]
+                                    }
+                                  ]}
+                                  src={asset.previewUrl}
+                                  subtitle={section.description}
+                                  title={asset.label}
+                                >
                                   <img alt={asset.label} src={asset.previewUrl} />
                                 </ImagePreviewTrigger>
                               ) : (
@@ -486,6 +544,37 @@ export default function LibraryPage() {
                               <div className="review-tag-row">
                                 <span className="review-tag">{section.tagLabel}</span>
                               </div>
+                              {(section.key === "logos" || section.key === "rera-qr") && (
+                                <div className="library-asset-actions" style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                                  <button
+                                    className="button button-ghost"
+                                    style={{ fontSize: "12px", padding: "4px 8px" }}
+                                    onClick={() => {
+                                      setReplacingAssetId(asset.id);
+                                      setAssetKind(section.uploadKind);
+                                      setLabel(asset.label);
+                                      setIsDrawerOpen(true);
+                                    }}
+                                    type="button"
+                                  >
+                                    Replace
+                                  </button>
+                                  <button
+                                    className="button button-ghost"
+                                    style={{ fontSize: "12px", padding: "4px 8px", color: "var(--destructive)" }}
+                                    onClick={async () => {
+                                      if (!sessionToken || !activeBrandId) return;
+                                      if (!confirm("Remove this asset?")) return;
+                                      await deleteBrandAsset(sessionToken, activeBrandId, asset.id);
+                                      const assetRecords = await getBrandAssets(sessionToken, activeBrandId);
+                                      setAssets(assetRecords);
+                                    }}
+                                    type="button"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </article>
                         ))}
@@ -551,11 +640,11 @@ export default function LibraryPage() {
       </section>
 
       {isDrawerOpen ? (
-        <div className="drawer-overlay" onClick={() => setIsDrawerOpen(false)}>
+        <div className="drawer-overlay" onClick={() => { setIsDrawerOpen(false); setReplacingAssetId(null); }}>
           <div className="drawer-content" onClick={(event) => event.stopPropagation()}>
             <div className="drawer-header">
-              <h2>Upload asset</h2>
-              <button className="drawer-close" onClick={() => setIsDrawerOpen(false)} type="button">
+              <h2>{replacingAssetId ? "Replace asset" : "Upload asset"}</h2>
+              <button className="drawer-close" onClick={() => { setIsDrawerOpen(false); setReplacingAssetId(null); }} type="button">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
                 </svg>
@@ -573,6 +662,7 @@ export default function LibraryPage() {
                     >
                       <option value="reference">Reference</option>
                       <option value="logo">Logo</option>
+                      <option value="rera_qr">RERA QR</option>
                       <option value="product">Project image</option>
                       <option value="inspiration">Inspiration</option>
                     </select>
@@ -585,6 +675,8 @@ export default function LibraryPage() {
                       placeholder={
                         assetKind === "logo"
                           ? "e.g. Krisala primary logo"
+                          : assetKind === "rera_qr"
+                            ? "e.g. Project RERA QR code"
                           : "e.g. Landmark tower exterior"
                       }
                       value={label}

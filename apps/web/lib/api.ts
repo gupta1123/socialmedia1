@@ -1,4 +1,6 @@
 import type {
+  AiImageEditResponse,
+  AiSegmentationResponse,
   CampaignDeliverablePlanRecord,
   CampaignRecord,
   BrandDetail,
@@ -31,6 +33,7 @@ import type {
   FeedbackRequest,
   FeedbackResult,
   FinalGenerationRequest,
+  ImageEditPlanResponse,
   CreatePostingWindowInput,
   HomeOverview,
   PlanOverview,
@@ -68,8 +71,8 @@ const rawStyleVariationCount = Number(process.env.NEXT_PUBLIC_STYLE_VARIATION_CO
 export type CreativeFlowVersion = "v1" | "v2";
 export type BootstrapMode = "full" | "light" | "create";
 export const creativeFlowVersion: CreativeFlowVersion = rawCreativeFlowVersion === "v2" ? "v2" : "v1";
-export const styleVariationLimit = creativeFlowVersion === "v2" ? 6 : 4;
-export const defaultStyleVariationCount = clampInt(rawStyleVariationCount, 1, styleVariationLimit, 3);
+export const styleVariationLimit = creativeFlowVersion === "v2" ? 3 : 4;
+export const defaultStyleVariationCount = creativeFlowVersion === "v2" ? 1 : clampInt(rawStyleVariationCount, 1, styleVariationLimit, 3);
 export type PlanningTemplateOption = {
   id: string;
   workspaceId: string;
@@ -125,27 +128,6 @@ export type ExternalPostUploadPayload = {
   dueAt?: string | undefined;
   ownerUserId?: string | undefined;
   reviewerUserId?: string | undefined;
-};
-
-export type AiImageEditResponse = {
-  imageUrl: string;
-  imageDataUrl?: string;
-  model: string;
-  width?: number;
-  height?: number;
-};
-
-export type AiSegmentationResponse = {
-  maskUrl: string;
-  maskDataUrl?: string;
-  model: string;
-  path?: string;
-  bbox?: {
-    xMin: number;
-    yMin: number;
-    xMax: number;
-    yMax: number;
-  };
 };
 
 const responseCache = new Map<string, { data: unknown; expiresAt: number }>();
@@ -717,6 +699,37 @@ export function generateAutoMask(
   });
 }
 
+export function planImageEdit(
+  token: string,
+  payload: {
+    brandId: string;
+    prompt: string;
+    width?: number;
+    height?: number;
+    image: File | Blob;
+    imageFileName?: string;
+  }
+) {
+  const body = new FormData();
+  body.append("brandId", payload.brandId);
+  body.append("prompt", payload.prompt);
+
+  if (typeof payload.width === "number") {
+    body.append("width", String(payload.width));
+  }
+
+  if (typeof payload.height === "number") {
+    body.append("height", String(payload.height));
+  }
+
+  body.append("image", payload.image, payload.imageFileName ?? "source.png");
+
+  return request<ImageEditPlanResponse>("/api/creative/image-edit-plan", token, {
+    method: "POST",
+    body
+  });
+}
+
 export function applyMaskedImageEdit(
   token: string,
   payload: {
@@ -726,7 +739,7 @@ export function applyMaskedImageEdit(
     width?: number;
     height?: number;
     image: File | Blob;
-    mask: File | Blob;
+    mask?: File | Blob;
     imageFileName?: string;
     maskFileName?: string;
   }
@@ -748,7 +761,9 @@ export function applyMaskedImageEdit(
   }
 
   body.append("image", payload.image, payload.imageFileName ?? "source.png");
-  body.append("mask", payload.mask, payload.maskFileName ?? "mask.png");
+  if (payload.mask) {
+    body.append("mask", payload.mask, payload.maskFileName ?? "mask.png");
+  }
 
   return request<AiImageEditResponse>("/api/creative/image-edit", token, {
     method: "POST",
@@ -1054,6 +1069,12 @@ export function uploadBrandAsset(
   return request<{ id: string; storagePath: string }>(`/api/brands/${brandId}/assets`, token, {
     method: "POST",
     body
+  });
+}
+
+export function deleteBrandAsset(token: string, brandId: string, assetId: string) {
+  return request<{ success: boolean }>(`/api/brands/${brandId}/assets/${assetId}`, token, {
+    method: "DELETE"
   });
 }
 

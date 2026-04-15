@@ -22,6 +22,9 @@ type BrandEditorState = {
   dontRules: string;
   bannedPatterns: string;
   typographyMood: string;
+  headlineFontFamily: string;
+  bodyFontFamily: string;
+  typographyNotes: string;
   compositionPrinciples: string;
   imageTreatment: string;
   textDensity: "minimal" | "balanced" | "dense";
@@ -180,6 +183,9 @@ export default function BrandDetailPage() {
           styleDescriptors: splitCommaList(formState.styleDescriptors),
           visualSystem: {
             typographyMood: formState.typographyMood,
+            headlineFontFamily: formState.headlineFontFamily,
+            bodyFontFamily: formState.bodyFontFamily,
+            typographyNotes: splitLineList(formState.typographyNotes),
             compositionPrinciples: splitLineList(formState.compositionPrinciples),
             imageTreatment: splitLineList(formState.imageTreatment),
             textDensity: formState.textDensity,
@@ -255,9 +261,14 @@ export default function BrandDetailPage() {
             </div>
             <div className="brand-property-grid" style={{ marginBottom: "20px" }}>
               <PropertyCard label="Typography mood" value={profile.visualSystem.typographyMood || "Not defined"} />
+              <PropertyCard label="Headline font" value={profile.visualSystem.headlineFontFamily || "Not defined"} />
+              <PropertyCard label="Body font" value={profile.visualSystem.bodyFontFamily || "Not defined"} />
             </div>
             <div className="brand-rule-columns">
+              <ListCard title="Typography notes" items={profile.visualSystem.typographyNotes} emptyLabel="No typography rules stored" />
               <ListCard title="Composition principles" items={profile.visualSystem.compositionPrinciples} emptyLabel="No composition rules stored" />
+            </div>
+            <div className="brand-rule-columns" style={{ marginTop: "20px" }}>
               <ListCard title="Image treatment" items={profile.visualSystem.imageTreatment} emptyLabel="No image treatment rules stored" />
             </div>
           </section>
@@ -456,6 +467,31 @@ export default function BrandDetailPage() {
                         />
                       </label>
                       <label className="field-label">
+                        Headline font family
+                        <input
+                          value={formState.headlineFontFamily}
+                          onChange={(event) => setFormState((current) => current ? { ...current, headlineFontFamily: event.target.value } : current)}
+                        />
+                        <span className="field-hint">Store the exact brand headline font family when one exists.</span>
+                      </label>
+                      <label className="field-label">
+                        Body font family
+                        <input
+                          value={formState.bodyFontFamily}
+                          onChange={(event) => setFormState((current) => current ? { ...current, bodyFontFamily: event.target.value } : current)}
+                        />
+                        <span className="field-hint">Store the exact supporting/body font family when one exists.</span>
+                      </label>
+                      <label className="field-label">
+                        Typography notes
+                        <textarea
+                          rows={4}
+                          value={formState.typographyNotes}
+                          onChange={(event) => setFormState((current) => current ? { ...current, typographyNotes: event.target.value } : current)}
+                        />
+                        <span className="field-hint">One rule per line, e.g. uppercase eyebrow labels, elegant serif headlines, wide tracking for metadata.</span>
+                      </label>
+                      <label className="field-label">
                         Composition principles
                         <textarea
                           rows={4}
@@ -629,6 +665,9 @@ function toEditorState(detail: BrandDetail): BrandEditorState {
     dontRules: joinLineList(profile?.dontRules),
     bannedPatterns: joinLineList(profile?.bannedPatterns),
     typographyMood: profile?.visualSystem.typographyMood ?? "",
+    headlineFontFamily: profile?.visualSystem.headlineFontFamily ?? "",
+    bodyFontFamily: profile?.visualSystem.bodyFontFamily ?? "",
+    typographyNotes: joinLineList(profile?.visualSystem.typographyNotes),
     compositionPrinciples: joinLineList(profile?.visualSystem.compositionPrinciples),
     imageTreatment: joinLineList(profile?.visualSystem.imageTreatment),
     textDensity: profile?.visualSystem.textDensity ?? "balanced",

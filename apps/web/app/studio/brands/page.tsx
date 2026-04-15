@@ -30,6 +30,30 @@ const FIELD_GROUPS = [
     title: "Visual style",
     fields: [
       { key: "styleDescriptors", label: "Style descriptors", type: "input", hint: "e.g. cinematic, graphic, minimalist." },
+      {
+        key: "typographyMood",
+        label: "Typography mood",
+        type: "textarea",
+        hint: "Overall type direction, e.g. editorial serif headlines with clean sans support."
+      },
+      {
+        key: "headlineFontFamily",
+        label: "Headline font family",
+        type: "input",
+        hint: "Exact brand headline font, e.g. Cormorant Garamond."
+      },
+      {
+        key: "bodyFontFamily",
+        label: "Body font family",
+        type: "input",
+        hint: "Exact supporting font, e.g. Avenir Next."
+      },
+      {
+        key: "typographyNotes",
+        label: "Typography notes",
+        type: "textarea",
+        hint: "Line-separated rules, e.g. uppercase labels, generous tracking, restrained body copy."
+      },
     ],
   },
   {

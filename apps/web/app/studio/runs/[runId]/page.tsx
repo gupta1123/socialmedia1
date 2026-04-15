@@ -246,7 +246,19 @@ export default function RunDetailPage() {
                       {output.previewUrl ? (
                         <ImagePreviewTrigger
                           alt={`Final candidate ${output.outputIndex + 1}`}
+                          actions={[{ href: `/studio/ai-edit?outputId=${output.id}`, label: "Open in Editor", tone: "primary" }]}
+                          badges={[`Option ${output.outputIndex + 1}`, formatReviewState(output.reviewState)]}
+                          details={[
+                            { label: "Run", value: detail.run.promptSummary },
+                            { label: "State", value: formatReviewState(output.reviewState) }
+                          ]}
                           src={output.previewUrl}
+                          subtitle={describeRunOutputSource(
+                            output.jobId,
+                            detail.jobs,
+                            seedTemplateLabelById,
+                            detail.promptPackage.referenceAssetIds.length
+                          )}
                           title={`Final candidate ${output.outputIndex + 1}`}
                           meta={detail.run.promptSummary}
                         >
@@ -272,6 +284,9 @@ export default function RunDetailPage() {
                       </div>
                       {output.reviewState === "pending_review" ? (
                         <div className="review-card-actions">
+                          <Link className="button button-ghost" href={`/studio/ai-edit?outputId=${output.id}`}>
+                            Open in Editor
+                          </Link>
                           <button
                             className="button button-primary approve-button"
                             disabled={pendingTargetKey === `output:${output.id}:feedback`}
@@ -304,9 +319,14 @@ export default function RunDetailPage() {
                           </button>
                         </div>
                       ) : (
-                        <span className={`pill pill-review-${output.reviewState}`}>
-                          {formatReviewState(output.reviewState)}
-                        </span>
+                        <div className="review-card-actions">
+                          <Link className="button button-ghost" href={`/studio/ai-edit?outputId=${output.id}`}>
+                            Open in Editor
+                          </Link>
+                          <span className={`pill pill-review-${output.reviewState}`}>
+                            {formatReviewState(output.reviewState)}
+                          </span>
+                        </div>
                       )}
                     </div>
                   </article>
@@ -360,7 +380,13 @@ export default function RunDetailPage() {
                       {template.previewUrl ? (
                         <ImagePreviewTrigger
                           alt={template.label}
+                          badges={[`Direction ${index + 1}`, "Style preview"]}
+                          details={[
+                            { label: "Run", value: detail.run.promptSummary },
+                            { label: "Type", value: "Style direction" }
+                          ]}
                           src={template.previewUrl}
+                          subtitle="Style exploration preview"
                           title={template.label}
                           meta={`Direction ${index + 1}`}
                         >

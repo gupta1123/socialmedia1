@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
 import type {
@@ -51,6 +51,9 @@ const defaultProfile: BrandProfile = {
   styleDescriptors: ["architectural", "sunlit", "luxury", "spatial"],
   visualSystem: {
     typographyMood: "Editorial serif-sans contrast with disciplined hierarchy.",
+    headlineFontFamily: "",
+    bodyFontFamily: "",
+    typographyNotes: [],
     compositionPrinciples: ["Preserve generous margins", "Let architecture or hero imagery carry the frame"],
     imageTreatment: ["Warm natural light", "Premium realism", "Avoid oversaturated contrast"],
     textDensity: "balanced",
@@ -84,12 +87,17 @@ type BrandFormState = {
   doRules: string;
   dontRules: string;
   bannedPatterns: string;
+  typographyMood: string;
+  headlineFontFamily: string;
+  bodyFontFamily: string;
+  typographyNotes: string;
   primary: string;
   secondary: string;
   accent: string;
 };
 
 type BriefFormState = Omit<CreativeBrief, "brandId" | "referenceAssetIds"> & {
+  copyMode: "manual" | "auto";
   selectedReferenceAssetIds: string[];
 };
 type PendingAction =
@@ -100,6 +108,10 @@ type PendingAction =
   | "generate-finals"
   | "submit-feedback"
   | null;
+type StudioMessageState = {
+  id: number;
+  text: string;
+};
 
 type StudioContextValue = {
   loading: boolean;
@@ -162,6 +174,10 @@ const defaultBrandForm: BrandFormState = {
   doRules: defaultProfile.doRules.join(", "),
   dontRules: defaultProfile.dontRules.join(", "),
   bannedPatterns: defaultProfile.bannedPatterns.join(", "),
+  typographyMood: defaultProfile.visualSystem.typographyMood,
+  headlineFontFamily: defaultProfile.visualSystem.headlineFontFamily,
+  bodyFontFamily: defaultProfile.visualSystem.bodyFontFamily,
+  typographyNotes: defaultProfile.visualSystem.typographyNotes.join("\n"),
   primary: defaultProfile.palette.primary,
   secondary: defaultProfile.palette.secondary,
   accent: defaultProfile.palette.accent
@@ -176,15 +192,29 @@ const defaultBriefForm: BriefFormState = {
   goal: "Drive enquiries for a premium residential project",
   prompt: "Create a premium real-estate post with a clear visual angle and restrained copy.",
   audience: "Homebuyers and investors",
+  copyMode: "manual",
   offer: "",
   exactText: "",
   includeBrandLogo: false,
   includeReraQr: false,
+  logoAssetId: null,
   templateType: "announcement",
   selectedReferenceAssetIds: []
 };
 
 const BOOTSTRAP_CACHE_KEY_PREFIX = "studio-bootstrap-cache";
+
+function resolveActiveBrandId(
+  brands: BootstrapResponse["brands"],
+  preferredBrandId?: string | null,
+  storedBrandId?: string | null
+) {
+  const candidate = preferredBrandId ?? storedBrandId ?? null;
+  if (candidate && brands.some((brand) => brand.id === candidate)) {
+    return candidate;
+  }
+  return brands[0]?.id ?? null;
+}
 
 const StudioContext = createContext<StudioContextValue | null>(null);
 
@@ -205,12 +235,41 @@ export function StudioProvider({
   const [darkMode, setDarkMode] = useState(false);
   const [promptPackage, setPromptPackage] = useState<PromptPackage | null>(null);
   const [styleVariationCount, setStyleVariationCountState] = useState(defaultStyleVariationCount);
-  const [message, setMessage] = useState<string | null>(null);
+  const [messageState, setMessageState] = useState<StudioMessageState | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [pendingTargetKey, setPendingTargetKey] = useState<string | null>(null);
   const [brandForm, setBrandForm] = useState<BrandFormState>(defaultBrandForm);
   const [briefForm, setBriefForm] = useState<BriefFormState>(defaultBriefForm);
+  const messageSequenceRef = useRef(0);
   const isPending = pendingAction !== null;
+  const message = messageState?.text ?? null;
+
+  const setMessage = useCallback((value: string | null) => {
+    if (value === null) {
+      setMessageState(null);
+      return;
+    }
+
+    messageSequenceRef.current += 1;
+    setMessageState({
+      id: messageSequenceRef.current,
+      text: value
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!messageState) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setMessageState((current) => (current?.id === messageState.id ? null : current));
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [messageState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -234,9 +293,18 @@ export function StudioProvider({
         return;
       }
 
-      setBootstrap(payload);
-      writeBootstrapCache(bootstrapMode, payload);
-      setActiveBrandIdState((current) => current ?? storedBrandId ?? payload.brands[0]?.id ?? null);
+      const normalizedPayload = normalizeBootstrapPayload(payload);
+      setBootstrap(normalizedPayload);
+      writeBootstrapCache(bootstrapMode, normalizedPayload);
+      setActiveBrandIdState((current) => {
+        const resolved = resolveActiveBrandId(normalizedPayload.brands, current, storedBrandId);
+        if (resolved) {
+          window.localStorage.setItem("activeBrandId", resolved);
+        } else {
+          window.localStorage.removeItem("activeBrandId");
+        }
+        return resolved;
+      });
     }
 
     const load = async () => {
@@ -245,7 +313,15 @@ export function StudioProvider({
 
       if (cachedBootstrap) {
         setBootstrap(cachedBootstrap);
-        setActiveBrandIdState((current) => current ?? storedBrandId ?? cachedBootstrap.brands[0]?.id ?? null);
+        setActiveBrandIdState((current) => {
+          const resolved = resolveActiveBrandId(cachedBootstrap.brands, current, storedBrandId);
+          if (resolved) {
+            window.localStorage.setItem("activeBrandId", resolved);
+          } else {
+            window.localStorage.removeItem("activeBrandId");
+          }
+          return resolved;
+        });
         setLoading(false);
       }
 
@@ -384,8 +460,9 @@ export function StudioProvider({
             return;
           }
 
-          setBootstrap(payload);
-          setActiveBrandIdState((current) => current ?? payload.brands[0]?.id ?? null);
+          const normalizedPayload = normalizeBootstrapPayload(payload);
+          setBootstrap(normalizedPayload);
+          setActiveBrandIdState((current) => current ?? normalizedPayload.brands[0]?.id ?? null);
         }
       } catch {
         // Background reconciliation should not interrupt the UI.
@@ -446,9 +523,18 @@ export function StudioProvider({
       bootstrapMode,
       bootstrapMode === "full" || bootstrapMode === "create" ? scopedBrandId : undefined
     );
-    setBootstrap(payload);
-    writeBootstrapCache(bootstrapMode, payload);
-    setActiveBrandIdState(preferredBrandId ?? activeBrandId ?? payload.brands[0]?.id ?? null);
+    const normalizedPayload = normalizeBootstrapPayload(payload);
+    setBootstrap(normalizedPayload);
+    writeBootstrapCache(bootstrapMode, normalizedPayload);
+    setActiveBrandIdState(() => {
+      const resolved = resolveActiveBrandId(normalizedPayload.brands, preferredBrandId ?? activeBrandId, null);
+      if (resolved) {
+        window.localStorage.setItem("activeBrandId", resolved);
+      } else {
+        window.localStorage.removeItem("activeBrandId");
+      }
+      return resolved;
+    });
   }, [activeBrandId, bootstrapMode, sessionToken]);
 
   function setActiveBrandId(value: string) {
@@ -470,6 +556,7 @@ export function StudioProvider({
       calendarItemId: undefined,
       includeBrandLogo: false,
       includeReraQr: false,
+      logoAssetId: null,
       selectedReferenceAssetIds: []
     }));
 
@@ -537,7 +624,13 @@ export function StudioProvider({
             neutrals: []
           },
           styleDescriptors: splitList(brandForm.styleDescriptors),
-          visualSystem: defaultProfile.visualSystem,
+          visualSystem: {
+            ...defaultProfile.visualSystem,
+            typographyMood: brandForm.typographyMood,
+            headlineFontFamily: brandForm.headlineFontFamily,
+            bodyFontFamily: brandForm.bodyFontFamily,
+            typographyNotes: splitList(brandForm.typographyNotes)
+          },
           doRules: splitList(brandForm.doRules),
           dontRules: splitList(brandForm.dontRules),
           bannedPatterns: splitList(brandForm.bannedPatterns),
@@ -824,6 +917,13 @@ function splitList(value: string) {
     .filter(Boolean);
 }
 
+function normalizeBootstrapPayload(payload: BootstrapResponse): BootstrapResponse {
+  return {
+    ...payload,
+    aiEdit: payload.aiEdit ?? { flow: "mask" }
+  };
+}
+
 function readBootstrapCache(mode: BootstrapMode): BootstrapResponse | null {
   if (typeof window === "undefined") {
     return null;
@@ -840,7 +940,7 @@ function readBootstrapCache(mode: BootstrapMode): BootstrapResponse | null {
       return null;
     }
 
-    return parsed;
+    return normalizeBootstrapPayload(parsed);
   } catch {
     return null;
   }
@@ -852,7 +952,7 @@ function writeBootstrapCache(mode: BootstrapMode, payload: BootstrapResponse) {
   }
 
   try {
-    window.sessionStorage.setItem(`${BOOTSTRAP_CACHE_KEY_PREFIX}:${mode}`, JSON.stringify(payload));
+    window.sessionStorage.setItem(`${BOOTSTRAP_CACHE_KEY_PREFIX}:${mode}`, JSON.stringify(normalizeBootstrapPayload(payload)));
   } catch {
     // Ignore storage pressure or browser privacy restrictions.
   }

@@ -12,6 +12,7 @@ import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions, useRegisterTopbarControls } from "../topbar-actions-context";
 import { PlacementIcons } from "../placement-icons";
 import { Skeleton } from "../skeleton";
+import { FloatingTooltip } from "../floating-tooltip";
 
 const REVIEW_SCOPES = [
   { id: "my", label: "My review" },
@@ -158,8 +159,30 @@ export default function ReviewPage() {
         cell: (entry: ReviewQueueEntry) => (
           <ImagePreviewTrigger
             alt={`Preview for ${entry.deliverable.title}`}
+            actions={
+              entry.previewOutput?.id
+                ? [{ href: `/studio/ai-edit?outputId=${entry.previewOutput.id}`, label: "Open in Editor", tone: "primary" }]
+                : undefined
+            }
+            badges={[
+              formatObjective(entry.deliverable.objectiveCode),
+              formatOrdinal(entry.postVersion.versionNumber)
+            ]}
             className="data-table-thumbnail"
+            details={[
+              { label: "Placement", value: entry.deliverable.placementCode },
+              { label: "Status", value: entry.deliverable.status }
+            ]}
             meta={`${formatOrdinal(entry.postVersion.versionNumber)} version`}
+            sections={[
+              {
+                title: "Review",
+                items: [
+                  { label: "Deliverable", value: entry.deliverable.title },
+                  { label: "Version", value: `${formatOrdinal(entry.postVersion.versionNumber)} version` }
+                ]
+              }
+            ]}
             src={entry.previewOutput?.previewUrl}
             title={entry.deliverable.title}
           >
@@ -498,18 +521,28 @@ function ReviewCardGallery({
             <div className="work-gallery-media review-option-media">
               <ImagePreviewTrigger
                 alt={`Preview for ${entry.deliverable.title}`}
+                actions={
+                  previewId
+                    ? [{ href: `/studio/ai-edit?outputId=${previewId}`, label: "Open in Editor", tone: "primary" }]
+                    : undefined
+                }
+                badges={[
+                  entry.deliverable.status.replaceAll("_", " ")
+                ]}
+                details={[
+                  { label: "Placement", value: format },
+                  { label: "Reviewer", value: reviewerLabelFor(entry.deliverable.reviewerUserId) }
+                ]}
                 src={entry.previewOutput?.previewUrl}
+                subtitle={entry.deliverable.briefText ?? "Ready for review"}
                 title={entry.deliverable.title}
               >
                 {entry.previewOutput?.previewUrl ? (
                   <img alt={`Preview for ${entry.deliverable.title}`} src={entry.previewOutput.previewUrl} />
                 ) : (
-                  <div className="work-gallery-fallback">
-                    <span>{formatOrdinal(entry.postVersion.versionNumber)}</span>
-                  </div>
+                  <div className="work-gallery-fallback" />
                 )}
               </ImagePreviewTrigger>
-              <span className="review-option-version">{formatOrdinal(entry.postVersion.versionNumber)} version</span>
             </div>
 
             <div className="work-gallery-body">
@@ -517,42 +550,75 @@ function ReviewCardGallery({
                 <Link href={`/studio/deliverables/${entry.deliverable.id}`}>{entry.deliverable.title}</Link>
                 <p>Reviewer: {reviewerLabelFor(entry.deliverable.reviewerUserId)}</p>
               </div>
-              <div className="work-gallery-meta-row">
-                <span>{formatObjective(entry.deliverable.objectiveCode)}</span>
-                <span>{entry.deliverable.priority}</span>
-              </div>
               <div className="work-gallery-footer">
                 <PlacementIcons channel={entry.deliverable.placementCode} compact format={format} interactive={false} />
-                <Link className="review-link" href={`/studio/deliverables/${entry.deliverable.id}`}>
-                  Open task
-                </Link>
+                <div className="review-utility-actions">
+                  {previewId ? (
+                    <FloatingTooltip content="Open in Editor">
+                      <Link className="utility-button" href={`/studio/ai-edit?outputId=${previewId}`} aria-label="Open in Editor">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="m16 5 3 3" />
+                          <path d="M8 16l8.5-8.5a2.12 2.12 0 1 1 3 3L11 19l-4 1 1-4Z" />
+                        </svg>
+                      </Link>
+                    </FloatingTooltip>
+                  ) : null}
+                  <FloatingTooltip content="Open task">
+                    <Link className="utility-button" href={`/studio/deliverables/${entry.deliverable.id}`} aria-label="Open task">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                        <polyline points="15 3 21 3 21 9" />
+                        <line x1="10" y1="14" x2="21" y2="3" />
+                      </svg>
+                    </Link>
+                  </FloatingTooltip>
+                </div>
               </div>
-              <div className="review-card-actions">
-                <button
-                  className="button button-ghost table-action-button approve-button"
-                  disabled={!previewId || isRowPending}
-                  onClick={() => void onDecision(previewId, "approved")}
-                  type="button"
-                >
-                  Approve
-                </button>
-                <button
-                  className="button button-ghost table-action-button"
-                  disabled={!previewId || isRowPending}
-                  onClick={() => void onDecision(previewId, "close")}
-                  type="button"
-                >
-                  Needs changes
-                </button>
-                <button
-                  className="button button-ghost table-action-button reject-button"
-                  disabled={!previewId || isRowPending}
-                  onClick={() => void onDecision(previewId, "off-brand")}
-                  type="button"
-                >
-                  Reject
-                </button>
-              </div>
+                <div className="review-decision-group">
+                  <FloatingTooltip content="Approve">
+                    <button
+                      className="button button-primary decision-button approve-decision"
+                      disabled={!previewId || isRowPending}
+                      onClick={() => void onDecision(previewId, "approved")}
+                      type="button"
+                      aria-label="Approve"
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </button>
+                  </FloatingTooltip>
+                  <FloatingTooltip content="Needs changes">
+                    <button
+                      className="button button-ghost decision-button revision-decision"
+                      disabled={!previewId || isRowPending}
+                      onClick={() => void onDecision(previewId, "close")}
+                      type="button"
+                      aria-label="Needs changes"
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                        <line x1="9" y1="10" x2="15" y2="10" />
+                        <line x1="9" y1="14" x2="13" y2="14" />
+                      </svg>
+                    </button>
+                  </FloatingTooltip>
+                  <FloatingTooltip content="Reject">
+                    <button
+                      className="button button-ghost decision-button reject-decision"
+                      disabled={!previewId || isRowPending}
+                      onClick={() => void onDecision(previewId, "off-brand")}
+                      type="button"
+                      aria-label="Reject"
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  </FloatingTooltip>
+                </div>
             </div>
           </article>
         );

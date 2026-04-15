@@ -502,8 +502,14 @@ export default function PlanPage() {
                   {task.previewUrl ? (
                     <ImagePreviewTrigger
                       alt={`Preview for ${task.title}`}
+                      badges={[formatStatusLabel(task.status)]}
+                      details={[
+                        { label: "Scheduled", value: formatDisplayDate(task.scheduledFor) },
+                        { label: "Placement", value: task.placementCode }
+                      ]}
                       meta={formatDisplayDate(task.scheduledFor)}
                       mode="inline"
+                      subtitle={getPostTaskContext(task, campaignNameById, seriesNameById)}
                       src={task.previewUrl}
                       title={task.title}
                     >

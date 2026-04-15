@@ -78,6 +78,16 @@ const objectiveOptions: Array<{ value: ObjectiveCode; label: string }> = [
   { value: "footfall", label: "Footfall" }
 ];
 
+const UPLOAD_WORKFLOW_OPTIONS: Array<{
+  value: ExternalPostReviewMode;
+  label: string;
+  description: string;
+}> = [
+  { value: "review", label: "Needs review", description: "Best default. Put the upload into review for approval first." },
+  { value: "approved", label: "Already approved", description: "Use this if the creative is already signed off and ready to schedule." },
+  { value: "scheduled", label: "Schedule directly", description: "Skip intermediate steps and treat this as ready to publish." }
+];
+
 function createDefaultDeliverableForm(): DeliverableFormState {
   const nextMorning = new Date();
   nextMorning.setDate(nextMorning.getDate() + 1);
@@ -120,8 +130,13 @@ export default function DeliverablesPage() {
   const [drawerMode, setDrawerMode] = useState<"create" | "upload">("create");
   const [externalUploadFile, setExternalUploadFile] = useState<File | null>(null);
   const [externalReviewMode, setExternalReviewMode] = useState<ExternalPostReviewMode>("review");
+  const [showUploadAdvanced, setShowUploadAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<DeliverableFormState>(createDefaultDeliverableForm);
+  const externalUploadPreviewUrl = useMemo(
+    () => (externalUploadFile ? URL.createObjectURL(externalUploadFile) : null),
+    [externalUploadFile]
+  );
 
   const topbarActions = useMemo(
     () => (
@@ -269,6 +284,7 @@ export default function DeliverablesPage() {
   function openCreateDrawer() {
     setDrawerMode("create");
     setExternalUploadFile(null);
+    setShowUploadAdvanced(false);
     setForm({
       ...createDefaultDeliverableForm(),
       projectId: projectFilter ?? "",
@@ -281,6 +297,7 @@ export default function DeliverablesPage() {
     setDrawerMode("upload");
     setExternalUploadFile(null);
     setExternalReviewMode("review");
+    setShowUploadAdvanced(false);
     setForm({
       ...createDefaultDeliverableForm(),
       title: "External post upload",
@@ -290,6 +307,16 @@ export default function DeliverablesPage() {
     });
     setIsDrawerOpen(true);
   }
+
+  useEffect(() => {
+    if (!externalUploadPreviewUrl) {
+      return;
+    }
+
+    return () => {
+      URL.revokeObjectURL(externalUploadPreviewUrl);
+    };
+  }, [externalUploadPreviewUrl]);
 
   const tableColumns = useMemo(
     () => [
@@ -599,7 +626,7 @@ export default function DeliverablesPage() {
 
       {isDrawerOpen ? (
         <div className="drawer-overlay" onClick={() => setIsDrawerOpen(false)}>
-          <div className="drawer-content" onClick={(event) => event.stopPropagation()}>
+          <div className={`drawer-content ${drawerMode === "upload" ? "upload-drawer-content" : ""}`} onClick={(event) => event.stopPropagation()}>
             <div className="drawer-header">
               <h2>{drawerMode === "upload" ? "Upload external post" : "Create post task"}</h2>
               <button className="drawer-close" onClick={() => setIsDrawerOpen(false)} type="button">
@@ -613,220 +640,424 @@ export default function DeliverablesPage() {
             <div className="drawer-body">
               <form className="planner-form" onSubmit={handleCreateDeliverable}>
                 {drawerMode === "upload" ? (
+                  <div className="upload-drawer-shell">
+                    <section className="upload-drawer-section upload-drawer-hero">
+                      <div className="upload-drawer-header-block">
+                        <p className="panel-label">Essentials</p>
+                        <h3>Upload the post, place it, and move on.</h3>
+                        <p className="upload-drawer-subcopy">
+                          Only keep the fields that change where the post goes, what happens next, and what the audience should do.
+                        </p>
+                      </div>
+
+                      <div className="upload-file-card">
+                        <label className="upload-file-input">
+                          <span className="upload-file-input-copy">
+                            <strong>{externalUploadFile ? "Replace image" : "Choose image"}</strong>
+                            <span>PNG, JPG, WEBP, or GIF</span>
+                          </span>
+                          <input
+                            required
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp,image/gif"
+                            onChange={(event) => {
+                              const nextFile = event.target.files?.[0] ?? null;
+                              setExternalUploadFile(nextFile);
+                              if (!nextFile) return;
+
+                              setForm((state) => ({
+                                ...state,
+                                title:
+                                  !state.title || state.title === "External post upload"
+                                    ? humanizeExternalFileName(nextFile.name)
+                                    : state.title
+                              }));
+                            }}
+                          />
+                        </label>
+
+                        {externalUploadPreviewUrl ? (
+                          <div className="upload-file-preview">
+                            <img alt={form.title || "Upload preview"} src={externalUploadPreviewUrl} />
+                          </div>
+                        ) : (
+                          <div className="upload-file-empty">
+                            <strong>No image selected</strong>
+                            <span>Your uploaded creative preview will appear here.</span>
+                          </div>
+                        )}
+                      </div>
+                    </section>
+
+                    <section className="upload-drawer-section">
+                      <p className="field-group-label">Where it belongs</p>
+                      <div className="planner-form-grid">
+                        <label className="field-label planner-form-span-2">
+                          Title
+                          <input
+                            required
+                            value={form.title}
+                            onChange={(event) => setForm((state) => ({ ...state, title: event.target.value }))}
+                            placeholder="Ram Navami greeting post"
+                          />
+                        </label>
+
+                        <label className="field-label">
+                          Post type
+                          <select
+                            required
+                            value={form.postTypeId}
+                            onChange={(event) => setForm((state) => ({ ...state, postTypeId: event.target.value }))}
+                          >
+                            <option value="">Select post type</option>
+                            {postTypes.map((postType) => (
+                              <option key={postType.id} value={postType.id}>
+                                {postType.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="field-label">
+                          Project
+                          <select
+                            value={form.projectId}
+                            onChange={(event) => setForm((state) => ({ ...state, projectId: event.target.value }))}
+                          >
+                            <option value="">Brand-level / no project</option>
+                            {visibleProjects.map((project) => (
+                              <option key={project.id} value={project.id}>
+                                {project.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="field-label">
+                          Placement
+                          <select
+                            value={form.channel}
+                            onChange={(event) =>
+                              setForm((state) => ({
+                                ...state,
+                                channel: event.target.value as CreativeChannel,
+                                format: getDefaultFormat(event.target.value as CreativeChannel)
+                              }))
+                            }
+                          >
+                            <option value="instagram-feed">Instagram feed</option>
+                            <option value="instagram-story">Instagram story</option>
+                            <option value="linkedin-feed">LinkedIn feed</option>
+                            <option value="x-post">X post</option>
+                            <option value="ad-creative">Ad creative</option>
+                          </select>
+                        </label>
+
+                        <label className="field-label">
+                          When should it go live?
+                          <input
+                            type="datetime-local"
+                            value={form.scheduledFor}
+                            onChange={(event) => setForm((state) => ({ ...state, scheduledFor: event.target.value }))}
+                          />
+                        </label>
+
+                        <div className="placement-note planner-form-span-2 upload-placement-note">
+                          <strong>{getPlacementSpec(form.channel, form.format)?.recommendedSize}</strong>
+                          <p>{getPlacementSpec(form.channel, form.format)?.safeZone}</p>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="upload-drawer-section">
+                      <p className="field-group-label">What happens next</p>
+                      <div className="upload-workflow-grid">
+                        {UPLOAD_WORKFLOW_OPTIONS.map((option) => (
+                          <button
+                            key={option.value}
+                            className={`upload-workflow-card ${externalReviewMode === option.value ? "is-selected" : ""}`}
+                            onClick={() => setExternalReviewMode(option.value)}
+                            type="button"
+                          >
+                            <strong>{option.label}</strong>
+                            <span>{option.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+
+                    <section className="upload-drawer-section">
+                      <p className="field-group-label">Content notes</p>
+                      <div className="planner-form-grid">
+                        <label className="field-label planner-form-span-2">
+                          Caption or internal note
+                          <textarea
+                            rows={4}
+                            value={form.briefText}
+                            onChange={(event) => setForm((state) => ({ ...state, briefText: event.target.value }))}
+                            placeholder="Optional context for review, scheduling, or record-keeping."
+                          />
+                        </label>
+
+                        <label className="field-label planner-form-span-2">
+                          CTA
+                          <input
+                            value={form.ctaText}
+                            onChange={(event) => setForm((state) => ({ ...state, ctaText: event.target.value }))}
+                            placeholder="Book a site visit"
+                          />
+                        </label>
+                      </div>
+                    </section>
+
+                    <section className="upload-drawer-section upload-drawer-section-muted">
+                      <button
+                        aria-expanded={showUploadAdvanced}
+                        className={`upload-advanced-toggle ${showUploadAdvanced ? "is-open" : ""}`}
+                        onClick={() => setShowUploadAdvanced((value) => !value)}
+                        type="button"
+                      >
+                        <span>
+                          <strong>Advanced options</strong>
+                          <small>Only open if this upload truly needs campaign or ownership metadata.</small>
+                        </span>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </button>
+
+                      {showUploadAdvanced ? (
+                        <div className="planner-form-grid upload-advanced-grid">
+                          <label className="field-label">
+                            Campaign
+                            <select
+                              value={form.campaignId}
+                              onChange={(event) => {
+                                const nextCampaignId = event.target.value;
+                                const campaign = campaigns.find((entry) => entry.id === nextCampaignId) ?? null;
+                                setForm((state) => ({
+                                  ...state,
+                                  campaignId: nextCampaignId,
+                                  projectId: campaign?.primaryProjectId ?? state.projectId
+                                }));
+                              }}
+                            >
+                              <option value="">Standalone</option>
+                              {campaigns.map((campaign) => (
+                                <option key={campaign.id} value={campaign.id}>
+                                  {campaign.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+
+                          <label className="field-label">
+                            Assignee
+                            <select
+                              value={form.ownerUserId}
+                              onChange={(event) => setForm((state) => ({ ...state, ownerUserId: event.target.value }))}
+                            >
+                              <option value="">Unassigned</option>
+                              {workspaceMembers.map((member) => (
+                                <option key={member.id} value={member.id}>
+                                  {member.displayName ?? member.email}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                      ) : null}
+                    </section>
+                  </div>
+                ) : (
                   <div className="planner-form-section">
-                    <p className="field-group-label">External creative</p>
+                    <p className="field-group-label">Post-task brief</p>
                     <div className="planner-form-grid">
                       <label className="field-label planner-form-span-2">
-                        Upload image
+                        Title
                         <input
                           required
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp,image/gif"
-                          onChange={(event) => setExternalUploadFile(event.target.files?.[0] ?? null)}
+                          value={form.title}
+                          onChange={(event) => setForm((state) => ({ ...state, title: event.target.value }))}
+                          placeholder="Instagram launch creative for Asteria Residences"
                         />
                       </label>
 
-                      <label className="field-label planner-form-span-2">
-                        Workflow
-                        <select value={externalReviewMode} onChange={(event) => setExternalReviewMode(event.target.value as ExternalPostReviewMode)}>
-                          <option value="review">Send to review</option>
-                          <option value="approved">Mark approved</option>
-                          <option value="scheduled">Schedule directly</option>
+                      <label className="field-label">
+                        Project
+                        <select
+                          required
+                          value={form.projectId}
+                          onChange={(event) => setForm((state) => ({ ...state, projectId: event.target.value }))}
+                        >
+                          <option value="">Select project</option>
+                          {visibleProjects.map((project) => (
+                            <option key={project.id} value={project.id}>
+                              {project.name}
+                            </option>
+                          ))}
                         </select>
                       </label>
-                    </div>
-                  </div>
-                ) : null}
 
-                <div className="planner-form-section">
-                  <p className="field-group-label">{drawerMode === "upload" ? "Post metadata" : "Post-task brief"}</p>
-                  <div className="planner-form-grid">
-                    <label className="field-label planner-form-span-2">
-                      Title
-                      <input
-                        required
-                        value={form.title}
-                        onChange={(event) => setForm((state) => ({ ...state, title: event.target.value }))}
-                        placeholder={drawerMode === "upload" ? "External festive post / campaign creative" : "Instagram launch creative for Asteria Residences"}
-                      />
-                    </label>
+                      <label className="field-label">
+                        Campaign
+                        <select
+                          value={form.campaignId}
+                          onChange={(event) => {
+                            const nextCampaignId = event.target.value;
+                            const campaign = campaigns.find((entry) => entry.id === nextCampaignId) ?? null;
+                            setForm((state) => ({
+                              ...state,
+                              campaignId: nextCampaignId,
+                              projectId: campaign?.primaryProjectId ?? state.projectId
+                            }));
+                          }}
+                        >
+                          <option value="">Standalone</option>
+                          {campaigns.map((campaign) => (
+                            <option key={campaign.id} value={campaign.id}>
+                              {campaign.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                    <label className="field-label">
-                      Project
-                      <select
-                        required={drawerMode !== "upload"}
-                        value={form.projectId}
-                        onChange={(event) => setForm((state) => ({ ...state, projectId: event.target.value }))}
-                      >
-                        <option value="">{drawerMode === "upload" ? "Brand-level / no project" : "Select project"}</option>
-                        {visibleProjects.map((project) => (
-                          <option key={project.id} value={project.id}>
-                            {project.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <label className="field-label">
+                        Post type
+                        <select
+                          required
+                          value={form.postTypeId}
+                          onChange={(event) => setForm((state) => ({ ...state, postTypeId: event.target.value }))}
+                        >
+                          <option value="">Select post type</option>
+                          {postTypes.map((postType) => (
+                            <option key={postType.id} value={postType.id}>
+                              {postType.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                    <label className="field-label">
-                      Campaign
-                      <select
-                        value={form.campaignId}
-                        onChange={(event) => {
-                          const nextCampaignId = event.target.value;
-                          const campaign = campaigns.find((entry) => entry.id === nextCampaignId) ?? null;
-                          setForm((state) => ({
-                            ...state,
-                            campaignId: nextCampaignId,
-                            projectId: campaign?.primaryProjectId ?? state.projectId
-                          }));
-                        }}
-                      >
-                        <option value="">Standalone</option>
-                        {campaigns.map((campaign) => (
-                          <option key={campaign.id} value={campaign.id}>
-                            {campaign.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <label className="field-label">
+                        Template
+                        <select
+                          value={form.creativeTemplateId}
+                          onChange={(event) => setForm((state) => ({ ...state, creativeTemplateId: event.target.value }))}
+                        >
+                          <option value="">No template</option>
+                          {visibleTemplates.map((template) => (
+                            <option key={template.id} value={template.id}>
+                              {template.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                    <label className="field-label">
-                      Post type
-                      <select
-                        required
-                        value={form.postTypeId}
-                        onChange={(event) => setForm((state) => ({ ...state, postTypeId: event.target.value }))}
-                      >
-                        <option value="">Select post type</option>
-                        {postTypes.map((postType) => (
-                          <option key={postType.id} value={postType.id}>
-                            {postType.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <label className="field-label">
+                        Assignee
+                        <select
+                          value={form.ownerUserId}
+                          onChange={(event) => setForm((state) => ({ ...state, ownerUserId: event.target.value }))}
+                        >
+                          <option value="">Unassigned</option>
+                          {workspaceMembers.map((member) => (
+                            <option key={member.id} value={member.id}>
+                              {member.displayName ?? member.email}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                    <label className="field-label">
-                      Template
-                      <select
-                        value={form.creativeTemplateId}
-                        onChange={(event) => setForm((state) => ({ ...state, creativeTemplateId: event.target.value }))}
-                      >
-                        <option value="">No template</option>
-                        {visibleTemplates.map((template) => (
-                          <option key={template.id} value={template.id}>
-                            {template.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <label className="field-label">
+                        Reviewer
+                        <select
+                          value={form.reviewerUserId}
+                          onChange={(event) => setForm((state) => ({ ...state, reviewerUserId: event.target.value }))}
+                        >
+                          <option value="">Unassigned</option>
+                          {workspaceMembers.map((member) => (
+                            <option key={member.id} value={member.id}>
+                              {member.displayName ?? member.email}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                    <label className="field-label">
-                      Assignee
-                      <select
-                        value={form.ownerUserId}
-                        onChange={(event) => setForm((state) => ({ ...state, ownerUserId: event.target.value }))}
-                      >
-                        <option value="">Unassigned</option>
-                        {workspaceMembers.map((member) => (
-                          <option key={member.id} value={member.id}>
-                            {member.displayName ?? member.email}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <label className="field-label">
+                        Objective
+                        <select
+                          value={form.objectiveCode}
+                          onChange={(event) =>
+                            setForm((state) => ({ ...state, objectiveCode: event.target.value as ObjectiveCode }))
+                          }
+                        >
+                          {objectiveOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                    <label className="field-label">
-                      Reviewer
-                      <select
-                        value={form.reviewerUserId}
-                        onChange={(event) => setForm((state) => ({ ...state, reviewerUserId: event.target.value }))}
-                      >
-                        <option value="">Unassigned</option>
-                        {workspaceMembers.map((member) => (
-                          <option key={member.id} value={member.id}>
-                            {member.displayName ?? member.email}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <label className="field-label">
+                        Placement
+                        <select
+                          value={form.channel}
+                          onChange={(event) =>
+                            setForm((state) => ({
+                              ...state,
+                              channel: event.target.value as CreativeChannel,
+                              format: getDefaultFormat(event.target.value as CreativeChannel)
+                            }))
+                          }
+                        >
+                          <option value="instagram-feed">Instagram feed</option>
+                          <option value="instagram-story">Instagram story</option>
+                          <option value="linkedin-feed">LinkedIn feed</option>
+                          <option value="x-post">X post</option>
+                          <option value="ad-creative">Ad creative</option>
+                        </select>
+                      </label>
 
-                    <label className="field-label">
-                      Objective
-                      <select
-                        value={form.objectiveCode}
-                        onChange={(event) =>
-                          setForm((state) => ({ ...state, objectiveCode: event.target.value as ObjectiveCode }))
-                        }
-                      >
-                        {objectiveOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <label className="field-label">
+                        Format
+                        <select
+                          value={form.format}
+                          onChange={(event) => setForm((state) => ({ ...state, format: event.target.value as CreativeFormat }))}
+                        >
+                          {getAllowedFormats(form.channel).map((spec) => (
+                            <option key={`${spec.channel}-${spec.format}`} value={spec.format}>
+                              {spec.formatLabel}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                    <label className="field-label">
-                      Placement
-                      <select
-                        value={form.channel}
-                        onChange={(event) =>
-                          setForm((state) => ({
-                            ...state,
-                            channel: event.target.value as CreativeChannel,
-                            format: getDefaultFormat(event.target.value as CreativeChannel)
-                          }))
-                        }
-                      >
-                        <option value="instagram-feed">Instagram feed</option>
-                        <option value="instagram-story">Instagram story</option>
-                        <option value="linkedin-feed">LinkedIn feed</option>
-                        <option value="x-post">X post</option>
-                        <option value="ad-creative">Ad creative</option>
-                      </select>
-                    </label>
+                      <label className="field-label">
+                        Scheduled for
+                        <input
+                          type="datetime-local"
+                          value={form.scheduledFor}
+                          onChange={(event) => setForm((state) => ({ ...state, scheduledFor: event.target.value }))}
+                        />
+                      </label>
 
-                    <label className="field-label">
-                      Format
-                      <select
-                        value={form.format}
-                        onChange={(event) => setForm((state) => ({ ...state, format: event.target.value as CreativeFormat }))}
-                      >
-                        {getAllowedFormats(form.channel).map((spec) => (
-                          <option key={`${spec.channel}-${spec.format}`} value={spec.format}>
-                            {spec.formatLabel}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <label className="field-label">
+                        Priority
+                        <select
+                          value={form.priority}
+                          onChange={(event) =>
+                            setForm((state) => ({ ...state, priority: event.target.value as DeliverablePriority }))
+                          }
+                        >
+                          {priorityOptions.map((priority) => (
+                            <option key={priority} value={priority}>
+                              {priority}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                    <label className="field-label">
-                      Scheduled for
-                      <input
-                        type="datetime-local"
-                        value={form.scheduledFor}
-                        onChange={(event) => setForm((state) => ({ ...state, scheduledFor: event.target.value }))}
-                      />
-                    </label>
-
-                    <label className="field-label">
-                      Priority
-                      <select
-                        value={form.priority}
-                        onChange={(event) =>
-                          setForm((state) => ({ ...state, priority: event.target.value as DeliverablePriority }))
-                        }
-                      >
-                        {priorityOptions.map((priority) => (
-                          <option key={priority} value={priority}>
-                            {priority}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    {drawerMode !== "upload" ? (
                       <label className="field-label">
                         Status
                         <select
@@ -842,33 +1073,33 @@ export default function DeliverablesPage() {
                           ))}
                         </select>
                       </label>
-                    ) : null}
 
-                    <label className="field-label planner-form-span-2">
-                      {drawerMode === "upload" ? "Caption / notes" : "Brief"}
-                      <textarea
-                        rows={4}
-                        value={form.briefText}
-                        onChange={(event) => setForm((state) => ({ ...state, briefText: event.target.value }))}
-                        placeholder={drawerMode === "upload" ? "Caption, context, or reviewer notes for this uploaded post." : "Premium launch creative focused on architecture, facade quality, and site visit CTA."}
-                      />
-                    </label>
+                      <label className="field-label planner-form-span-2">
+                        Brief
+                        <textarea
+                          rows={4}
+                          value={form.briefText}
+                          onChange={(event) => setForm((state) => ({ ...state, briefText: event.target.value }))}
+                          placeholder="Premium launch creative focused on architecture, facade quality, and site visit CTA."
+                        />
+                      </label>
 
-                    <label className="field-label planner-form-span-2">
-                      CTA
-                      <input
-                        value={form.ctaText}
-                        onChange={(event) => setForm((state) => ({ ...state, ctaText: event.target.value }))}
-                        placeholder="Book a site visit"
-                      />
-                    </label>
+                      <label className="field-label planner-form-span-2">
+                        CTA
+                        <input
+                          value={form.ctaText}
+                          onChange={(event) => setForm((state) => ({ ...state, ctaText: event.target.value }))}
+                          placeholder="Book a site visit"
+                        />
+                      </label>
 
-                    <div className="placement-note planner-form-span-2">
-                      <strong>{getPlacementSpec(form.channel, form.format)?.recommendedSize}</strong>
-                      <p>{getPlacementSpec(form.channel, form.format)?.safeZone}</p>
+                      <div className="placement-note planner-form-span-2">
+                        <strong>{getPlacementSpec(form.channel, form.format)?.recommendedSize}</strong>
+                        <p>{getPlacementSpec(form.channel, form.format)?.safeZone}</p>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
 
                 <div className="planner-form-actions">
                   <button className="button button-ghost" type="button" onClick={() => setIsDrawerOpen(false)}>
@@ -907,4 +1138,18 @@ function toLocalDateTimeValue(value: Date) {
   const hour = `${value.getHours()}`.padStart(2, "0");
   const minute = `${value.getMinutes()}`.padStart(2, "0");
   return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
+function humanizeExternalFileName(fileName: string) {
+  const base = fileName.replace(/\.[^.]+$/, "");
+  const normalized = base
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return "External post upload";
+  }
+
+  return normalized.replace(/\b\w/g, (char) => char.toUpperCase());
 }

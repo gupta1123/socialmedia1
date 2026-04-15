@@ -353,7 +353,18 @@ export default function DeliverableDetailPage() {
               <div className="creative-preview-frame final-frame deliverable-showcase-frame">
                 <ImagePreviewTrigger
                   alt={`${deliverable.title} version ${showcaseVersion.versionNumber}`}
+                  actions={
+                    showcaseVersion.createdFromOutputId
+                      ? [{ href: `/studio/ai-edit?outputId=${showcaseVersion.createdFromOutputId}`, label: "Open in Editor", tone: "primary" }]
+                      : undefined
+                  }
+                  badges={[approvedVersion ? "Approved" : "Latest", `Version ${showcaseVersion.versionNumber}`]}
+                  details={[
+                    { label: "Deliverable", value: deliverable.title },
+                    { label: "Status", value: showcaseVersion.status }
+                  ]}
                   src={showcaseVersion.previewUrl}
+                  subtitle={deliverable.briefText ?? "Deliverable preview"}
                   title={deliverable.title}
                   meta={`Version ${showcaseVersion.versionNumber}`}
                 >
@@ -440,7 +451,18 @@ export default function DeliverableDetailPage() {
                         <div className="planner-version-preview">
                           <ImagePreviewTrigger
                             alt={`${deliverable.title} version ${version.versionNumber}`}
+                            actions={
+                              version.createdFromOutputId
+                                ? [{ href: `/studio/ai-edit?outputId=${version.createdFromOutputId}`, label: "Open in Editor", tone: "primary" }]
+                                : undefined
+                            }
+                            badges={[`Version ${version.versionNumber}`, version.status]}
+                            details={[
+                              { label: "Headline", value: version.headline ?? "No headline stored" },
+                              { label: "State", value: version.status }
+                            ]}
                             src={version.previewUrl}
+                            subtitle={version.caption ?? "No caption saved for this version yet."}
                             title={deliverable.title}
                             meta={`Version ${version.versionNumber}`}
                           >
