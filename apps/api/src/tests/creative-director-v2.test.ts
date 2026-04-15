@@ -148,6 +148,7 @@ describe("compilePromptPackageV2", () => {
       brief: {
         brandId: crypto.randomUUID(),
         createMode: "post",
+        copyMode: "manual",
         channel: "instagram-feed",
         format: "square",
         goal: "Project launch",
@@ -243,6 +244,7 @@ describe("compilePromptPackageV2", () => {
       brief: {
         brandId,
         createMode: "post",
+        copyMode: "manual",
         projectId: localProjectId,
         postTypeId: crypto.randomUUID(),
         channel: "instagram-feed",
@@ -351,6 +353,7 @@ describe("compilePromptPackageV2", () => {
       brief: {
         brandId,
         createMode: "post",
+        copyMode: "manual",
         channel: "instagram-feed",
         format: "portrait",
         goal: "Build interest in a key project amenity",
@@ -455,6 +458,7 @@ describe("compilePromptPackageV2", () => {
       brief: {
         brandId,
         createMode: "post",
+        copyMode: "manual",
         channel: "instagram-feed",
         format: "portrait",
         goal: "Build interest in the swimming pool amenity",
@@ -551,6 +555,7 @@ describe("compilePromptPackageV2", () => {
       brief: {
         brandId,
         createMode: "post",
+        copyMode: "manual",
         festivalId: crypto.randomUUID(),
         postTypeId: crypto.randomUUID(),
         channel: "instagram-feed",
@@ -647,6 +652,7 @@ describe("compilePromptPackageV2", () => {
       brief: {
         brandId,
         createMode: "post",
+        copyMode: "manual",
         channel: "instagram-feed",
         format: "portrait",
         goal: "Build interest in a key project amenity",

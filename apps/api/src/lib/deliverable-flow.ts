@@ -592,6 +592,11 @@ function buildCreativeBrief(params: {
       (typeof params.deliverable.sourceJson?.createMode === "string"
         ? (params.deliverable.sourceJson.createMode as CreativeBrief["createMode"])
         : "post"),
+    copyMode:
+      params.briefOverride?.copyMode ??
+      (typeof params.deliverable.sourceJson?.copyMode === "string"
+        ? (params.deliverable.sourceJson.copyMode as CreativeBrief["copyMode"])
+        : "manual"),
     deliverableId: params.deliverableId,
     campaignId: params.briefOverride?.campaignId ?? params.deliverable.campaignId ?? undefined,
     campaignPlanId:

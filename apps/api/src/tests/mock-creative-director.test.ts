@@ -108,6 +108,7 @@ describe("compilePromptPackageMock", () => {
       brief: {
         brandId: crypto.randomUUID(),
         createMode: "post",
+        copyMode: "manual",
         channel: "instagram-story",
         format: "story",
         goal: "Launch announcement",
@@ -182,6 +183,7 @@ describe("compilePromptPackageMock", () => {
       brief: {
         brandId: crypto.randomUUID(),
         createMode: "post",
+        copyMode: "manual",
         channel: "instagram-feed",
         format: "portrait",
         goal: "Construction progress update",
@@ -227,6 +229,7 @@ describe("compilePromptPackageMock", () => {
       brief: {
         brandId: crypto.randomUUID(),
         createMode: "post",
+        copyMode: "manual",
         channel: "instagram-feed",
         format: "portrait",
         goal: "Project hero reveal",
@@ -275,6 +278,7 @@ describe("compilePromptPackageMock", () => {
       brief: {
         brandId: crypto.randomUUID(),
         createMode: "post",
+        copyMode: "manual",
         channel: "instagram-feed",
         format: "square",
         goal: "Amenity spotlight",
@@ -321,6 +325,7 @@ describe("compilePromptPackageMock", () => {
       brief: {
         brandId: crypto.randomUUID(),
         createMode: "post",
+        copyMode: "manual",
         channel: "instagram-feed",
         format: "portrait",
         goal: "Site visit invite",
@@ -366,6 +371,7 @@ describe("compilePromptPackageMock", () => {
       brief: {
         brandId: crypto.randomUUID(),
         createMode: "post",
+        copyMode: "manual",
         channel: "instagram-feed",
         format: "portrait",
         goal: "Project hero reveal",
