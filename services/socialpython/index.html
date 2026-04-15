@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Briefly Social Prompt Lab</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand-card">
+          <div class="eyebrow">Local Prompt Lab</div>
+          <h1>Briefly Social</h1>
+          <p>Notebook-style V2 compiler playground. No image generation. Every message compiles prompts and exposes context tools plus skill loading.</p>
+        </div>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Context</h2>
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span>Brand</span>
+              <select id="brand-select" disabled></select>
+            </label>
+            <label class="field">
+              <span>Post type</span>
+              <select id="post-type-select"></select>
+            </label>
+            <label class="field" id="project-field">
+              <span>Project</span>
+              <select id="project-select"></select>
+            </label>
+            <label class="field hidden" id="festival-field">
+              <span>Festival</span>
+              <select id="festival-select"></select>
+            </label>
+            <label class="field">
+              <span>Channel</span>
+              <select id="channel-select"></select>
+            </label>
+            <label class="field">
+              <span>Format</span>
+              <select id="format-select"></select>
+            </label>
+            <label class="field">
+              <span>Variations</span>
+              <input id="variation-count-input" type="number" min="1" max="6" value="3" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Controls</h2>
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span>Goal</span>
+              <input id="goal-input" type="text" />
+            </label>
+            <label class="field">
+              <span>Exact text</span>
+              <input id="exact-text-input" type="text" placeholder="Optional exact on-image text" />
+            </label>
+            <label class="field">
+              <span>Audience</span>
+              <input id="audience-input" type="text" placeholder="Optional audience framing" />
+            </label>
+            <label class="field">
+              <span>Offer / CTA</span>
+              <input id="offer-input" type="text" placeholder="Optional CTA or offer" />
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <label class="toggle">
+              <input id="brand-logo-toggle" type="checkbox" />
+              <span>Use brand logo</span>
+            </label>
+            <label class="toggle">
+              <input id="rera-toggle" type="checkbox" />
+              <span>Use RERA QR</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Starter</h2>
+          </div>
+          <div id="starter-prompt" class="starter"></div>
+          <button id="use-starter-button" class="ghost-button">Use starter prompt</button>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Runtime</h2>
+          </div>
+          <div id="runtime-status" class="runtime-status"></div>
+        </section>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <div class="eyebrow">Prompt Iteration</div>
+            <h2>Chat with the prompt compiler</h2>
+            <p>Use the current controls, send a brief, and inspect summary, seed prompt, final prompt, tool calls, and loaded prompt skills.</p>
+          </div>
+          <div class="status-stack">
+            <div id="health-pill" class="pill">Loading…</div>
+            <button id="clear-chat-button" class="ghost-button">Clear chat</button>
+          </div>
+        </header>
+
+        <section id="chat-log" class="chat-log"></section>
+
+        <form id="composer" class="composer">
+          <label class="composer-field">
+            <span>Message</span>
+            <textarea
+              id="message-input"
+              rows="4"
+              placeholder="Describe the creative direction you want. Example: Create a premium launch post with a warm sunset hero tower image and restrained editorial typography."
+            ></textarea>
+          </label>
+          <div class="composer-actions">
+            <div class="hint">Each message generates a fresh prompt package from the current controls.</div>
+            <button id="send-button" class="primary-button" type="submit">Generate prompts</button>
+          </div>
+        </form>
+      </main>
+    </div>
+
+    <template id="user-message-template">
+      <article class="message message-user">
+        <div class="message-meta"></div>
+        <div class="bubble"></div>
+      </article>
+    </template>
+
+    <template id="assistant-message-template">
+      <article class="message message-assistant">
+        <div class="message-meta"></div>
+        <div class="assistant-card">
+          <div class="assistant-header">
+            <div>
+              <div class="assistant-title"></div>
+              <div class="assistant-subtitle"></div>
+            </div>
+            <div class="metrics"></div>
+          </div>
+          <div class="prompt-grid">
+            <section class="prompt-card">
+              <div class="prompt-card-header">
+                <h3>Summary</h3>
+                <button class="copy-button" data-copy="summary" type="button">Copy</button>
+              </div>
+              <pre class="prompt-output prompt-summary"></pre>
+            </section>
+            <section class="prompt-card">
+              <div class="prompt-card-header">
+                <h3>Seed prompt</h3>
+                <button class="copy-button" data-copy="seed" type="button">Copy</button>
+              </div>
+              <pre class="prompt-output prompt-seed"></pre>
+            </section>
+            <section class="prompt-card">
+              <div class="prompt-card-header">
+                <h3>Final prompt</h3>
+                <button class="copy-button" data-copy="final" type="button">Copy</button>
+              </div>
+              <pre class="prompt-output prompt-final"></pre>
+            </section>
+            <section class="prompt-card prompt-variations-card">
+              <div class="prompt-card-header">
+                <h3>Variations</h3>
+              </div>
+              <div class="prompt-variations"></div>
+            </section>
+            <section class="prompt-card trace-card">
+              <div class="prompt-card-header">
+                <h3>Agno trace</h3>
+              </div>
+              <div class="trace-metrics"></div>
+              <div class="trace-status"></div>
+              <div class="trace-events"></div>
+            </section>
+          </div>
+        </div>
+      </article>
+    </template>
+
+    <template id="loading-template">
+      <article class="message message-assistant loading-message">
+        <div class="message-meta">Compiling prompt package…</div>
+        <div class="loading-card">
+          <div class="loading-bar"></div>
+          <div class="loading-grid">
+            <div class="loading-block"></div>
+            <div class="loading-block tall"></div>
+            <div class="loading-block tall"></div>
+          </div>
+        </div>
+      </article>
+    </template>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+  </html>

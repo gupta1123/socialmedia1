@@ -1,0 +1,426 @@
+{
+  "brand": {
+    "id": "e9afb6df-b957-4d94-b48f-447cb67140b0",
+    "name": "Krisala Developers",
+    "profile": {
+      "voice": {
+        "summary": "Premium, contemporary, and quietly confident. Speaks with polish without sounding inflated.",
+        "adjectives": ["premium", "credible", "contemporary", "refined"],
+        "bannedPhrases": ["guaranteed returns", "assured appreciation", "cheap deal", "flash sale"],
+        "approvedVocabulary": ["design-led", "premium", "connected", "elevated", "refined", "credible"]
+      },
+      "doRules": [
+        "Ground visuals in real project truth",
+        "Keep compositions premium, calm, and uncluttered",
+        "Use the brand name as text rather than a generated logo",
+        "Let architecture, amenities, or one festive cue lead each post"
+      ],
+      "palette": {
+        "accent": "#c58a43",
+        "primary": "#27211d",
+        "neutrals": ["#d5c6b7", "#a79687", "#faf5ef"],
+        "secondary": "#f3ebe1"
+      },
+      "identity": {
+        "promise": "Make aspirational homebuying communication feel premium, grounded, and credible.",
+        "positioning": "Design-led Pune and PCMC developer building premium residential communities in growth corridors.",
+        "audienceSummary": "Urban homebuyers, upgraders, and investors evaluating premium Pune addresses and modern community living."
+      },
+      "dontRules": [
+        "Do not use pushy discount-led copy",
+        "Do not make layouts feel cheap or crowded",
+        "Do not invent returns or exaggerated commercial claims",
+        "Do not generate random logo marks or house icons"
+      ],
+      "compliance": {
+        "bannedClaims": ["guaranteed returns", "assured appreciation", "risk-free investment"],
+        "reviewChecks": [
+          "Verify all project facts against approved source data",
+          "Keep tone premium and non-pushy",
+          "Preserve clean safe zones for brand and CTA"
+        ]
+      },
+      "visualSystem": {
+        "textDensity": "balanced",
+        "realismLevel": "elevated_real",
+        "imageTreatment": ["Warm natural light", "Premium realism", "Crisp but not overprocessed contrast"],
+        "typographyMood": "Contemporary editorial hierarchy with premium serif-sans restraint.",
+        "compositionPrinciples": [
+          "Let architecture or one visual anchor carry the frame",
+          "Keep copy blocks disciplined and breathable",
+          "Avoid brochure clutter and leave clean footer space"
+        ]
+      },
+      "bannedPatterns": ["cheap brochure clutter", "neon gradients", "generic SaaS aesthetics", "cartoonish iconography"],
+      "referenceCanon": {
+        "usageNotes": [
+          "Prefer real project imagery before generic architecture",
+          "Use light, materiality, and clean layout to communicate premium value"
+        ],
+        "antiReferenceNotes": [
+          "Avoid clutter-heavy low-trust brochures",
+          "Avoid loud festive kitsch or gimmicky real estate ads"
+        ]
+      },
+      "styleDescriptors": ["architectural", "urban", "premium", "warm", "crafted"],
+      "referenceAssetIds": ["f81a56bf-81d2-42c1-b9ba-6491cb6992b9"]
+    }
+  },
+  "projects": [
+    {
+      "id": "faf46010-d038-4a2d-bd6d-3e944e7eab0f",
+      "name": "Zoy+",
+      "profile": {
+        "faqs": [
+          {
+            "answer": "Beside Pall Corporation on Hinjawadi Phase 1 Road, Rajiv Gandhi Info-tech Park, Pune 411057.",
+            "question": "Where is Zoy+ located?"
+          },
+          {
+            "answer": "Zoy+ offers 2 and 3 bed residences.",
+            "question": "What unit types are available?"
+          },
+          {
+            "answer": "Yes. RERA No: PR1260002500133.",
+            "question": "Is the project RERA registered?"
+          },
+          {
+            "answer": "The project is about 5 minutes from the upcoming Hinjawadi Metro Station on Line 3.",
+            "question": "What is the strongest connectivity fact?"
+          }
+        ],
+        "tagline": "Experience a Plus Side Of Life",
+        "amenities": [
+          "Temple",
+          "Multipurpose Court",
+          "Box Cricket",
+          "41 Pick-Up & Drop Zone",
+          "Grand Entrance Lobby",
+          "Digital door lock",
+          "Automation / Smart Features",
+          "3-tier security system with video door phone",
+          "DG backups for lifts and common areas",
+          "Rainwater harvesting",
+          "Sewage treatment plant",
+          "Solar system",
+          "Garbage chute"
+        ],
+        "legalNotes": [
+          "Verify current pricing and inventory before using commercial copy",
+          "Use RERA number PR1260002500133 where regulated communication requires it"
+        ],
+        "reraNumber": "PR1260002500133",
+        "sizeRanges": ["Approx. 735 to 1195 sq ft (verify final sanctioned carpet areas)"],
+        "totalUnits": "",
+        "floorsCount": "G + 6P + 30 floors",
+        "positioning": "Premium Hinjawadi Phase 1 address for ambitious residents who want cosmopolitan energy, connected urban convenience, and refined design.",
+        "pricingBand": "premium",
+        "towersCount": "2 towers",
+        "travelTimes": [
+          "5 minutes from the upcoming Hinjawadi Metro Station on Line 3",
+          "Minutes away from Wakad, Baner, and PCMC"
+        ],
+        "bannedClaims": ["Guaranteed returns", "Assured appreciation", "Immediate possession"],
+        "endUserAngle": "Built for buyers seeking work-life balance, urban convenience, and a contemporary residential community in Hinjawadi.",
+        "latestUpdate": "Residential launch now open in Hinjawadi Phase 1.",
+        "parkingFacts": "",
+        "bookingAmount": "",
+        "currentOffers": [],
+        "heroAmenities": [
+          "Grand Entrance Lobby",
+          "Multipurpose Court",
+          "Box Cricket",
+          "3-tier security system with video door phone"
+        ],
+        "investorAngle": "Metro-led connectivity and IT-corridor demand support the project's growth-corridor narrative.",
+        "keyObjections": [
+          "Peak-hour traffic around Hinjawadi",
+          "Need clarity on current pricing and possession timeline"
+        ],
+        "offerValidity": "",
+        "startingPrice": "Starts from ₹85 lakh onwards (verify current inventory)",
+        "approvedClaims": [
+          "Premium address in Hinjawadi Phase 1",
+          "5 minutes from the upcoming Hinjawadi Metro Station on Line 3",
+          "2 & 3 bed residences by Krisala Developers",
+          "Designed for work-life balance and cosmopolitan living"
+        ],
+        "configurations": ["2 Bed Residences", "3 Bed Residences"],
+        "lifestyleAngle": "Work-life balance with urban convenience, youthful energy, and a cosmopolitan lifestyle in Pune's IT corridor.",
+        "nearbyLandmarks": [
+          "Pall Corporation",
+          "Rajiv Gandhi Info-tech Park",
+          "Phoenix Mall of the Millennium",
+          "Grand High Street",
+          "Radisson Blu",
+          "Hilton Garden Inn"
+        ],
+        "approvalsSummary": "RERA registered: PR1260002500133.",
+        "audienceSegments": ["Young professionals", "Upgraders", "Investors"],
+        "completionWindow": "",
+        "credibilityFacts": [
+          "By Krisala Developers, a Pune and PCMC residential developer",
+          "Project address beside Pall Corporation on Hinjawadi Phase 1 Road"
+        ],
+        "milestoneHistory": ["Krisala's inaugural residential launch in Hinjawadi Phase 1"],
+        "possessionStatus": "Launch phase",
+        "specialUnitTypes": [],
+        "financingPartners": [],
+        "connectivityPoints": [
+          "Upcoming Hinjawadi Metro Station on Line 3",
+          "Mumbai-Pune Expressway",
+          "Pune-Bengaluru Highway",
+          "Proposed Ring Road",
+          "Access route toward Navi Mumbai Airport via new road"
+        ],
+        "constructionStatus": "Launch phase",
+        "locationAdvantages": [
+          "Located in Hinjawadi Phase 1 near major educational and IT hubs",
+          "Built for a glocal, cosmopolitan lifestyle",
+          "Strong infrastructure story through metro and ring-road proximity"
+        ],
+        "paymentPlanSummary": "",
+        "priceRangeByConfig": [],
+        "sampleFlatImageIds": [],
+        "actualProjectImageIds": ["f81a56bf-81d2-42c1-b9ba-6491cb6992b9"]
+      }
+    },
+    {
+      "id": "2dcf6127-5f02-46dd-bb11-c5fe13f16e11",
+      "name": "Aventis",
+      "profile": {
+        "faqs": [
+          {
+            "answer": "Aventis is in Tathawade, beside Shakai on the Mumbai-Pune-Bangalore Highway.",
+            "question": "Where is Aventis located?"
+          },
+          {
+            "answer": "Aventis offers 2.25 and 3.25 BHK homes.",
+            "question": "What unit types are available?"
+          },
+          {
+            "answer": "Yes. RERA No: P52100080336.",
+            "question": "Is the project RERA registered?"
+          }
+        ],
+        "tagline": "BigHeartLiving",
+        "amenities": [
+          "Indoor gym",
+          "Zumba / aerobics area",
+          "Meditation pods",
+          "Lounge area",
+          "Library",
+          "Creche",
+          "Swimming pool at the clubhouse terrace",
+          "Party lawn",
+          "Garden trail",
+          "Jogging track",
+          "Futsal court",
+          "Gazebo seating"
+        ],
+        "legalNotes": [
+          "Use RERA number P52100080336 where required",
+          "Verify any pricing, availability, and offers before publishing"
+        ],
+        "reraNumber": "P52100080336",
+        "sizeRanges": [],
+        "totalUnits": "",
+        "floorsCount": "",
+        "positioning": "Premium Tathawade homes that combine spacious layouts, smart living features, and strong West Pune connectivity.",
+        "pricingBand": "premium",
+        "towersCount": "",
+        "travelTimes": [],
+        "bannedClaims": ["Guaranteed returns", "Assured appreciation", "Immediate possession"],
+        "endUserAngle": "Spacious layouts and community amenities suit families and urban upgraders seeking a better everyday living setup.",
+        "latestUpdate": "Official project page highlights spacious layouts, smart features, and connectivity-led living.",
+        "parkingFacts": "Reserved parking for every home.",
+        "bookingAmount": "",
+        "currentOffers": [],
+        "heroAmenities": ["Swimming pool at the clubhouse terrace", "Party lawn", "Garden trail", "Futsal court"],
+        "investorAngle": "Tathawade's West Pune connectivity story supports long-term buyer and investor interest.",
+        "keyObjections": [],
+        "offerValidity": "",
+        "startingPrice": "",
+        "approvedClaims": [
+          "2.25 & 3.25 BHK homes in Tathawade",
+          "RERA registered project",
+          "Smart home features and community amenities",
+          "Close to Hinjawadi, Baner, Wakad, and the Mumbai-Pune Expressway"
+        ],
+        "configurations": ["2.25 BHK Homes", "3.25 BHK Homes"],
+        "lifestyleAngle": "Designed for buyers who want roomier homes, community amenities, and quick access to Pune's western growth corridor.",
+        "nearbyLandmarks": ["Hinjawadi", "Baner", "Wakad"],
+        "approvalsSummary": "RERA registered: P52100080336.",
+        "audienceSegments": ["Upgraders", "Young families", "Working professionals"],
+        "completionWindow": "",
+        "credibilityFacts": [
+          "Residential project by Krisala Developers",
+          "Project address beside Shakai on the Mumbai-Pune-Bangalore Highway in Tathawade"
+        ],
+        "milestoneHistory": [],
+        "possessionStatus": "Current sales phase",
+        "specialUnitTypes": [],
+        "financingPartners": [],
+        "connectivityPoints": [
+          "Mumbai-Pune Expressway",
+          "Mumbai-Pune-Bangalore Highway",
+          "West Pune growth corridor"
+        ],
+        "constructionStatus": "Active residential project in Tathawade",
+        "locationAdvantages": [
+          "Located in Tathawade, one of West Pune's sought-after neighbourhoods",
+          "Connects well to Hinjawadi, Baner, Wakad, and the expressway"
+        ],
+        "paymentPlanSummary": "",
+        "priceRangeByConfig": [],
+        "sampleFlatImageIds": [],
+        "actualProjectImageIds": ["e4b52db7-5d86-4dbf-b046-34ccdef9c174"]
+      }
+    }
+  ],
+  "postTypes": [
+    {
+      "id": "e3449bca-019c-4617-9cc9-1100f3ccce67",
+      "code": "project-launch",
+      "name": "Project launch",
+      "config": {
+        "ctaStyle": "site-visit",
+        "copyDensity": "balanced",
+        "allowedFormats": ["square", "portrait", "landscape"],
+        "defaultChannels": ["instagram-feed", "linkedin-feed"],
+        "safeZoneGuidance": ["Reserve top and lower thirds for name and CTA"],
+        "requiredBriefFields": ["goal", "prompt"],
+        "recommendedTemplateTypes": ["hero", "announcement"]
+      },
+      "defaultGoal": "Project launch hero",
+      "defaultExactText": "",
+      "starterPrompt": "Create a premium launch post with a strong hero tower image, elevated editorial hierarchy, and a design-led premium feel."
+    },
+    {
+      "id": "50db8f49-c735-4a91-83d0-f0ef96644a7d",
+      "code": "site-visit-invite",
+      "name": "Site visit invite",
+      "config": {
+        "ctaStyle": "site-visit",
+        "copyDensity": "balanced",
+        "allowedFormats": ["square", "portrait", "story"],
+        "defaultChannels": ["instagram-feed", "instagram-story", "ad-creative"],
+        "safeZoneGuidance": ["Keep CTA and contact area unobstructed"],
+        "requiredBriefFields": ["goal", "offer", "exactText"],
+        "recommendedTemplateTypes": ["offer", "announcement"]
+      },
+      "defaultGoal": "Weekend site visit invite",
+      "defaultExactText": "Visit this weekend",
+      "starterPrompt": "Invite buyers to visit the site this weekend with a warm building view, premium hospitality cues, and one clear CTA."
+    },
+    {
+      "id": "41044bda-763f-4874-ac93-1dcacfd8865b",
+      "code": "amenity-spotlight",
+      "name": "Amenity spotlight",
+      "config": {
+        "ctaStyle": "soft-enquiry",
+        "copyDensity": "minimal",
+        "allowedFormats": ["square", "portrait", "story"],
+        "defaultChannels": ["instagram-feed", "instagram-story"],
+        "safeZoneGuidance": ["Keep amenity title and CTA readable without blocking architecture"],
+        "requiredBriefFields": ["goal", "prompt"],
+        "recommendedTemplateTypes": ["product-focus", "hero"]
+      },
+      "defaultGoal": "Amenity spotlight",
+      "defaultExactText": "",
+      "starterPrompt": "Create a premium one-amenity spotlight with a calm hospitality feel, elegant lighting, and strong aspirational lifestyle energy."
+    },
+    {
+      "id": "b435addb-b329-40f0-8d6e-11e536374eda",
+      "code": "construction-update",
+      "name": "Construction update",
+      "config": {
+        "ctaStyle": "trust-building",
+        "copyDensity": "balanced",
+        "allowedFormats": ["square", "landscape"],
+        "defaultChannels": ["instagram-feed", "linkedin-feed"],
+        "safeZoneGuidance": ["Keep progress headline and date visible"],
+        "requiredBriefFields": ["goal", "prompt"],
+        "recommendedTemplateTypes": ["announcement", "hero"]
+      },
+      "defaultGoal": "Progress update",
+      "defaultExactText": "",
+      "starterPrompt": "Show real visible progress with a premium trustworthy tone, clean metrics, and late-afternoon construction light."
+    },
+    {
+      "id": "9336e31d-f00e-4ea3-af3a-d9da06016222",
+      "code": "festive-greeting",
+      "name": "Festive greeting",
+      "config": {
+        "ctaStyle": "soft-brand",
+        "copyDensity": "minimal",
+        "allowedFormats": ["square", "story"],
+        "defaultChannels": ["instagram-feed", "instagram-story"],
+        "safeZoneGuidance": ["Maintain celebratory hierarchy with clear logo lockup"],
+        "requiredBriefFields": ["goal", "exactText"],
+        "recommendedTemplateTypes": ["quote", "hero"]
+      },
+      "defaultGoal": "Festive greeting",
+      "defaultExactText": "Warm wishes",
+      "starterPrompt": "Create a warm premium festive greeting with refined symbolism, generous negative space, and restrained elegance."
+    }
+  ],
+  "festivals": [
+    {
+      "id": "7a8682a3-4742-45ec-8a33-364afc475627",
+      "code": "diwali",
+      "name": "Diwali / Deepavali",
+      "category": "religious",
+      "community": "Hindu",
+      "regions": ["india"],
+      "meaning": "The festival of lights symbolizing hope, renewal, prosperity, and the victory of light over darkness.",
+      "dateLabel": "8 Nov 2026",
+      "nextOccursOn": "2026-11-08"
+    },
+    {
+      "id": "7825fca4-5849-4950-994a-21d088278128",
+      "code": "holi",
+      "name": "Holi",
+      "category": "religious",
+      "community": "Hindu",
+      "regions": ["india"],
+      "meaning": "The festival of colors celebrating spring, joy, togetherness, and the victory of good over evil.",
+      "dateLabel": "4 Mar 2026",
+      "nextOccursOn": "2026-03-04"
+    },
+    {
+      "id": "f3b4af92-d583-4582-bdd3-9e844dc9fc94",
+      "code": "maha-shivaratri",
+      "name": "Maha Shivaratri",
+      "category": "religious",
+      "community": "Hindu",
+      "regions": ["india"],
+      "meaning": "Honors Lord Shiva and is associated with devotion, stillness, discipline, and spiritual reflection.",
+      "dateLabel": "15 Feb 2026",
+      "nextOccursOn": "2026-02-15"
+    },
+    {
+      "id": "8d5c0672-9499-4dba-b55d-8b1ff801ef26",
+      "code": "ugadi",
+      "name": "Ugadi",
+      "category": "cultural",
+      "community": "Hindu",
+      "regions": ["karnataka", "andhra-pradesh", "telangana"],
+      "meaning": "The Deccan New Year, celebrating fresh starts, reflection, and hope for the year ahead.",
+      "dateLabel": "19 Mar 2026",
+      "nextOccursOn": "2026-03-19"
+    }
+  ],
+  "channels": [
+    { "value": "instagram-feed", "label": "Instagram feed" },
+    { "value": "instagram-story", "label": "Instagram story" },
+    { "value": "linkedin-feed", "label": "LinkedIn feed" },
+    { "value": "ad-creative", "label": "Ad creative" }
+  ],
+  "formats": [
+    { "value": "square", "label": "Square" },
+    { "value": "portrait", "label": "Portrait" },
+    { "value": "landscape", "label": "Landscape" },
+    { "value": "story", "label": "Story" }
+  ]
+}
