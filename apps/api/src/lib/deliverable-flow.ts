@@ -181,6 +181,8 @@ export async function compileDeliverablePromptPackage(params: {
 
   const creativeRequestId = randomId();
   const promptPackageId = randomId();
+  const compiledVariations =
+    "variations" in compiled && Array.isArray(compiled.variations) ? compiled.variations : [];
 
   await supabaseAdmin.from("creative_requests").insert({
     id: creativeRequestId,
@@ -219,6 +221,7 @@ export async function compileDeliverablePromptPackage(params: {
     template_type: compiled.templateType ?? null,
     reference_strategy: compiled.referenceStrategy,
     reference_asset_ids: inferredReferenceAssetIds,
+    variations: compiledVariations,
     resolved_constraints: {
       ...compiled.resolvedConstraints,
       projectImageAssetIds: projectProfileVersion?.profile.actualProjectImageIds ?? [],

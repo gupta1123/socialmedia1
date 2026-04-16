@@ -871,7 +871,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
     const { data: persistedPromptPackage, error: persistedPromptPackageError } = await supabaseAdmin
       .from("prompt_packages")
-      .select("deliverable_id")
+      .select("deliverable_id, variations, compiler_trace")
       .eq("id", promptPackage.id)
       .maybeSingle();
     if (persistedPromptPackageError) {
@@ -879,6 +879,12 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     }
     const persistedDeliverableId =
       typeof persistedPromptPackage?.deliverable_id === "string" ? persistedPromptPackage.deliverable_id : null;
+    const persistedVariations =
+      Array.isArray(persistedPromptPackage?.variations)
+        ? persistedPromptPackage.variations
+        : Array.isArray(persistedPromptPackage?.compiler_trace?.variations)
+          ? persistedPromptPackage.compiler_trace.variations
+          : [];
 
     let deliverable;
     try {
@@ -909,6 +915,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
     promptPackage = {
       ...promptPackage,
+      variations: promptPackage.variations.length > 0 ? promptPackage.variations : persistedVariations,
       deliverableId: deliverable.id
     };
 
@@ -952,6 +959,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         template_type: promptPackage.templateType ?? null,
         reference_strategy: promptPackage.referenceStrategy,
         reference_asset_ids: promptPackage.referenceAssetIds,
+        variations,
         resolved_constraints: promptPackage.resolvedConstraints,
         compiler_trace: {
           ...promptPackage.compilerTrace,

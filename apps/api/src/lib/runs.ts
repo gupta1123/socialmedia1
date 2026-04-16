@@ -30,6 +30,7 @@ type PromptPackageRow = {
   template_type: PromptPackage["templateType"] | null;
   reference_strategy: PromptPackage["referenceStrategy"];
   reference_asset_ids: string[];
+  variations: PromptPackage["variations"] | null;
   resolved_constraints: Record<string, unknown>;
   compiler_trace: Record<string, unknown> | null;
   created_at: string;
@@ -211,7 +212,7 @@ async function listPromptPackagesByWorkspace(workspaceId: string) {
   const { data, error } = await supabaseAdmin
     .from("prompt_packages")
     .select(
-      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, creative_request_id, brand_profile_version_id, prompt_summary, seed_prompt, final_prompt, aspect_ratio, chosen_model, template_type, reference_strategy, reference_asset_ids, resolved_constraints, compiler_trace, created_at"
+      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, creative_request_id, brand_profile_version_id, prompt_summary, seed_prompt, final_prompt, aspect_ratio, chosen_model, template_type, reference_strategy, reference_asset_ids, variations, resolved_constraints, compiler_trace, created_at"
     )
     .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false })
@@ -228,7 +229,7 @@ async function getPromptPackageRow(runId: string) {
   const { data, error } = await supabaseAdmin
     .from("prompt_packages")
     .select(
-      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, creative_request_id, brand_profile_version_id, prompt_summary, seed_prompt, final_prompt, aspect_ratio, chosen_model, template_type, reference_strategy, reference_asset_ids, resolved_constraints, compiler_trace, created_at"
+      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, creative_request_id, brand_profile_version_id, prompt_summary, seed_prompt, final_prompt, aspect_ratio, chosen_model, template_type, reference_strategy, reference_asset_ids, variations, resolved_constraints, compiler_trace, created_at"
     )
     .eq("id", runId)
     .maybeSingle();
@@ -352,7 +353,11 @@ async function listTemplatesByOutputIds(outputIds: string[]) {
 
 function mapPromptPackageRow(row: PromptPackageRow): PromptPackage {
   const compilerTrace = row.compiler_trace ?? {};
-  const variations = Array.isArray(compilerTrace.variations) ? compilerTrace.variations : [];
+  const variations = Array.isArray(row.variations)
+    ? row.variations
+    : Array.isArray(compilerTrace.variations)
+      ? compilerTrace.variations
+      : [];
 
   return {
     id: row.id,

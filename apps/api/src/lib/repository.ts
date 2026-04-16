@@ -513,6 +513,7 @@ export async function getPromptPackage(promptPackageId: string): Promise<PromptP
         template_type: PromptPackage["templateType"];
         reference_strategy: PromptPackage["referenceStrategy"];
         reference_asset_ids: string[];
+        variations: PromptPackage["variations"] | null;
         resolved_constraints: Record<string, unknown>;
         compiler_trace: Record<string, unknown> | null;
       }
@@ -527,7 +528,11 @@ export async function getPromptPackage(promptPackageId: string): Promise<PromptP
   }
 
   const compilerTrace = row.compiler_trace ?? {};
-  const variations = Array.isArray(compilerTrace.variations) ? compilerTrace.variations : [];
+  const variations = Array.isArray(row.variations)
+    ? row.variations
+    : Array.isArray(compilerTrace.variations)
+      ? compilerTrace.variations
+      : [];
 
   return {
     id: row.id,

@@ -409,6 +409,7 @@ export async function registerDeliverableRoutes(app: FastifyInstance) {
       template_type: null,
       reference_strategy: "uploaded-references",
       reference_asset_ids: [],
+      variations: [],
       resolved_constraints: sourceJson,
       compiler_trace: {
         pipeline: "external-upload",
