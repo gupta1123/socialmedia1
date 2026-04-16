@@ -319,9 +319,11 @@ def normalize_external_truth_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
         "postTypeContract": _normalize_post_type(
             external.get("postType"), external.get("postTypeGuidance")
         ),
-        "candidateAssets": external.get("assets") or [],
+        "candidateAssets": _normalize_external_assets(
+            external.get("assets") or [], external.get("project")
+        ),
         "generationContract": {
-            "aspectRatio": external.get("format"),
+            "aspectRatio": _derive_aspect_ratio_from_external(external),
             "variationCount": external.get("variationCount"),
         },
     }
@@ -332,6 +334,79 @@ def normalize_external_truth_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
     if external.get("inferredReference"):
         normalized["inferredReference"] = external.get("inferredReference")
 
+    return normalized
+
+
+def _derive_aspect_ratio_from_external(external: dict[str, Any]) -> str:
+    """Derive aspect ratio from external format, preferring postTypeGuidance.aspectRatio if available."""
+    post_type_guidance = external.get("postTypeGuidance") or {}
+    if post_type_guidance.get("aspectRatio"):
+        return post_type_guidance["aspectRatio"]
+    fmt = external.get("format")
+    mapping = {
+        "square": "1:1",
+        "portrait": "4:5",
+        "landscape": "16:9",
+        "story": "9:16",
+        "cover": "16:9",
+    }
+    return mapping.get((fmt or "").strip().lower(), "1:1")
+
+
+def _normalize_external_assets(assets: list[Any], project: Any) -> list[dict[str, Any]]:
+    """Normalize external assets to internal format with proper subjectType."""
+    project_id = project.get("id") if isinstance(project, dict) else None
+    normalized = []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        kind = asset.get("kind", "")
+        metadata_json = asset.get("metadataJson") or {}
+        subject_type = metadata_json.get("subjectType")
+        if not subject_type:
+            if kind == "product":
+                subject_type = "project_exterior"
+            elif kind == "reference":
+                subject_type = "generic_reference"
+            else:
+                subject_type = "generic_reference"
+        normalized.append(
+            {
+                "id": asset.get("id"),
+                "brandId": asset.get("brandId"),
+                "projectId": asset.get("projectId"),
+                "kind": kind,
+                "label": asset.get("label"),
+                "fileName": asset.get("fileName"),
+                "storagePath": asset.get("storagePath"),
+                "mimeType": asset.get("mimeType"),
+                "metadataJson": metadata_json,
+                "normalizedMetadata": {
+                    "subjectType": subject_type,
+                    "viewType": metadata_json.get("viewType", "wide"),
+                    "amenityName": metadata_json.get("amenityName"),
+                    "projectStageHint": metadata_json.get("projectStageHint"),
+                    "usageIntent": metadata_json.get("usageIntent", "supporting_ref"),
+                    "preserveIdentity": bool(
+                        metadata_json.get("preserveIdentity", False)
+                    ),
+                    "textSafeHints": metadata_json.get("textSafeHints", []),
+                    "qualityTier": metadata_json.get("qualityTier", "usable"),
+                    "tags": metadata_json.get("tags", []),
+                },
+                "eligibility": {
+                    "isProjectScoped": bool(
+                        project_id and asset.get("projectId") == project_id
+                    ),
+                    "isTemplateLinked": False,
+                    "isSelectedReference": False,
+                    "isExactLogo": kind == "logo",
+                    "isExactReraQr": kind == "rera_qr",
+                    "isProjectTruthAnchor": kind == "product"
+                    and asset.get("projectId") == project_id,
+                },
+            }
+        )
     return normalized
 
 
