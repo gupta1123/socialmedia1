@@ -44,6 +44,7 @@ Use this skill after planning.
 - Instead describe what the IMAGE LOOKS LIKE: what is shown in the scene, how it is lit, what mood it conveys
 - Think: "What would a photographer or director capture?" not "What should a designer create?"
 - FESTIVE GREETING EXCEPTION: For `festival-post-playbook`, you may use poster-archetype language such as invitation-card composition, central icon poster, framed poster, greeting plaque, airy header space, or contained devotional graphic, because that route is intentionally poster-first rather than photography-first. Even then, keep the prompt concise and visual, not like designer instructions.
+- FESTIVE GREETING EXCEPTION: Unless the brief explicitly asks for photography, do not use shot-language such as studio quality, shallow depth of field, top-down shot, wide-angle interior, prop styling, or cinematic still-life phrasing.
 
 ## Prompt Writing Pattern
 For the final prompt, write as if describing a photograph/artwork to someone who cannot see it:

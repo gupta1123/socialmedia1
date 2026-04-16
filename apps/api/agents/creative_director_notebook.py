@@ -309,7 +309,8 @@ def build_playbook_override(payload: dict[str, Any]) -> str:
         "- Brand colors and typography may influence taste and finish, but they must not turn the image into a luxury interior scene or a branded still life.\n"
         "- Do not default to serene architectural interiors, marble ledges, lifestyle photography, or building-led visuals unless the brief explicitly asks for that.\n"
         "- Prefer poster containment, symbolic composition, breathing room, curated multi-color festive palettes, and restrained ornament.\n"
-        "- Apply these constraints to every variation. Do not use still-life or interior variants as alternate routes unless the brief explicitly requests them.\n\n"
+        "- Apply these constraints to every variation. Do not use still-life or interior variants as alternate routes unless the brief explicitly requests them.\n"
+        "- Avoid photographic shot-language such as studio-quality photo, shallow depth of field, top-down shot, wide-angle interior, prop styling, or warm natural-light still life unless the brief explicitly requests photography.\n\n"
     )
 
 

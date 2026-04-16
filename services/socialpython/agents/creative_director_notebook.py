@@ -199,6 +199,7 @@ FESTIVAL OVERRIDE (MANDATORY when postTypeContract.playbookKey == "festival-post
 - It is acceptable to describe festive poster containment for this route: invitation-card framing, central icon poster, lower greeting plaque, framed poster, airy header space, balanced decorative density.
 - Avoid project ads, amenity scenes, architectural hero shots, photoreal festive ads, and branded still-life photography unless the brief explicitly asks for that route.
 - These rules apply to EVERY variation, not only the primary route. Do not use interior still-life, architectural vignette, or lifestyle-photography alternatives as variation routes unless the brief explicitly asks for them.
+- Do not use photographic shot-language such as "studio quality", "shallow depth of field", "top-down shot", "wide-angle interior", or prop-styling language unless the brief explicitly asks for photography.
 """.strip()
 
 SKILL_WORKFLOW_INSTRUCTION = """
@@ -323,8 +324,9 @@ def build_playbook_override(payload: dict[str, Any]) -> str:
         "- Use one clear festival hero idea, one poster archetype, one illustration family, and controlled decorative density.\n"
         "- Brand colors and typography may influence taste and finish, but they must not turn the image into a luxury interior scene or a branded still life.\n"
         "- Do not default to serene architectural interiors, marble ledges, lifestyle photography, or building-led visuals unless the brief explicitly asks for that.\n"
-        "- Prefer poster containment, symbolic composition, breathing room, curated multi-color festive palettes, and restrained ornament.\n\n"
-        "- Apply these constraints to every variation. Do not use still-life or interior variants as alternate routes unless the brief explicitly requests them.\n\n"
+        "- Prefer poster containment, symbolic composition, breathing room, curated multi-color festive palettes, and restrained ornament.\n"
+        "- Apply these constraints to every variation. Do not use still-life or interior variants as alternate routes unless the brief explicitly requests them.\n"
+        "- Avoid photographic shot-language such as studio-quality photo, shallow depth of field, top-down shot, wide-angle interior, prop styling, or warm natural-light still life unless the brief explicitly requests photography.\n\n"
     )
 
 
