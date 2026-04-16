@@ -1193,30 +1193,36 @@ def parse_prompt_package(raw: Any) -> dict[str, Any]:
 
 def execute(payload: dict[str, Any]) -> dict[str, Any]:
     brief_analyst, prompt_crafter = build_agents()
-    token = CURRENT_PAYLOAD.set(payload)
+    raw_payload = payload
+    token = CURRENT_PAYLOAD.set(raw_payload)
     try:
-        analyst_run = brief_analyst.run(build_request_summary(payload))
+        raw_bundle = raw_payload.get("truthBundle") or {}
+        normalized_bundle = normalize_external_truth_bundle(raw_bundle)
+        normalized_payload = {**raw_payload, "truthBundle": normalized_bundle}
+        CURRENT_PAYLOAD.set(normalized_payload)
+
+        analyst_run = brief_analyst.run(build_request_summary(normalized_payload))
         analyst_output = (
             analyst_run.content
             if isinstance(analyst_run.content, str)
             else str(analyst_run.content)
         )
-        skill_names, skill_packet = build_skill_packet(payload)
+        skill_names, skill_packet = build_skill_packet(normalized_payload)
 
         crafter_input = (
             "Using the analyzed brief and preloaded skills below, return the final prompt package JSON.\n"
-            f"Create exactly {resolve_variation_count(payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
+            f"Create exactly {resolve_variation_count(normalized_payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
             "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n\n"
             "## Loaded Skills\n"
             f"{skill_packet}\n\n"
             "## Request Truth Context\n"
-            f"{build_crafter_context(payload)}\n\n"
+            f"{build_crafter_context(normalized_payload)}\n\n"
             "## Analyzed Brief\n"
             f"{analyst_output}\n"
         )
         crafter_run = prompt_crafter.run(crafter_input)
         parsed = parse_prompt_package(crafter_run.content)
-        return normalize_prompt_package(parsed, payload, analyst_output)
+        return normalize_prompt_package(parsed, normalized_payload, analyst_output)
     finally:
         CURRENT_PAYLOAD.reset(token)
 
@@ -1225,32 +1231,40 @@ def execute_with_trace(
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     brief_analyst, prompt_crafter = build_agents()
-    token = CURRENT_PAYLOAD.set(payload)
+    raw_payload = payload
+    token = CURRENT_PAYLOAD.set(raw_payload)
     tool_calls: list[dict[str, Any]] = []
     tool_token = CURRENT_TOOL_CALLS.set(tool_calls)
     try:
-        analyst_run = brief_analyst.run(build_request_summary(payload))
+        raw_bundle = raw_payload.get("truthBundle") or {}
+        normalized_bundle = normalize_external_truth_bundle(raw_bundle)
+        normalized_payload = {**raw_payload, "truthBundle": normalized_bundle}
+        CURRENT_PAYLOAD.set(normalized_payload)
+
+        analyst_run = brief_analyst.run(build_request_summary(normalized_payload))
         analyst_output = (
             analyst_run.content
             if isinstance(analyst_run.content, str)
             else str(analyst_run.content)
         )
-        skill_names, skill_packet = build_skill_packet(payload)
+        skill_names, skill_packet = build_skill_packet(normalized_payload)
 
         crafter_input = (
             "Using the analyzed brief and preloaded skills below, return the final prompt package JSON.\n"
-            f"Create exactly {resolve_variation_count(payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
+            f"Create exactly {resolve_variation_count(normalized_payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
             "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n\n"
             "## Loaded Skills\n"
             f"{skill_packet}\n\n"
             "## Request Truth Context\n"
-            f"{build_crafter_context(payload)}\n\n"
+            f"{build_crafter_context(normalized_payload)}\n\n"
             "## Analyzed Brief\n"
             f"{analyst_output}\n"
         )
         crafter_run = prompt_crafter.run(crafter_input)
         parsed = parse_prompt_package(crafter_run.content)
-        normalized = normalize_prompt_package(parsed, payload, analyst_output)
+        normalized = normalize_prompt_package(
+            parsed, normalized_payload, analyst_output
+        )
 
         loaded_skill_names = list_local_skill_names()
         skill_tool_calls = [
