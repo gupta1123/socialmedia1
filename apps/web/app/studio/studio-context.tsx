@@ -706,6 +706,7 @@ export function StudioProvider({
       const useAsyncV2 = creativeFlowVersion === "v2" && (options?.useAsync ?? process.env.NEXT_PUBLIC_USE_ASYNC_COMPILE === "true");
 
       if (useAsyncV2) {
+        // Use async endpoint with polling to avoid Heroku 30s timeout
         const { jobId } = await compileCreativeV2Async(sessionToken, {
           ...basePayload,
           variationCount: styleVariationCount
