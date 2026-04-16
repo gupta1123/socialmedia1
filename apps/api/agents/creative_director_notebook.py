@@ -270,6 +270,48 @@ def choose_image_model() -> str:
     return os.getenv("FAL_FINAL_MODEL", "fal-ai/nano-banana/edit")
 
 
+def use_openrouter_for_llm() -> bool:
+    return os.getenv("USE_OPENROUTER", "false").lower() == "true"
+
+
+def resolve_llm_config() -> tuple[str, str]:
+    if use_openrouter_for_llm():
+        return (
+            "openrouter",
+            os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash"),
+        )
+    return ("openai", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
+
+
+def is_festival_playbook(payload: dict[str, Any]) -> bool:
+    bundle = normalize_external_truth_bundle(payload.get("truthBundle") or {})
+    post_type = bundle.get("postTypeContract") or {}
+    return post_type.get("playbookKey") == "festival-post-playbook"
+
+
+def build_playbook_override(payload: dict[str, Any]) -> str:
+    if not is_festival_playbook(payload):
+        return ""
+
+    festival = (
+        normalize_external_truth_bundle(payload.get("truthBundle") or {}).get(
+            "festivalTruth"
+        )
+        or {}
+    )
+    festival_name = festival.get("name") or "festival greeting"
+    return (
+        "## Playbook Override\n"
+        f"This request is using `festival-post-playbook` for {festival_name}.\n"
+        "- Keep the result festival-first, not project-first or architecture-first.\n"
+        "- Default to a premium festive poster, invitation-card composition, symbolic devotional graphic, or lightly textured illustration.\n"
+        "- Use one clear festival hero idea, one poster archetype, one illustration family, and controlled decorative density.\n"
+        "- Brand colors and typography may influence taste and finish, but they must not turn the image into a luxury interior scene or a branded still life.\n"
+        "- Do not default to serene architectural interiors, marble ledges, lifestyle photography, or building-led visuals unless the brief explicitly asks for that.\n"
+        "- Prefer poster containment, symbolic composition, breathing room, curated multi-color festive palettes, and restrained ornament.\n\n"
+    )
+
+
 def truth_bundle() -> dict[str, Any]:
     bundle = current_payload().get("truthBundle")
     if not isinstance(bundle, dict):
@@ -380,7 +422,9 @@ def list_candidate_assets() -> str:
 
 @tool()
 def get_available_project_amenities() -> str:
-    result = compact_json((truth_bundle().get("amenityResolution") or {}).get("availableAmenities") or [])
+    result = compact_json(
+        (truth_bundle().get("amenityResolution") or {}).get("availableAmenities") or []
+    )
     record_tool_call("get_available_project_amenities", result)
     return result
 
@@ -400,7 +444,9 @@ def get_assets_for_amenity(amenity_name: str) -> str:
             selected_option = option
             break
 
-    asset_ids = selected_option.get("assetIds") if isinstance(selected_option, dict) else []
+    asset_ids = (
+        selected_option.get("assetIds") if isinstance(selected_option, dict) else []
+    )
     assets = [asset for asset in all_assets if asset.get("id") in asset_ids]
     result = {
         "amenityName": amenity_name,
@@ -408,6 +454,12 @@ def get_assets_for_amenity(amenity_name: str) -> str:
         "assets": assets,
         "hasExactAssetMatch": bool(assets),
     }
+
+    if selected_option and asset_ids:
+        resolution["selectedAmenity"] = selected_option.get("name")
+        resolution["selectedAssetIds"] = asset_ids
+        resolution["hasExactAssetMatch"] = bool(assets)
+
     record_tool_call(
         "get_assets_for_amenity",
         compact_json(result),
@@ -491,11 +543,17 @@ def get_assets_for_post_type(post_type_code: str) -> str:
         elif quality_tier in {"medium", "usable"}:
             score += 0.25
 
-        if post_type_code == "amenity-spotlight" and isinstance(amenity_focus, str) and amenity_focus.strip():
+        if (
+            post_type_code == "amenity-spotlight"
+            and isinstance(amenity_focus, str)
+            and amenity_focus.strip()
+        ):
             asset_amenity = metadata.get("amenityName") or ""
             asset_search_text = f"{asset.get('label', '')} {asset_amenity}".lower()
             normalized_focus = amenity_focus.strip().lower()
-            focus_tokens = [token for token in normalized_focus.split() if len(token) > 2]
+            focus_tokens = [
+                token for token in normalized_focus.split() if len(token) > 2
+            ]
             if normalized_focus in asset_search_text:
                 score += 5
             elif any(token in asset_search_text for token in focus_tokens):
@@ -521,7 +579,9 @@ def get_assets_for_post_type(post_type_code: str) -> str:
     result = {
         "postTypeCode": post_type_code,
         "preferredSubjectTypes": preferred_types,
-        "amenityFocus": amenity_focus if isinstance(amenity_focus, str) and amenity_focus.strip() else None,
+        "amenityFocus": amenity_focus
+        if isinstance(amenity_focus, str) and amenity_focus.strip()
+        else None,
         "heroAsset": hero_asset,
         "logoAsset": logo_asset,  # Can be used in prompt if includeBrandLogo=true
         "availableAssetCount": len(scored_assets),
@@ -640,14 +700,19 @@ def build_agents() -> tuple[Agent, Agent]:
     if AGENTS is not None:
         return AGENTS
 
+    llm_provider, llm_model = resolve_llm_config()
     base_url = os.getenv("OPENAI_BASE_URL")
     model_kwargs: dict[str, Any] = {
-        "id": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        "id": llm_model,
         "timeout": float(os.getenv("AGNO_OPENAI_TIMEOUT_SEC", "20")),
         "max_retries": int(os.getenv("AGNO_OPENAI_MAX_RETRIES", "1")),
     }
 
-    if base_url:
+    if llm_provider == "openrouter":
+        model_kwargs["base_url"] = os.getenv(
+            "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
+        )
+    elif base_url:
         model_kwargs["base_url"] = base_url
 
     brief_analyst = Agent(
@@ -985,30 +1050,37 @@ def parse_prompt_package(raw: Any) -> dict[str, Any]:
 
 def execute(payload: dict[str, Any]) -> dict[str, Any]:
     brief_analyst, prompt_crafter = build_agents()
-    token = CURRENT_PAYLOAD.set(payload)
+    raw_payload = payload
+    token = CURRENT_PAYLOAD.set(raw_payload)
     try:
-        analyst_run = brief_analyst.run(build_request_summary(payload))
+        raw_bundle = raw_payload.get("truthBundle") or {}
+        normalized_bundle = normalize_external_truth_bundle(raw_bundle)
+        normalized_payload = {**raw_payload, "truthBundle": normalized_bundle}
+        CURRENT_PAYLOAD.set(normalized_payload)
+
+        analyst_run = brief_analyst.run(build_request_summary(normalized_payload))
         analyst_output = (
             analyst_run.content
             if isinstance(analyst_run.content, str)
             else str(analyst_run.content)
         )
-        skill_names, skill_packet = build_skill_packet(payload)
+        skill_names, skill_packet = build_skill_packet(normalized_payload)
 
         crafter_input = (
             "Using the analyzed brief and preloaded skills below, return the final prompt package JSON.\n"
-            f"Create exactly {resolve_variation_count(payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
+            f"Create exactly {resolve_variation_count(normalized_payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
             "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n\n"
+            f"{build_playbook_override(normalized_payload)}"
             "## Loaded Skills\n"
             f"{skill_packet}\n\n"
             "## Request Truth Context\n"
-            f"{build_crafter_context(payload)}\n\n"
+            f"{build_crafter_context(normalized_payload)}\n\n"
             "## Analyzed Brief\n"
             f"{analyst_output}\n"
         )
         crafter_run = prompt_crafter.run(crafter_input)
         parsed = parse_prompt_package(crafter_run.content)
-        return normalize_prompt_package(parsed, payload, analyst_output)
+        return normalize_prompt_package(parsed, normalized_payload, analyst_output)
     finally:
         CURRENT_PAYLOAD.reset(token)
 
@@ -1017,32 +1089,41 @@ def execute_with_trace(
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     brief_analyst, prompt_crafter = build_agents()
-    token = CURRENT_PAYLOAD.set(payload)
+    raw_payload = payload
+    token = CURRENT_PAYLOAD.set(raw_payload)
     tool_calls: list[dict[str, Any]] = []
     tool_token = CURRENT_TOOL_CALLS.set(tool_calls)
     try:
-        analyst_run = brief_analyst.run(build_request_summary(payload))
+        raw_bundle = raw_payload.get("truthBundle") or {}
+        normalized_bundle = normalize_external_truth_bundle(raw_bundle)
+        normalized_payload = {**raw_payload, "truthBundle": normalized_bundle}
+        CURRENT_PAYLOAD.set(normalized_payload)
+
+        analyst_run = brief_analyst.run(build_request_summary(normalized_payload))
         analyst_output = (
             analyst_run.content
             if isinstance(analyst_run.content, str)
             else str(analyst_run.content)
         )
-        skill_names, skill_packet = build_skill_packet(payload)
+        skill_names, skill_packet = build_skill_packet(normalized_payload)
 
         crafter_input = (
             "Using the analyzed brief and preloaded skills below, return the final prompt package JSON.\n"
-            f"Create exactly {resolve_variation_count(payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
+            f"Create exactly {resolve_variation_count(normalized_payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
             "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n\n"
+            f"{build_playbook_override(normalized_payload)}"
             "## Loaded Skills\n"
             f"{skill_packet}\n\n"
             "## Request Truth Context\n"
-            f"{build_crafter_context(payload)}\n\n"
+            f"{build_crafter_context(normalized_payload)}\n\n"
             "## Analyzed Brief\n"
             f"{analyst_output}\n"
         )
         crafter_run = prompt_crafter.run(crafter_input)
         parsed = parse_prompt_package(crafter_run.content)
-        normalized = normalize_prompt_package(parsed, payload, analyst_output)
+        normalized = normalize_prompt_package(
+            parsed, normalized_payload, analyst_output
+        )
 
         loaded_skill_names = list_local_skill_names()
         skill_tool_calls = [
@@ -1051,6 +1132,7 @@ def execute_with_trace(
             if call.get("toolName") == "get_skill_instructions"
         ]
 
+        llm_provider, llm_model = resolve_llm_config()
         trace = {
             "eventCount": len(tool_calls),
             "toolCallCount": len(tool_calls),
@@ -1060,8 +1142,8 @@ def execute_with_trace(
             "skillToolCalls": skill_tool_calls,
             "runId": None,
             "sessionId": None,
-            "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            "modelProvider": "openai-responses",
+            "model": llm_model,
+            "modelProvider": llm_provider,
             "analystOutput": analyst_output,
             "loadedSkillNames": loaded_skill_names,
             "loadedSkillCount": len(loaded_skill_names),
