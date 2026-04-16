@@ -164,6 +164,8 @@ def runtime_diagnostics(agent: Any | None = None) -> dict[str, Any]:
     )
     tool_names = ["get_skill_instructions"] if skill_names else []
     skills_runtime_available = SKILLS_DIR.exists()
+    supabase_url = os.getenv("SUPABASE_URL", "").strip()
+    supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 
     return {
         "skillsRuntimeAvailable": skills_runtime_available,
@@ -176,6 +178,10 @@ def runtime_diagnostics(agent: Any | None = None) -> dict[str, Any]:
         "loadedToolCount": len(tool_names),
         "loadedToolNames": tool_names,
         "skillFirstMode": os.getenv("AGNO_SKILL_FIRST_MODE", "0") == "1",
+        "openAiTimeoutSec": float(os.getenv("AGNO_OPENAI_TIMEOUT_SEC", "20")),
+        "openAiMaxRetries": int(os.getenv("AGNO_OPENAI_MAX_RETRIES", "1")),
+        "supabaseConfigured": bool(supabase_url and supabase_service_role_key),
+        "supabaseHost": urlparse(supabase_url).netloc if supabase_url else None,
     }
 
 
