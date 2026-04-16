@@ -22,6 +22,9 @@ Use this skill last.
 - Reject prompts that contradict the selected playbook.
 - Reject prompts that use a different post-type playbook than the selected postTypeContract.
 - Reject prompts where the chosen amenity image does not match the selected amenity focus, or where one amenity image is used to represent a different facility.
+- Reject prompts that are so generic they do not describe a finished poster structure.
+- Reject prompts for text-bearing post types that do not provide a clear text-safe zone or hierarchy.
+- Reject prompts that over-describe copy but under-specify layout and image structure.
 - For construction updates, reject generic architectural beauty shots unless they include a clear but minimal update/progress overlay.
 - For construction updates, reject prompts where the building/property is not the dominant visual subject.
 - For construction updates, reject software UI/dashboard/app-screen language, including cards, chips, task rows, browser chrome, form fields, or wireframe language.

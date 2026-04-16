@@ -19,8 +19,14 @@ Make the location advantage feel clear and premium.
 - Connectivity-led editorial poster
 - Premium urban context frame
 
+## Required prompt behavior
+- Write it as a finished location-advantage poster, not a generic skyline image or map flyer.
+- Use one dominant project/context image, one headline-safe zone, one short connectivity/support line, and one restrained footer/signature strip.
+- Keep any location or landmark cue compact and editorial rather than infographic-heavy.
+- Use place recognition and premium context, not long factual copy blocks.
+- Do not invent landmarks, travel times, or unsupported transit claims.
+
 ## Must not leak
 - Dense infographic clutter
 - Unverified travel-time claims
 - Generic map screenshot aesthetics
-

@@ -53,7 +53,7 @@ import {
 } from "../lib/creative-reference-selection.js";
 import { buildPostTypePromptGuidance } from "../lib/post-type-prompt-guidance.js";
 import { getCreativeRunDetail, listWorkspaceRuns } from "../lib/runs.js";
-import { compilePromptPackageV2 } from "../lib/creative-director.js";
+import { compilePromptPackageV2, normalizeCreativeBriefForCompilation } from "../lib/creative-director.js";
 
 const MAX_SUPPORTING_REFERENCE_IMAGES = 2;
 const CreativeCompileV2RequestSchema = CreativeBriefSchema.extend({
@@ -387,7 +387,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       return reply.unauthorized();
     }
 
-    const brief = CreativeCompileV2RequestSchema.parse(request.body);
+    const parsedBrief = CreativeCompileV2RequestSchema.parse(request.body);
+    const { brief, autoCopyStripped } = normalizeCreativeBriefForCompilation(parsedBrief);
     const brand = await getBrand(brief.brandId);
     await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
 
@@ -629,7 +630,17 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         previewId: `preview_v2_${now}`,
         endpoint: "/api/creative/compile-v2",
         persisted: false,
-        postTypeCode: postType.code
+        postTypeCode: postType.code,
+        promptDetailMode: "poster-spec",
+        autoCopySanitized: autoCopyStripped,
+        referenceRolePlan: {
+          hasPrimaryAnchor: Boolean(reusableTemplate || sourceOutput),
+          hasAmenityAnchorCandidate: inferredReferenceSelection.amenityAssetIds.length > 0,
+          hasProjectAnchorCandidate: projectActualImages.length > 0,
+          secondaryReferenceCount: Math.max(0, referenceAssets.length - inferredReferenceSelection.amenityAssetIds.length),
+          includeBrandLogo: brief.includeBrandLogo,
+          includeReraQr: brief.includeReraQr
+        }
       }
     };
 
@@ -2086,6 +2097,16 @@ function buildV2RoleAwarePrompt(
     }
   }
 
+  if (plan.primaryAnchor?.role === "template") {
+    roleLines.push(
+      `Use the template reference (${plan.primaryAnchor.label}) for layout rhythm, safe-zone planning, overlay discipline, spacing, and footer structure only. Do not copy its literal text, brand names, or placeholder content.`
+    );
+  } else if (plan.primaryAnchor?.role === "source_post") {
+    roleLines.push(
+      `Use the source-post reference (${plan.primaryAnchor.label}) only for framing intent and compositional structure. Do not copy its literal text or branding.`
+    );
+  }
+
   if (postTypeCode === "amenity-spotlight" && !plan.amenityAnchor && plan.projectAnchor) {
     roleLines.push(
       "No exact amenity reference image was supplied for the requested facility. Generate the amenity scene without using a mismatched amenity or building image as the hero reference."
@@ -2115,6 +2136,12 @@ function buildV2RoleAwarePrompt(
     );
   }
 
+  if (plan.references.length > 0) {
+    roleLines.push(
+      "If an additional style or context reference is supplied, use it only for layout rhythm, overlay discipline, material language, atmosphere, or premium finishing detail. It must never override the hero subject."
+    );
+  }
+
   roleLines.push(
     mode === "seed"
       ? "One complete style direction only; no grid, collage, contact sheet, or multiple poster options."
@@ -2133,6 +2160,10 @@ function getAssetForPath(plan: RoleAwareReferencePlan, storagePath: string): { r
   if (plan.sourcePost?.storagePath === storagePath) return { role: plan.sourcePost.role, label: plan.sourcePost.label };
   if (plan.amenityAnchor?.storagePath === storagePath) return { role: "amenity_image", label: plan.amenityAnchor.label };
   if (plan.projectAnchor?.storagePath === storagePath) return { role: "project_image", label: plan.projectAnchor.label };
+  if (plan.brandLogo?.storagePath === storagePath) return { role: "brand_logo", label: plan.brandLogo.label };
+  if (plan.complianceQr?.storagePath === storagePath) return { role: "rera_qr", label: plan.complianceQr.label };
+  const reference = plan.references.find((entry) => entry.storagePath === storagePath);
+  if (reference) return { role: "reference", label: reference.label };
   return null;
 }
 
@@ -2163,7 +2194,7 @@ function collectReferenceStoragePaths(plan: RoleAwareReferencePlan) {
 
 function filterReferenceStoragePathsForPrompt(
   plan: RoleAwareReferencePlan,
-  prompt: string,
+  _prompt: string,
   postTypeCode: string
 ): string[] {
   const alwaysInclude = [
@@ -2172,27 +2203,67 @@ function filterReferenceStoragePathsForPrompt(
   ].filter((v): v is string => typeof v === "string" && v.length > 0);
 
   const heroReference: string[] = [];
+  const secondaryReference: string[] = [];
+  const pushSecondary = (value: string | null | undefined) => {
+    if (!value || heroReference.includes(value) || secondaryReference.includes(value)) {
+      return;
+    }
+    secondaryReference.push(value);
+  };
   if (postTypeCode === "amenity-spotlight") {
     if (plan.amenityAnchor?.storagePath) {
       heroReference.push(plan.amenityAnchor.storagePath);
     }
+    pushSecondary(plan.projectAnchor?.storagePath);
   } else if (postTypeCode === "construction-update" || postTypeCode === "project-launch") {
     if (plan.projectAnchor?.storagePath) {
       heroReference.push(plan.projectAnchor.storagePath);
+    }
+    pushSecondary(plan.primaryAnchor?.storagePath);
+    if (secondaryReference.length === 0) {
+      pushSecondary(plan.references[0]?.storagePath);
     }
   } else if (postTypeCode === "sample-flat-showcase" || postTypeCode === "site-visit-invite") {
     if (plan.projectAnchor?.storagePath) {
       heroReference.push(plan.projectAnchor.storagePath);
     }
+    pushSecondary(plan.primaryAnchor?.storagePath);
+    if (secondaryReference.length === 0) {
+      pushSecondary(plan.references[0]?.storagePath);
+    }
+  } else if (postTypeCode === "location-advantage") {
+    if (plan.projectAnchor?.storagePath) {
+      heroReference.push(plan.projectAnchor.storagePath);
+    }
+    pushSecondary(plan.primaryAnchor?.storagePath);
+    if (secondaryReference.length === 0) {
+      pushSecondary(plan.references[0]?.storagePath);
+    }
+  } else if (postTypeCode === "testimonial") {
+    if (plan.primaryAnchor?.storagePath) {
+      heroReference.push(plan.primaryAnchor.storagePath);
+    } else if (plan.projectAnchor?.storagePath) {
+      heroReference.push(plan.projectAnchor.storagePath);
+    }
+    if (secondaryReference.length === 0) {
+      pushSecondary(plan.references[0]?.storagePath);
+    }
   } else if (postTypeCode === "festive-greeting") {
-    // No hero reference for festive greetings
+    pushSecondary(plan.primaryAnchor?.storagePath);
+    if (secondaryReference.length === 0) {
+      pushSecondary(plan.references[0]?.storagePath);
+    }
   } else {
     // Default: include amenity and project
     if (plan.amenityAnchor?.storagePath) heroReference.push(plan.amenityAnchor.storagePath);
     if (plan.projectAnchor?.storagePath) heroReference.push(plan.projectAnchor.storagePath);
+    pushSecondary(plan.primaryAnchor?.storagePath);
+    if (secondaryReference.length === 0) {
+      pushSecondary(plan.references[0]?.storagePath);
+    }
   }
 
-  const result = [...heroReference, ...alwaysInclude];
+  const result = [...heroReference, ...secondaryReference.slice(0, 1), ...alwaysInclude];
   console.log(`[filterReferenceStoragePathsForPrompt] postTypeCode=${postTypeCode}, heroRef=${heroReference.length}, alwaysInclude=${alwaysInclude.length}, total=${result.length}, paths=${JSON.stringify(result)}`);
   return result;
 }
@@ -2215,9 +2286,23 @@ function getHeroReferenceForPostType(plan: RoleAwareReferencePlan, postTypeCode:
       return plan.projectAnchor?.storagePath
         ? [plan.projectAnchor.storagePath]
         : [];
+
+    case "location-advantage":
+      return [
+        plan.projectAnchor?.storagePath,
+        plan.primaryAnchor?.storagePath
+      ].filter((v): v is string => typeof v === "string" && v.length > 0);
+
+    case "testimonial":
+      return [
+        plan.primaryAnchor?.storagePath,
+        plan.projectAnchor?.storagePath
+      ].filter((v): v is string => typeof v === "string" && v.length > 0);
     
     case "festive-greeting":
-      return [];
+      return plan.primaryAnchor?.storagePath
+        ? [plan.primaryAnchor.storagePath]
+        : [];
     
     default:
       return [

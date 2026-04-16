@@ -19,6 +19,9 @@ Use this skill after planning.
 - Keep logo and QR instructions short and exact.
 - Do not make logo placement a headline design decision. If logo is enabled, describe it only as a small supplied footer/corner signature or omit it.
 - Seed prompts should be looser than final prompts, but both must stay truthful.
+- For final prompts, prefer a poster-spec order: output type and intent, hero truth, layout/zones, text behavior, graphic system, lighting/materials, then negative prompt.
+- For text-bearing real-estate posts, explicitly describe the poster zones: brand/header strip, headline-safe zone, support/CTA zone, hero area, footer/signature zone.
+- Make it clear how many overlays, cards, badges, or chips are allowed. Default to very few.
 
 ## Asset Usage Rules (CRITICAL)
 - ALWAYS use only ONE hero image in the prompt. The Brief Analyst has already selected the best asset via get_assets_for_post_type.
@@ -26,7 +29,8 @@ Use this skill after planning.
 - The prompt should reference: "Use the supplied [amenity/project/interior] image as the hero reference."
 - Do NOT mention multiple image files or reference "Image 1", "Image 2", "Image 3", etc.
 - The logo (if enabled) can be mentioned as a secondary reference for brand identity only.
-- Never include supporting references, mood boards, or additional reference images in the prompt.
+- A single secondary style/context reference may be used when it materially improves layout fidelity, but never narrate references as "Image 1", "Image 2", or filename lists.
+- Never include uncontrolled supporting references, mood boards, or long reference lists in the prompt.
 - If no suitable asset is available for the post type, say "no reference image available" and generate from the brief alone.
 
 ### Post type asset selection:

@@ -115,7 +115,7 @@ Produce a concise working brief for the prompt crafter.
 Required sections:
 ## Brief Contract
 ## Truth Summary
-## Asset Decision (MUST list ONLY the single hero asset id, plus logo/RERA if enabled)
+## Asset Decision (MUST list the hero asset id, plus at most one secondary style/context asset id when materially useful, plus logo/RERA if enabled)
 ## Strategy Route
 ## Risk Checks
 
@@ -125,28 +125,37 @@ Only include facts that materially affect the image.
 
 CRITICAL: Asset Decision must list ONLY:
 - 1 hero asset id (selected via get_assets_for_post_type tool - this is the PRIMARY reference)
+- 0 or 1 secondary style/context asset id only when it materially improves layout or poster fidelity
 - logo asset id (if includeBrandLogo is true)
 - RERA QR asset id (if includeReraQr is true)
 
-Do NOT list multiple candidate assets, supporting references, or all available images.
-The prompt crafter will use ONLY these selected assets in the final prompt.
+Do NOT list multiple candidate assets, long reference lists, or all available images.
+The prompt crafter will use only these selected assets in the final prompt package.
 """.strip()
 
 CRAFTER_OUTPUT_INSTRUCTION = """
 Return a distilled prompt package, not a manifest dump.
 
 - seedPrompt: compatibility alias only; make it the same finished-post intent as finalPrompt.
-- finalPrompt: compact, resolved, production-ready, single-image post option.
+- finalPrompt: detailed, resolved, production-ready, single-image poster-spec post option.
 - variations: create exactly the requested number of distinct finished post options.
 - Each variation must have its own seedPrompt and finalPrompt; both should describe one finished post option, not a draft style board.
 - Variation prompts must differ in composition strategy, visual hierarchy, mood/lighting, and copy treatment.
 - Do not make variations minor rewordings of the same prompt.
-- Keep both prompts image-first. Do not dump brand manifest prose into them.
+- Keep both prompts image-first. Do not dump brand manifest prose into them, but do be explicit about layout, text-safe zones, graphic hierarchy, overlay treatment, and negative constraints.
 - Use the analyst output plus loaded skills to synthesize, not restate.
 - If exact text is provided, preserve it exactly.
 - If logo or RERA QR toggles are on, require exact supplied assets or clean omission. Never invent placeholders.
 - Never describe mood boards, tiled boards, mockup sheets, artboards, multiple posters, or "style exploration" inside one frame.
 - Top-level seedPrompt and finalPrompt must be aliases of variations[0].seedPrompt and variations[0].finalPrompt.
+- Prefer a detailed poster-spec order inside finalPrompt:
+  1. output type / aspect ratio / campaign intent
+  2. hero subject truth from supplied asset(s)
+  3. poster structure and zone plan
+  4. text hierarchy and allowed copy behavior
+  5. graphic system, palette, typography mood, logo/QR behavior
+  6. scene / lighting / material direction
+  7. explicit negative prompt
 
 🚨 CRITICAL - Asset Usage - NEVER do this:
 - ❌ DO NOT say "Image 1 is the amenity truth reference (filename.jpg)"
@@ -159,10 +168,11 @@ Return a distilled prompt package, not a manifest dump.
 ✅ CORRECT Asset Usage:
 - ✅ "Use the amenity reference image as the hero subject."
 - ✅ "Use the project reference for building identity context."
+- ✅ "Use the template or style reference for layout rhythm, spacing, and overlay discipline only."
 - ✅ "Include the brand logo in the footer as supplied."
 - ✅ If no reference needed: describe the scene without mentioning images
 
-The prompt goes to an image generation model - it cannot see multiple images or understand "Image 1", "Image 2" references. You must describe what you want in plain text and mention which reference is the primary one.
+The prompt goes to an image generation model that may receive one hero reference plus a very small number of secondary references from the system. Never narrate them as "Image 1", "Image 2", or filename lists. Describe the role of the reference in plain text and keep the hero reference primary.
 
 Example of CORRECT prompt:
 "Create a premium amenity spotlight showing a kids' room with soft natural lighting. Use the amenity reference as the hero. Include 'Amenity Spotlight' text at top in refined font. Add project name as brand context."
@@ -683,12 +693,12 @@ def build_agents() -> tuple[Agent, Agent]:
 
     prompt_crafter_kwargs: dict[str, Any] = {
         "name": "Prompt Crafter",
-        "role": "Turn the analyzed brief into compact prompts for finished post option generation.",
+        "role": "Turn the analyzed brief into detailed poster-spec prompts for finished post option generation.",
         "model": OpenAIResponses(**model_kwargs),
         "instructions": [
             "You are an expert image prompt crafter for a real-estate social image lab.",
-            "Work exactly like a prompt specialist: use the preloaded skills, synthesize, then write compact prompts.",
-            "Keep output focused on what the image model needs, not everything you know.",
+            "Work exactly like a prompt specialist: use the preloaded skills, synthesize, then write detailed poster-spec prompts.",
+            "Keep output focused on what the image model needs, not everything you know, but be specific about composition, layout zones, typography-safe areas, overlays, and negative constraints when they affect output quality.",
             "Every variation is a finished post option. Do not create exploratory previews or draft style boards.",
             "Keep seedPrompt as a compatibility alias for the same finished option intent as finalPrompt.",
             "Each prompt must describe one single complete image only.",

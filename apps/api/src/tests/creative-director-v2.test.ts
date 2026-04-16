@@ -398,7 +398,7 @@ describe("compilePromptPackageV2", () => {
 
     const truthBundleSummary = getTruthBundleSummary(output);
     expect(truthBundleSummary.candidateAssetIds).toContain(amenityAssetId);
-    expect(truthBundleSummary.candidateAssetIds).not.toContain(projectExteriorAssetId);
+    expect(truthBundleSummary.candidateAssetIds).toContain(projectExteriorAssetId);
     expect(truthBundleSummary.candidateAssetIds).not.toContain(sampleFlatAssetId);
   });
 
@@ -502,7 +502,7 @@ describe("compilePromptPackageV2", () => {
 
     const truthBundleSummary = getTruthBundleSummary(output);
     expect(truthBundleSummary.candidateAssetIds).toContain(poolAssetId);
-    expect(truthBundleSummary.candidateAssetIds).not.toContain(projectExteriorAssetId);
+    expect(truthBundleSummary.candidateAssetIds).toContain(projectExteriorAssetId);
     expect(truthBundleSummary.candidateAssetIds).not.toContain(parkAssetId);
     expect(output.compilerTrace.postTypeGuidanceManifest).toMatchObject({
       code: "amenity-spotlight",
@@ -714,6 +714,61 @@ describe("compilePromptPackageV2", () => {
     const imageRefPattern = /(?:Image \d+ is [^.]+\.(?:jpg|jpeg|png|webp)[^,]*(?:,|and)|filename.*(?:jpg|jpeg|png|webp).*Image \d+)/i;
     const hasActualImageRefs = imageRefPattern.test(output.finalPrompt);
     expect(hasActualImageRefs).toBe(false);
+    expect(output.finalPrompt).toContain("Create a premium 4:5 amenity spotlight poster for social media");
+    expect(output.finalPrompt).toContain("Poster structure:");
+    expect(output.finalPrompt).toContain("Negative prompt:");
+    expect(output.compilerTrace.promptDetailMode).toBe("poster-spec");
+  });
+
+  it("strips inherited CTA and exact text when copy mode is auto", async () => {
+    const output = await compilePromptPackageV2({
+      brandName: "Briefly Social Demo",
+      brandProfile: buildBrandProfile(),
+      variationCount: 1,
+      brief: {
+        brandId: crypto.randomUUID(),
+        createMode: "post",
+        copyMode: "auto",
+        channel: "instagram-feed",
+        format: "portrait",
+        goal: "Invite buyers to visit the project",
+        prompt: "Create a premium site visit invite with a warm, trustworthy tone.",
+        audience: "Homebuyers",
+        offer: "Book your site visit",
+        exactText: "Visit the Experience Centre",
+        referenceAssetIds: [],
+        includeBrandLogo: false,
+        includeReraQr: false,
+        logoAssetId: null,
+        templateType: "offer"
+      },
+      referenceLabels: [],
+      projectName: "Zoy+",
+      projectProfile: buildProjectProfile(),
+      festival: null,
+      postType: {
+        code: "site-visit-invite",
+        name: "Site visit invite",
+        config: {
+          defaultChannels: ["instagram-feed"],
+          allowedFormats: ["portrait"],
+          recommendedTemplateTypes: ["offer"],
+          requiredBriefFields: ["goal", "offer", "exactText"],
+          safeZoneGuidance: ["Keep CTA and contact area unobstructed"],
+          ctaStyle: "site-visit",
+          copyDensity: "balanced"
+        }
+      },
+      template: null,
+      series: null,
+      calendarItem: null,
+      deliverableSnapshot: null
+    });
+
+    expect(output.finalPrompt).not.toContain("Visit the Experience Centre");
+    expect(output.finalPrompt).not.toContain("Book your site visit");
+    expect(output.compilerTrace.autoCopySanitized).toBe(true);
+    expect(output.resolvedConstraints.promptDetailMode).toBe("poster-spec");
   });
 
   it("filters references correctly for amenity spotlight", async () => {
@@ -738,13 +793,19 @@ describe("compilePromptPackageV2", () => {
       ].filter((v): v is string => typeof v === "string" && v.length > 0);
 
       const heroReference: string[] = [];
+      const secondaryReference: string[] = [];
+      const pushSecondary = (value: string | null | undefined) => {
+        if (!value || heroReference.includes(value) || secondaryReference.includes(value)) return;
+        secondaryReference.push(value);
+      };
       if (postTypeCode === "amenity-spotlight") {
         if (plan.amenityAnchor?.storagePath) {
           heroReference.push(plan.amenityAnchor.storagePath);
         }
+        pushSecondary(plan.projectAnchor?.storagePath);
       }
 
-      return [...heroReference, ...alwaysInclude];
+      return [...heroReference, ...secondaryReference.slice(0, 1), ...alwaysInclude];
     }
 
     const plan: RoleAwareReferencePlan = {
@@ -762,16 +823,16 @@ describe("compilePromptPackageV2", () => {
 
     const filtered = filterReferenceStoragePathsForPrompt(plan, "", "amenity-spotlight");
     console.log("Filtered refs for amenity-spotlight:", filtered);
-    expect(filtered.length).toBe(2);
+    expect(filtered.length).toBe(3);
     expect(filtered).toContain("amenities/pool.jpg");
+    expect(filtered).toContain("project/building.jpg");
     expect(filtered).toContain("brand/logo.png");
-    expect(filtered).not.toContain("project/building.jpg");
 
     const noAmenityPlan: RoleAwareReferencePlan = {
       ...plan,
       amenityAnchor: null,
     };
     const filteredWithoutAmenity = filterReferenceStoragePathsForPrompt(noAmenityPlan, "", "amenity-spotlight");
-    expect(filteredWithoutAmenity).toEqual(["brand/logo.png"]);
+    expect(filteredWithoutAmenity).toEqual(["project/building.jpg", "brand/logo.png"]);
   });
 });

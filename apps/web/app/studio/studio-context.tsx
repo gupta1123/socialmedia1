@@ -691,6 +691,12 @@ export function StudioProvider({
     try {
       const basePayload = {
         ...briefForm,
+        ...(briefForm.copyMode === "auto"
+          ? {
+              offer: "",
+              exactText: "",
+            }
+          : {}),
         brandId: activeBrandId,
         referenceAssetIds: briefForm.selectedReferenceAssetIds
       };

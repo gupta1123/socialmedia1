@@ -623,6 +623,7 @@ def build_request_payload(body: dict[str, Any]) -> dict[str, Any]:
     festival = LOOKUPS.festivals.get(body.get("festivalId") or "")
 
     post_type_code = post_type["code"]
+    copy_mode = "auto" if body.get("copyMode") == "auto" else "manual"
     include_brand_logo = bool(body.get("includeBrandLogo"))
     include_rera_qr = bool(body.get("includeReraQr"))
     channel = body.get("channel") or post_type["config"]["defaultChannels"][0]
@@ -632,6 +633,9 @@ def build_request_payload(body: dict[str, Any]) -> dict[str, Any]:
     exact_text = (body.get("exactText") or "").strip()
     audience = (body.get("audience") or "").strip()
     offer = (body.get("offer") or "").strip()
+    if copy_mode == "auto":
+        exact_text = ""
+        offer = ""
     try:
         variation_count = int(body.get("variationCount") or 3)
     except (TypeError, ValueError):
@@ -664,6 +668,7 @@ def build_request_payload(body: dict[str, Any]) -> dict[str, Any]:
                 "goal": goal,
                 "prompt": prompt,
                 "audience": audience,
+                "copyMode": copy_mode,
                 "offer": offer,
                 "exactText": exact_text,
                 "templateType": template_type,

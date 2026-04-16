@@ -20,6 +20,8 @@ Use this skill after composition planning and before prompt assembly.
 - If exact user text is provided, preserve it exactly and do not paraphrase it.
 - Do not invent phone numbers, prices, possession dates, launch dates, RERA numbers, progress percentages, discounts, guarantees, or location claims.
 - Prefer short labels over paragraphs.
+- For text-bearing poster types, explicitly define a headline-safe zone, support-line zone, CTA-safe zone when relevant, and text that must stay out of the hero image area.
+- Default to one headline, one short support line, and one footer/signature treatment unless the selected playbook clearly needs more.
 
 ## Construction-update text policy
 - Allowed text: project name, "Construction Update", "Progress Update", "Site Progress", exact requested text, and brief/project-truth-provided progress or status cues.

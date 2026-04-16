@@ -92,7 +92,7 @@ const legacyDefaultPromptText =
   "Design an elegant Instagram launch graphic for a premium residential development. Showcase architectural form, refined materials, warm natural light, and an aspirational lifestyle without looking like a generic stock ad.";
 const defaultPromptText = "Create a premium real-estate post with a clear visual angle and restrained copy.";
 const defaultCreateChannel: CreativeChannel = "instagram-feed";
-const defaultCreateFormat: CreativeFormat = "square";
+const defaultCreateFormat: CreativeFormat = "portrait";
 const defaultSeriesSlideCount = 5;
 const MIN_PROMPT_LENGTH = 10;
 const MAX_REFERENCE_SELECTION = 2;
