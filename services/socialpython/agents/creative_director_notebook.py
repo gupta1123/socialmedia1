@@ -335,6 +335,8 @@ def normalize_external_truth_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
 
     if external.get("festival"):
         normalized["festivalTruth"] = external.get("festival")
+    elif external.get("festivalTruth"):
+        normalized["festivalTruth"] = external.get("festivalTruth")
 
     if external.get("inferredReference"):
         normalized["inferredReference"] = external.get("inferredReference")
@@ -948,6 +950,8 @@ def build_agents() -> tuple[Agent, Agent]:
             "Always call get_brand_truth and list_candidate_assets.",
             "For amenity-spotlight, call get_available_project_amenities after get_post_type_contract.",
             "The amenity choice must come from the project's available amenities only. Do not invent or hardcode amenity types.",
+            "CRITICAL: If postTypeContract.amenityFocus is explicitly set (not null), you MUST use that exact amenity - do not choose a different one. Call get_assets_for_amenity with the specified amenityFocus value.",
+            "If amenityFocus is null AND amenitySelectionSource is 'inferred', THEN you may choose the best amenity from available amenities based on the brief. Call get_assets_for_amenity with your chosen amenity.",
             "For amenity-spotlight, choose the amenity before writing prompt guidance, then call get_assets_for_amenity for that exact amenity.",
             "If get_assets_for_amenity returns no assets, explicitly record that there is no exact amenity image match and do not substitute a different amenity asset.",
             "For non-amenity post types, call get_assets_for_post_type with the post type code to get the single best hero asset.",
