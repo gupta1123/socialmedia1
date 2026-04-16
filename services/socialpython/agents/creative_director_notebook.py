@@ -1150,6 +1150,8 @@ def normalize_prompt_package(
     resolved_constraints = result.get("resolvedConstraints")
     if not isinstance(resolved_constraints, dict):
         resolved_constraints = {}
+    post_type_contract = bundle.get("postTypeContract") or {}
+    amenity_resolution = bundle.get("amenityResolution") or {}
     resolved_constraints.update(
         {
             "brandName": (bundle.get("brandTruth") or {}).get("name"),
@@ -1164,6 +1166,8 @@ def normalize_prompt_package(
                 for asset in (bundle.get("candidateAssets") or [])
                 if asset.get("id")
             ],
+            "amenityImageAssetIds": amenity_resolution.get("selectedAssetIds") or [],
+            "amenityFocus": post_type_contract.get("amenityFocus"),
             "projectAnchorAssetId": exact_asset_contract.get(
                 "requiredProjectAnchorAssetId"
             ),
