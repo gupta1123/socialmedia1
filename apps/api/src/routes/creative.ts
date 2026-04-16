@@ -654,8 +654,110 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     }
 
     const parsedBrief = CreativeCompileV2RequestSchema.parse(request.body);
-    const brand = await getBrand(parsedBrief.brandId);
+    const { brief, autoCopyStripped } = normalizeCreativeBriefForCompilation(parsedBrief);
+    const brand = await getBrand(brief.brandId);
     await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
+
+    const [project, postType, reusableTemplateDetail, calendarItem, campaign, series, campaignPlan, sourceOutput, festival] = await Promise.all([
+      brief.projectId ? getProject(brief.projectId) : Promise.resolve(null),
+      brief.postTypeId ? getPostType(brief.postTypeId) : Promise.resolve(null),
+      brief.creativeTemplateId ? getCreativeTemplateDetail(brief.creativeTemplateId) : Promise.resolve(null),
+      brief.calendarItemId ? getCalendarItem(brief.calendarItemId) : Promise.resolve(null),
+      brief.campaignId ? getCampaign(brief.campaignId) : Promise.resolve(null),
+      brief.seriesId ? getSeries(brief.seriesId) : Promise.resolve(null),
+      brief.campaignPlanId ? getCampaignDeliverablePlan(brief.campaignPlanId) : Promise.resolve(null),
+      brief.sourceOutputId
+        ? supabaseAdmin
+            .from("creative_outputs")
+            .select("id, workspace_id, brand_id, storage_path")
+            .eq("id", brief.sourceOutputId)
+            .maybeSingle()
+            .then(({ data }) => data)
+        : Promise.resolve(null),
+      brief.festivalId ? getFestival(brief.festivalId) : Promise.resolve(null)
+    ]);
+
+    if (project && (project.workspaceId !== brand.workspaceId || project.brandId !== brand.id)) {
+      return reply.badRequest("Project does not belong to the selected brand/workspace");
+    }
+
+    if (postType && postType.workspaceId && postType.workspaceId !== brand.workspaceId) {
+      return reply.badRequest("Post type does not belong to the selected workspace");
+    }
+
+    if (!postType) {
+      return reply.badRequest("Choose a post type before compiling v2 prompts");
+    }
+
+    const [brandProfileVersion, allAssets, projectProfileVersion] = await Promise.all([
+      getActiveBrandProfile(brand.id),
+      listBrandAssets(brand.id),
+      project ? getActiveProjectProfile(project.id).catch(() => null) : Promise.resolve(null)
+    ]);
+
+    const isFestiveGreeting = postType.code === "festive-greeting" && Boolean(festival);
+    const projectActualImages = Array.isArray(projectProfileVersion?.profile.actualProjectImageIds)
+      ? projectProfileVersion?.profile.actualProjectImageIds
+      : [];
+    const projectSampleImages = Array.isArray(projectProfileVersion?.profile.sampleFlatImageIds)
+      ? projectProfileVersion?.profile.sampleFlatImageIds
+      : [];
+    const brandReferenceImages = Array.isArray(brandProfileVersion.profile.referenceAssetIds)
+      ? brandProfileVersion.profile.referenceAssetIds
+      : [];
+    const postTypeGuidance = buildPostTypePromptGuidance({
+      brandName: brand.name,
+      brief,
+      postType: {
+        code: postType.code,
+        name: postType.name,
+        config: postType.config
+      },
+      projectName: project?.name ?? null,
+      projectProfile: projectProfileVersion?.profile ?? null,
+      brandAssets: allAssets,
+      projectId: project?.id ?? null
+    });
+    const inferredReferenceSelection = buildInferredReferenceSelection({
+      postTypeCode: postType.code,
+      isFestiveGreeting,
+      explicitReferenceAssetIds: brief.referenceAssetIds,
+      projectImageAssetIds: projectActualImages,
+      sampleFlatImageIds: projectSampleImages,
+      brandReferenceAssetIds: brandReferenceImages,
+      allAssets,
+      projectId: project?.id ?? null,
+      focusAmenity: postTypeGuidance.manifest.amenityFocus ?? null,
+    });
+
+    const preparedPayload = {
+      brandId: brand.id,
+      projectId: project?.id ?? null,
+      postTypeId: postType.id,
+      channel: brief.channel ?? postType.config.defaultChannels[0],
+      format: brief.format ?? postType.config.allowedFormats[0],
+      goal: brief.goal ?? (postType.config as Record<string, unknown>)?.defaultGoal as string ?? postType.name,
+      prompt: brief.prompt,
+      exactText: brief.exactText,
+      audience: brief.audience,
+      offer: brief.offer,
+      copyMode: brief.copyMode,
+      includeBrandLogo: brief.includeBrandLogo,
+      includeReraQr: brief.includeReraQr,
+      variationCount: brief.variationCount ?? env.CREATIVE_STYLE_VARIATION_COUNT,
+      referenceAssetIds: inferredReferenceSelection.referenceAssetIds,
+      truthBundle: {
+        brand: { id: brand.id, name: brand.name },
+        project: project ? { id: project.id, name: project.name, stage: project.stage } : null,
+        postType: { id: postType.id, code: postType.code, name: postType.name },
+        brandProfile: brandProfileVersion.profile,
+        assets: allAssets,
+        projectProfile: projectProfileVersion?.profile ?? null,
+        inferredReference: inferredReferenceSelection,
+        postTypeGuidance: postTypeGuidance.manifest,
+        autoCopyStripped
+      }
+    };
 
     const sessionToken = request.headers.authorization?.replace("Bearer ", "") || "";
     const { data: compileJob, error: jobError } = await supabaseAdmin
@@ -664,7 +766,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         workspace_id: brand.workspaceId,
         brand_id: brand.id,
         status: "pending",
-        input_brief: parsedBrief,
+        input_brief: preparedPayload,
         session_token: sessionToken
       })
       .select("id")
@@ -677,12 +779,9 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
     const jobId = compileJob.id;
 
-    // Trigger the Edge Function to process the job
     fetch(`${env.SUPABASE_URL}/functions/v1/process-compile-jobs`, {
       method: "POST"
-    }).catch(() => {
-      // Non-blocking - job will be picked up on next poll
-    });
+    }).catch(() => {});
 
     return { jobId, status: "pending" };
   });
