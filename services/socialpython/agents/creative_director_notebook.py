@@ -198,6 +198,7 @@ FESTIVAL OVERRIDE (MANDATORY when postTypeContract.playbookKey == "festival-post
 - Do not let typography or brand styling become the main subject. Brand influence should show up as taste, restraint, palette discipline, spacing, and a subtle footer/sign-off.
 - It is acceptable to describe festive poster containment for this route: invitation-card framing, central icon poster, lower greeting plaque, framed poster, airy header space, balanced decorative density.
 - Avoid project ads, amenity scenes, architectural hero shots, photoreal festive ads, and branded still-life photography unless the brief explicitly asks for that route.
+- These rules apply to EVERY variation, not only the primary route. Do not use interior still-life, architectural vignette, or lifestyle-photography alternatives as variation routes unless the brief explicitly asks for them.
 """.strip()
 
 SKILL_WORKFLOW_INSTRUCTION = """
@@ -323,6 +324,7 @@ def build_playbook_override(payload: dict[str, Any]) -> str:
         "- Brand colors and typography may influence taste and finish, but they must not turn the image into a luxury interior scene or a branded still life.\n"
         "- Do not default to serene architectural interiors, marble ledges, lifestyle photography, or building-led visuals unless the brief explicitly asks for that.\n"
         "- Prefer poster containment, symbolic composition, breathing room, curated multi-color festive palettes, and restrained ornament.\n\n"
+        "- Apply these constraints to every variation. Do not use still-life or interior variants as alternate routes unless the brief explicitly requests them.\n\n"
     )
 
 
