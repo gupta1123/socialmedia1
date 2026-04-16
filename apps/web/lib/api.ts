@@ -1094,6 +1094,21 @@ export function compileCreativeV2(token: string, payload: CompileCreativeV2Paylo
   });
 }
 
+export function compileCreativeV2Async(token: string, payload: CompileCreativeV2Payload) {
+  return request<{ jobId: string; status: string }>("/api/creative/compile-v2-async", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getCompileV2AsyncStatus(token: string, jobId: string) {
+  return request<{ status: string; result?: PromptPackage; error?: unknown }>(
+    `/api/creative/compile-v2-async/${jobId}`,
+    token
+  );
+}
+
 export function generateStyleSeeds(token: string, payload: StyleSeedRequest) {
   return request<{ id: string; requestId: string | null }>("/api/creative/style-seeds", token, {
     method: "POST",

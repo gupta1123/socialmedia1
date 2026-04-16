@@ -647,6 +647,76 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     return PromptPackageSchema.parse(promptPackage);
   });
 
+  app.post("/api/creative/compile-v2-async", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    const parsedBrief = CreativeCompileV2RequestSchema.parse(request.body);
+    const brand = await getBrand(parsedBrief.brandId);
+    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
+
+    const { data: compileJob, error: jobError } = await supabaseAdmin
+      .from("compile_jobs")
+      .insert({
+        workspace_id: brand.workspaceId,
+        brand_id: brand.id,
+        status: "pending",
+        input_brief: parsedBrief
+      })
+      .select("id")
+      .single();
+
+    if (jobError) {
+      request.log.error({ error: jobError }, "failed to create compile job");
+      return reply.code(500).send({ error: "Failed to create compile job" });
+    }
+
+    const jobId = compileJob.id;
+
+    // Trigger the Edge Function to process the job
+    fetch(`${env.SUPABASE_URL}/functions/v1/process-compile-jobs`, {
+      method: "POST"
+    }).catch(() => {
+      // Non-blocking - job will be picked up on next poll
+    });
+
+    return { jobId, status: "pending" };
+  });
+
+  app.get("/api/creative/compile-v2-async/:jobId", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    const { jobId } = request.params as { jobId: string };
+
+    const { data: compileJob, error: jobError } = await supabaseAdmin
+      .from("compile_jobs")
+      .select("*")
+      .eq("id", jobId)
+      .maybeSingle();
+
+    if (jobError || !compileJob) {
+      return reply.notFound();
+    }
+
+    const brand = await getBrand(compileJob.brand_id);
+    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
+
+    if (compileJob.status === "completed") {
+      return { status: "completed", result: compileJob.result };
+    }
+
+    if (compileJob.status === "failed") {
+      return { status: "failed", error: compileJob.error_json };
+    }
+
+    return { status: compileJob.status as "pending" | "processing" };
+  });
+
   app.post("/api/creative/style-seeds-v2", { preHandler: app.authenticate }, async (request, reply) => {
     const viewer = request.viewer;
     if (!viewer) {

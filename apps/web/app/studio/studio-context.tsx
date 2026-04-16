@@ -17,12 +17,14 @@ import {
   bootstrapSession,
   compileCreative,
   compileCreativeV2,
+  compileCreativeV2Async,
   createBrand,
   creativeFlowVersion,
   defaultStyleVariationCount,
   generateFinals,
   generateStyleSeeds,
   generateStyleSeedsV2,
+  getCompileV2AsyncStatus,
   styleVariationLimit,
   getCreativeJob,
   submitFeedback,
@@ -682,7 +684,7 @@ export function StudioProvider({
     }
   }
 
-  async function compilePromptPackage(options?: { silentSuccess?: boolean }) {
+  async function compilePromptPackage(options?: { silentSuccess?: boolean; useAsync?: boolean }) {
     if (!sessionToken || !activeBrandId) return null;
 
     setPendingAction("compile-prompt");
@@ -700,6 +702,35 @@ export function StudioProvider({
         brandId: activeBrandId,
         referenceAssetIds: briefForm.selectedReferenceAssetIds
       };
+
+      const useAsyncV2 = creativeFlowVersion === "v2" && (options?.useAsync ?? process.env.NEXT_PUBLIC_USE_ASYNC_COMPILE === "true");
+
+      if (useAsyncV2) {
+        const { jobId } = await compileCreativeV2Async(sessionToken, {
+          ...basePayload,
+          variationCount: styleVariationCount
+        });
+        setMessage("Compiling prompt (async)...");
+
+        for (let i = 0; i < 60; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          const status = await getCompileV2AsyncStatus(sessionToken, jobId);
+
+          if (status.status === "completed" && status.result) {
+            setPromptPackage(status.result);
+            setMessage("Prompt package compiled.");
+            return status.result;
+          }
+
+          if (status.status === "failed") {
+            const err = status.error as { message?: string } | undefined;
+            throw new Error(err?.message || "Async compile failed");
+          }
+        }
+
+        throw new Error("Compile timed out");
+      }
+
       const payload =
         creativeFlowVersion === "v2"
           ? await compileCreativeV2(sessionToken, {
