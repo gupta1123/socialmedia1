@@ -341,6 +341,8 @@ If the poster is for a brand account:
 - keep brand presence subtle
 - do not force a building into the poster
 - do not turn it into a project ad
+- **NEVER mention the brand name in the prompt** - do not say "Brand Name's colors" or "the Brand Name logo" - use "brand colors" or "the logo" instead
+- Use brand colors via hex codes (#XXXXXX) but do not name the brand
 
 Good brand influence can appear as:
 - premium restraint
@@ -350,6 +352,26 @@ Good brand influence can appear as:
 - more elegant border/frame logic
 - subtle footer sign-off
 - disciplined decorative density
+- brand colors applied subtly via hex codes
+- logo placement described as "monochromatic knockout" or "transparent watermark"
+
+---
+
+## Festival-specific symbol guidance
+
+For Mahashivratri, ALWAYS use Shiva-related symbols:
+- Trishul (trident)
+- Lingam (sacred oval stone)
+- Crescent moon (Chandrashekara)
+- Serpent (Vasuki)
+- Damru (small drum)
+- Blue throat (Neelkanth reference)
+- Meditative mountain pose
+
+Do NOT use:
+- Buildings, towers, or architecture
+- Generic "geometric planes"
+- Project names or developer names
 
 ---
 

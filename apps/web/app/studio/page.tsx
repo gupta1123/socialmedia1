@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { HomeOverview } from "@image-lab/contracts";
 import { getHomeOverview } from "../../lib/api";
 import { formatDisplayDateTime } from "../../lib/formatters";
@@ -9,6 +10,18 @@ import { useStudio } from "./studio-context";
 import { useRegisterTopbarActions } from "./topbar-actions-context";
 import { SkeletonRow } from "./skeleton";
 
+// Redirect to Create page by default
+export default function StudioHomePage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/studio/create?mode=ad-hoc");
+  }, [router]);
+
+  return null;
+}
+
+/*
 const EMPTY_OVERVIEW: HomeOverview = {
   dueToday: { count: 0, items: [] },
   needsReview: { count: 0, items: [] },
@@ -199,3 +212,4 @@ export default function StudioHomePage() {
     </div>
   );
 }
+*/

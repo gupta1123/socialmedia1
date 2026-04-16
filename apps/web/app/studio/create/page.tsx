@@ -139,8 +139,8 @@ const WORKSPACE_CREATE_MODE_OPTIONS: Array<{
   meta: string;
 }> = [
   { id: "post", label: "Post", meta: "Create a new post or start from a post task" },
-  { id: "campaign", label: "Campaign", meta: "Create a new campaign and plan posts inside it" },
-  { id: "series", label: "Series", meta: "Create a recurring content track, then add posts there" }
+  // { id: "campaign", label: "Campaign", meta: "Create a new campaign and plan posts inside it" },
+  // { id: "series", label: "Series", meta: "Create a recurring content track, then add posts there" }
 ];
 const objectiveOptions: Array<{ value: ObjectiveCode; label: string }> = [
   { value: "awareness", label: "Awareness" },
@@ -1084,14 +1084,16 @@ export default function CreatePage() {
   const hasActiveFinalJob = Boolean(latestActiveFinalJob);
   const activeFinalTemplateId = latestActiveFinalJob?.selectedTemplateId ?? null;
   const directionTargetCount =
-    promptPackage?.variations.length
-      ? promptPackage.variations.length
-      : hasActiveSeedJob
-        ? styleVariationCount
-        : latestActiveSeedJob?.requestedCount ?? 3;
+    latestActiveSeedJob?.requestedCount ??
+    (hasActiveSeedJob || pendingCanvasAction === "explore" || pendingAction === "generate-seeds"
+      ? styleVariationCount
+      : promptPackage?.variations.length || styleVariationCount);
   const optionTargetCount = isOneStageV2
-    ? promptPackage?.variations.length || runDetail?.promptPackage.variations.length || styleVariationCount
-    : latestActiveFinalJob?.requestedCount ?? 2;
+    ? latestActiveFinalJob?.requestedCount ??
+      (hasActiveFinalJob || pendingCanvasAction === "explore" || pendingAction === "generate-seeds"
+        ? styleVariationCount
+        : promptPackage?.variations.length || runDetail?.promptPackage.variations.length || styleVariationCount)
+    : latestActiveFinalJob?.requestedCount ?? styleVariationCount;
   const remainingDirectionSlots = latestActiveSeedJob
     ? Math.max(directionTargetCount - currentSeedTemplates.length, 0)
     : 0;
@@ -1210,8 +1212,8 @@ export default function CreatePage() {
     pendingAction === "compile-prompt"
       ? "We’re turning your brief into a production-ready prompt before generating directions."
       : pendingAction === "generate-seeds"
-        ? "Submitting three direction previews so you can compare the visual language before creating final options."
-        : "We’re rendering three direction previews now. They’ll appear here automatically as soon as they’re ready.";
+        ? `Submitting ${directionTargetCount} direction preview${directionTargetCount === 1 ? "" : "s"} so you can compare the visual language before creating final options.`
+        : `We’re rendering ${directionTargetCount} direction preview${directionTargetCount === 1 ? "" : "s"} now. They’ll appear here automatically as soon as they’re ready.`;
   const isGeneratingV2Options =
     isOneStageV2 &&
     currentFinalOutputs.length === 0 &&

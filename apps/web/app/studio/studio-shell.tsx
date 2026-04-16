@@ -9,29 +9,29 @@ import { StudioProvider, useStudio } from "./studio-context";
 import { TopbarActionsProvider, useTopbarActions } from "./topbar-actions-context";
 
 const navigation = [
-  {
-    href: "/studio",
-    label: "Home",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-        <polyline points="9 22 9 12 15 12 15 22"/>
-      </svg>
-    )
-  },
-  {
-    href: "/studio/plan",
-    label: "Plan",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 4h16v16H4z" />
-        <path d="M9 4v16" />
-        <path d="M15 4v16" />
-        <path d="M4 9h16" />
-        <path d="M4 15h16" />
-      </svg>
-    )
-  },
+  // {
+  //   href: "/studio",
+  //   label: "Home",
+  //   icon: (
+  //     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  //       <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+  //       <polyline points="9 22 9 12 15 12 15 22"/>
+  //     </svg>
+  //   )
+  // },
+  // {
+  //   href: "/studio/plan",
+  //   label: "Plan",
+  //   icon: (
+  //     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  //       <path d="M4 4h16v16H4z" />
+  //       <path d="M9 4v16" />
+  //       <path d="M15 4v16" />
+  //       <path d="M4 9h16" />
+  //       <path d="M4 15h16" />
+  //     </svg>
+  //   )
+  // },
   {
     href: "/studio/create?mode=ad-hoc",
     label: "Create",
@@ -78,18 +78,18 @@ const navigation = [
       </svg>
     )
   },
-  {
-    href: "/studio/calendar",
-    label: "Calendar",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="5" width="18" height="16" rx="2" />
-        <path d="M16 3v4" />
-        <path d="M8 3v4" />
-        <path d="M3 10h18" />
-      </svg>
-    )
-  },
+  // {
+  //   href: "/studio/calendar",
+  //   label: "Calendar",
+  //   icon: (
+  //     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  //       <rect x="3" y="5" width="18" height="16" rx="2" />
+  //       <path d="M16 3v4" />
+  //       <path d="M8 3v4" />
+  //       <path d="M3 10h18" />
+  //     </svg>
+  //   )
+  // },
   {
     href: "/studio/library",
     label: "Library",
