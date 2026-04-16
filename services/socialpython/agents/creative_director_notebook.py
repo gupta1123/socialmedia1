@@ -27,9 +27,7 @@ except (
     Skills = None
 
 
-DEFAULT_SKILLS_DIR = (
-    Path(__file__).resolve().parents[1] / "skills" / "prompt" / "v2"
-)
+DEFAULT_SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills" / "prompt" / "v2"
 
 SKILLS_DIR = Path(os.getenv("AGNO_AGENT_V2_SKILLS_DIR", str(DEFAULT_SKILLS_DIR)))
 
@@ -276,6 +274,114 @@ def truth_bundle() -> dict[str, Any]:
     return bundle
 
 
+def normalize_external_truth_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Normalize external truthBundle format (from Edge Function) to internal format."""
+    if bundle.get("brandTruth") is not None:
+        return bundle
+    if bundle.get("brand") is None:
+        return bundle
+
+    external = bundle
+    normalized: dict[str, Any] = {
+        "requestContext": {
+            "goal": external.get("goal"),
+            "offer": external.get("offer"),
+            "format": external.get("format"),
+            "prompt": external.get("prompt"),
+            "channel": external.get("channel"),
+            "audience": external.get("audience"),
+            "copyMode": external.get("copyMode"),
+            "exactText": external.get("exactText"),
+            "variationCount": external.get("variationCount"),
+            "includeBrandLogo": external.get("includeBrandLogo"),
+            "includeReraQr": external.get("includeReraQr"),
+            "referenceAssetIds": external.get("referenceAssetIds"),
+            "autoCopyStripped": external.get("autoCopyStripped"),
+        },
+        "brandTruth": _normalize_brand(external.get("brand")),
+        "projectTruth": _normalize_project(
+            external.get("project"), external.get("projectProfile")
+        ),
+        "postTypeContract": _normalize_post_type(
+            external.get("postType"), external.get("postTypeGuidance")
+        ),
+        "candidateAssets": external.get("assets") or [],
+        "generationContract": {
+            "aspectRatio": external.get("format"),
+            "variationCount": external.get("variationCount"),
+        },
+    }
+
+    if external.get("festival"):
+        normalized["festivalTruth"] = external.get("festival")
+
+    if external.get("inferredReference"):
+        normalized["inferredReference"] = external.get("inferredReference")
+
+    return normalized
+
+
+def _normalize_brand(brand: Any) -> dict[str, Any]:
+    if not isinstance(brand, dict):
+        return {}
+    profile = brand.get("profile") or {}
+    return {
+        "name": brand.get("name"),
+        "palette": profile.get("palette"),
+        "styleDescriptors": profile.get("styleDescriptors"),
+        "visualSystem": profile.get("visualSystem"),
+        "voice": profile.get("voice"),
+        "doRules": profile.get("doRules"),
+        "dontRules": profile.get("dontRules"),
+        "bannedPatterns": profile.get("bannedPatterns"),
+        "compliance": profile.get("compliance"),
+        "referenceCanon": profile.get("referenceCanon"),
+    }
+
+
+def _normalize_project(project: Any, projectProfile: Any) -> dict[str, Any]:
+    if not isinstance(project, dict):
+        return {}
+    profile = projectProfile or project.get("profile") or {}
+    return {
+        "id": project.get("id"),
+        "name": project.get("name"),
+        "stage": profile.get("stage"),
+        "tagline": profile.get("tagline"),
+        "positioning": profile.get("positioning"),
+        "lifestyleAngle": profile.get("lifestyleAngle"),
+        "audienceSegments": profile.get("audienceSegments"),
+        "heroAmenities": profile.get("heroAmenities"),
+        "amenities": profile.get("amenities"),
+        "locationAdvantages": profile.get("locationAdvantages"),
+        "nearbyLandmarks": profile.get("nearbyLandmarks"),
+        "constructionStatus": profile.get("constructionStatus"),
+        "latestUpdate": profile.get("latestUpdate"),
+        "approvedClaims": profile.get("approvedClaims"),
+        "bannedClaims": profile.get("bannedClaims"),
+        "legalNotes": profile.get("legalNotes"),
+        "credibilityFacts": profile.get("credibilityFacts"),
+        "reraNumber": profile.get("reraNumber"),
+        "actualProjectImageIds": profile.get("actualProjectImageIds"),
+        "sampleFlatImageIds": profile.get("sampleFlatImageIds"),
+    }
+
+
+def _normalize_post_type(post_type: Any, guidance: Any) -> dict[str, Any]:
+    if not isinstance(post_type, dict):
+        return {}
+    config = guidance or post_type.get("config") or {}
+    return {
+        "id": post_type.get("id"),
+        "code": post_type.get("code"),
+        "name": post_type.get("name"),
+        "config": config if isinstance(config, dict) else {},
+        "playbookKey": post_type.get("code", "").replace("-", "_") + "_playbook"
+        if post_type.get("code")
+        else None,
+    }
+
+
 def resolve_variation_count(payload: dict[str, Any]) -> int:
     request_context = truth_bundle().get("requestContext") or {}
     raw = request_context.get("variationCount", 3)
@@ -379,7 +485,9 @@ def list_candidate_assets() -> str:
 
 @tool()
 def get_available_project_amenities() -> str:
-    result = compact_json((truth_bundle().get("amenityResolution") or {}).get("availableAmenities") or [])
+    result = compact_json(
+        (truth_bundle().get("amenityResolution") or {}).get("availableAmenities") or []
+    )
     record_tool_call("get_available_project_amenities", result)
     return result
 
@@ -399,7 +507,9 @@ def get_assets_for_amenity(amenity_name: str) -> str:
             selected_option = option
             break
 
-    asset_ids = selected_option.get("assetIds") if isinstance(selected_option, dict) else []
+    asset_ids = (
+        selected_option.get("assetIds") if isinstance(selected_option, dict) else []
+    )
     assets = [asset for asset in all_assets if asset.get("id") in asset_ids]
     result = {
         "amenityName": amenity_name,
@@ -490,11 +600,17 @@ def get_assets_for_post_type(post_type_code: str) -> str:
         elif quality_tier in {"medium", "usable"}:
             score += 0.25
 
-        if post_type_code == "amenity-spotlight" and isinstance(amenity_focus, str) and amenity_focus.strip():
+        if (
+            post_type_code == "amenity-spotlight"
+            and isinstance(amenity_focus, str)
+            and amenity_focus.strip()
+        ):
             asset_amenity = metadata.get("amenityName") or ""
             asset_search_text = f"{asset.get('label', '')} {asset_amenity}".lower()
             normalized_focus = amenity_focus.strip().lower()
-            focus_tokens = [token for token in normalized_focus.split() if len(token) > 2]
+            focus_tokens = [
+                token for token in normalized_focus.split() if len(token) > 2
+            ]
             if normalized_focus in asset_search_text:
                 score += 5
             elif any(token in asset_search_text for token in focus_tokens):
@@ -520,7 +636,9 @@ def get_assets_for_post_type(post_type_code: str) -> str:
     result = {
         "postTypeCode": post_type_code,
         "preferredSubjectTypes": preferred_types,
-        "amenityFocus": amenity_focus if isinstance(amenity_focus, str) and amenity_focus.strip() else None,
+        "amenityFocus": amenity_focus
+        if isinstance(amenity_focus, str) and amenity_focus.strip()
+        else None,
         "heroAsset": hero_asset,
         "logoAsset": logo_asset,  # Can be used in prompt if includeBrandLogo=true
         "availableAssetCount": len(scored_assets),
@@ -723,7 +841,8 @@ def build_agent() -> Agent:
 
 
 def build_request_summary(payload: dict[str, Any]) -> str:
-    bundle = payload.get("truthBundle") or {}
+    raw_bundle = payload.get("truthBundle") or {}
+    bundle = normalize_external_truth_bundle(raw_bundle)
     brief = bundle.get("requestContext") or {}
     brand = bundle.get("brandTruth") or {}
     post_type = bundle.get("postTypeContract") or {}
@@ -767,7 +886,8 @@ def build_request_summary(payload: dict[str, Any]) -> str:
 
 
 def build_crafter_context(payload: dict[str, Any]) -> str:
-    bundle = payload.get("truthBundle") or {}
+    raw_bundle = payload.get("truthBundle") or {}
+    bundle = normalize_external_truth_bundle(raw_bundle)
     brief = bundle.get("requestContext") or {}
     brand = bundle.get("brandTruth") or {}
     project = bundle.get("projectTruth") or {}
