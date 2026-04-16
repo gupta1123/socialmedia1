@@ -312,7 +312,9 @@ def normalize_external_truth_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
             "referenceAssetIds": external.get("referenceAssetIds"),
             "autoCopyStripped": external.get("autoCopyStripped"),
         },
-        "brandTruth": _normalize_brand(external.get("brand")),
+        "brandTruth": _normalize_brand(
+            external.get("brand"), external.get("brandProfile")
+        ),
         "projectTruth": _normalize_project(
             external.get("project"), external.get("projectProfile")
         ),
@@ -410,10 +412,11 @@ def _normalize_external_assets(assets: list[Any], project: Any) -> list[dict[str
     return normalized
 
 
-def _normalize_brand(brand: Any) -> dict[str, Any]:
+def _normalize_brand(brand: Any, brandProfile: Any = None) -> dict[str, Any]:
     if not isinstance(brand, dict):
         return {}
-    profile = brand.get("profile") or {}
+    nested_profile = brand.get("profile")
+    profile = nested_profile if nested_profile is not None else (brandProfile or {})
     return {
         "name": brand.get("name"),
         "palette": profile.get("palette"),
