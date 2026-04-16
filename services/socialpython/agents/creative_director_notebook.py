@@ -527,6 +527,9 @@ def _normalize_post_type(post_type: Any, guidance: Any) -> dict[str, Any]:
         "playbookKey": post_type.get("code", "").replace("-", "_") + "_playbook"
         if post_type.get("code")
         else None,
+        "amenityFocus": guidance.get("amenityFocus")
+        if isinstance(guidance, dict)
+        else None,
     }
 
 
@@ -665,6 +668,12 @@ def get_assets_for_amenity(amenity_name: str) -> str:
         "assets": assets,
         "hasExactAssetMatch": bool(assets),
     }
+
+    if selected_option and asset_ids:
+        resolution["selectedAmenity"] = selected_option.get("name")
+        resolution["selectedAssetIds"] = asset_ids
+        resolution["hasExactAssetMatch"] = bool(assets)
+
     record_tool_call(
         "get_assets_for_amenity",
         compact_json(result),
