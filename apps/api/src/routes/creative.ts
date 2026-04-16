@@ -808,7 +808,21 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
 
     if (compileJob.status === "completed") {
-      return { status: "completed", result: compileJob.result };
+      try {
+        const result = await buildAsyncV2PromptPackage({
+          brand,
+          compileJob
+        });
+        return { status: "completed", result };
+      } catch (error) {
+        request.log.error({ error, jobId }, "failed to materialize async v2 compile result");
+        return {
+          status: "failed",
+          error: {
+            message: error instanceof Error ? error.message : "Async compile returned an invalid result"
+          }
+        };
+      }
     }
 
     if (compileJob.status === "failed") {
@@ -2695,6 +2709,222 @@ function resolvePromptPackageReferenceAssets(
     brandLogoAsset: brandLogoAssetId ? brandAssets.find((asset) => asset.id === brandLogoAssetId) ?? null : null,
     complianceQrAsset: reraQrAssetId ? brandAssets.find((asset) => asset.id === reraQrAssetId) ?? null : null,
   };
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asOptionalString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function asOptionalBoolean(value: unknown) {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function asUuidArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && /^[0-9a-f-]{36}$/i.test(item))
+    : [];
+}
+
+function normalizeAsyncReferenceStrategy(referenceStrategy: unknown, referenceAssetIds: string[]) {
+  if (
+    referenceStrategy === "generated-template" ||
+    referenceStrategy === "uploaded-references" ||
+    referenceStrategy === "hybrid"
+  ) {
+    return referenceStrategy;
+  }
+
+  return referenceAssetIds.length > 0 ? "uploaded-references" : "generated-template";
+}
+
+function normalizeAsyncTemplateType(templateType: unknown) {
+  return templateType === "hero" ||
+      templateType === "product-focus" ||
+      templateType === "testimonial" ||
+      templateType === "announcement" ||
+      templateType === "quote" ||
+      templateType === "offer"
+    ? templateType
+    : undefined;
+}
+
+function normalizeAsyncVariations(
+  value: unknown,
+  fallback: {
+    seedPrompt: string;
+    finalPrompt: string;
+    referenceStrategy: "generated-template" | "uploaded-references" | "hybrid";
+  }
+) {
+  const rows = Array.isArray(value) ? value : [];
+  const normalized = rows
+    .map((row, index) => {
+      const record = asObject(row);
+      const seedPrompt = asOptionalString(record.seedPrompt);
+      const finalPrompt = asOptionalString(record.finalPrompt);
+      if (!seedPrompt || !finalPrompt) {
+        return null;
+      }
+
+      return {
+        id: asOptionalString(record.id) ?? `variation_${index + 1}`,
+        title: asOptionalString(record.title) ?? `Variation ${index + 1}`,
+        strategy: asOptionalString(record.strategy) ?? "Distinct creative route",
+        seedPrompt,
+        finalPrompt,
+        referenceStrategy: normalizeAsyncReferenceStrategy(record.referenceStrategy, []),
+        differenceFromOthers: asOptionalString(record.differenceFromOthers),
+        resolvedConstraints: asObject(record.resolvedConstraints),
+        compilerTrace: asObject(record.compilerTrace)
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+  if (normalized.length > 0) {
+    return normalized;
+  }
+
+  return [
+    {
+      id: "variation_1",
+      title: "Primary route",
+      strategy: "Primary route",
+      seedPrompt: fallback.seedPrompt,
+      finalPrompt: fallback.finalPrompt,
+      referenceStrategy: fallback.referenceStrategy,
+      differenceFromOthers: undefined,
+      resolvedConstraints: {},
+      compilerTrace: {}
+    }
+  ];
+}
+
+async function buildAsyncV2PromptPackage(params: {
+  brand: Awaited<ReturnType<typeof getBrand>>;
+  compileJob: {
+    id: string;
+    brand_id: string;
+    workspace_id: string;
+    input_brief: unknown;
+    result: unknown;
+  };
+}) {
+  const inputBrief = asObject(params.compileJob.input_brief);
+  const rawResultEnvelope = asObject(params.compileJob.result);
+  const rawCompiled = asObject("result" in rawResultEnvelope ? rawResultEnvelope.result : rawResultEnvelope);
+
+  const brandProfileVersion = await getActiveBrandProfile(params.brand.id);
+  const truthBundle = asObject(inputBrief.truthBundle);
+  const truthProjectProfile = asObject(truthBundle.projectProfile);
+  const inferredReference = asObject(truthBundle.inferredReference);
+  const rawResolvedConstraints = asObject(rawCompiled.resolvedConstraints);
+  const rawCompilerTrace = asObject(rawCompiled.compilerTrace);
+  const allAssets = await listBrandAssets(params.brand.id);
+
+  const referenceAssetIds = asUuidArray(inputBrief.referenceAssetIds);
+  const selectedBrandLogoAsset =
+    asOptionalBoolean(inputBrief.includeBrandLogo) === true
+      ? allAssets.find((asset) => asset.kind === "logo") ?? null
+      : null;
+  const selectedReraQrAsset =
+    asOptionalBoolean(inputBrief.includeReraQr) === true
+      ? allAssets.find((asset) => asset.kind === "rera_qr") ?? null
+      : null;
+
+  const brief = CreativeBriefSchema.parse({
+    brandId: params.brand.id,
+    createMode: asOptionalString(inputBrief.createMode) ?? "post",
+    deliverableId: asOptionalString(inputBrief.deliverableId),
+    campaignId: asOptionalString(inputBrief.campaignId),
+    campaignPlanId: asOptionalString(inputBrief.campaignPlanId),
+    seriesId: asOptionalString(inputBrief.seriesId),
+    festivalId: asOptionalString(inputBrief.festivalId),
+    sourceOutputId: asOptionalString(inputBrief.sourceOutputId),
+    projectId: asOptionalString(inputBrief.projectId),
+    postTypeId: asOptionalString(inputBrief.postTypeId),
+    creativeTemplateId: asOptionalString(inputBrief.creativeTemplateId),
+    calendarItemId: asOptionalString(inputBrief.calendarItemId),
+    channel: inputBrief.channel,
+    format: inputBrief.format,
+    goal: inputBrief.goal,
+    prompt: inputBrief.prompt,
+    audience: asOptionalString(inputBrief.audience),
+    copyMode: inputBrief.copyMode === "auto" ? "auto" : "manual",
+    offer: asOptionalString(inputBrief.offer),
+    exactText: asOptionalString(inputBrief.exactText),
+    referenceAssetIds,
+    includeBrandLogo: asOptionalBoolean(inputBrief.includeBrandLogo) ?? false,
+    includeReraQr: asOptionalBoolean(inputBrief.includeReraQr) ?? false,
+    variationCount: typeof inputBrief.variationCount === "number" ? inputBrief.variationCount : undefined
+  });
+
+  const referenceStrategy = normalizeAsyncReferenceStrategy(rawCompiled.referenceStrategy, referenceAssetIds);
+  const seedPrompt = asOptionalString(rawCompiled.seedPrompt) ?? asOptionalString(rawCompiled.finalPrompt) ?? "";
+  const finalPrompt = asOptionalString(rawCompiled.finalPrompt) ?? seedPrompt;
+  if (!seedPrompt || !finalPrompt) {
+    throw new Error("Async compile result is missing prompts");
+  }
+
+  return PromptPackageSchema.parse({
+    id: params.compileJob.id,
+    workspaceId: params.brand.workspaceId,
+    brandId: params.brand.id,
+    deliverableId: null,
+    projectId: asOptionalString(inputBrief.projectId) ?? null,
+    postTypeId: asOptionalString(inputBrief.postTypeId) ?? null,
+    creativeTemplateId: asOptionalString(inputBrief.creativeTemplateId) ?? null,
+    calendarItemId: asOptionalString(inputBrief.calendarItemId) ?? null,
+    creativeRequestId: params.compileJob.id,
+    brandProfileVersionId: brandProfileVersion.id,
+    promptSummary: asOptionalString(rawCompiled.promptSummary) ?? "Compiled prompt package",
+    seedPrompt,
+    finalPrompt,
+    aspectRatio: asOptionalString(rawCompiled.aspectRatio) ?? "1:1",
+    chosenModel: asOptionalString(rawCompiled.chosenModel) ?? "unknown",
+    templateType: normalizeAsyncTemplateType(rawCompiled.templateType),
+    referenceStrategy,
+    referenceAssetIds,
+    variations: normalizeAsyncVariations(rawCompiled.variations, {
+      seedPrompt,
+      finalPrompt,
+      referenceStrategy
+    }),
+    resolvedConstraints: {
+      ...rawResolvedConstraints,
+      projectImageAssetIds: asUuidArray(truthProjectProfile.actualProjectImageIds),
+      sampleFlatImageIds: asUuidArray(truthProjectProfile.sampleFlatImageIds),
+      amenityImageAssetIds: asUuidArray(inferredReference.amenityAssetIds),
+      includeBrandLogo: brief.includeBrandLogo,
+      includeReraQr: brief.includeReraQr,
+      brandLogoAssetId: selectedBrandLogoAsset?.id ?? null,
+      brandLogoLabel: selectedBrandLogoAsset?.label ?? null,
+      reraQrAssetId: selectedReraQrAsset?.id ?? null,
+      reraQrLabel: selectedReraQrAsset?.label ?? null,
+      postTypeGuidance: rawResolvedConstraints.postTypeGuidance ?? asObject(truthBundle.postTypeGuidance)
+    },
+    compilerTrace: {
+      ...rawCompilerTrace,
+      ...asObject(rawResultEnvelope.trace),
+      runtime: rawResultEnvelope.runtime,
+      sourceBrief: brief,
+      preview: true,
+      previewId: `preview_v2_${params.compileJob.id}`,
+      endpoint: "/api/creative/compile-v2",
+      persisted: false,
+      postTypeCode: asOptionalString(asObject(truthBundle.postType).code) ?? asOptionalString(rawCompilerTrace.postTypeCode),
+      promptDetailMode: "poster-spec",
+      autoCopySanitized:
+        typeof rawCompilerTrace.autoCopySanitized === "boolean"
+          ? rawCompilerTrace.autoCopySanitized
+          : asOptionalBoolean(truthBundle.autoCopyStripped) ?? false
+    }
+  });
 }
 
 async function failJobSubmission(jobId: string, error: unknown) {
