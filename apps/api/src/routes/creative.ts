@@ -657,13 +657,15 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const brand = await getBrand(parsedBrief.brandId);
     await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
 
+    const sessionToken = request.headers.authorization?.replace("Bearer ", "") || "";
     const { data: compileJob, error: jobError } = await supabaseAdmin
       .from("compile_jobs")
       .insert({
         workspace_id: brand.workspaceId,
         brand_id: brand.id,
         status: "pending",
-        input_brief: parsedBrief
+        input_brief: parsedBrief,
+        session_token: sessionToken
       })
       .select("id")
       .single();
