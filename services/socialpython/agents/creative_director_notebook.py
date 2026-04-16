@@ -190,6 +190,14 @@ Example of CORRECT prompt:
 
 Example of INCORRECT prompt (NEVER write this - this is instructional, not descriptive):
 "Design a construction update poster for Miami with a contemporary style. The header should occupy the upper portion, followed by a content area describing project progress. Reserve the footer for branding."
+
+FESTIVAL OVERRIDE (MANDATORY when postTypeContract.playbookKey == "festival-post-playbook"):
+- Festival-first beats brand-first. The festival symbol, ritual object, devotional motif, or illustrative system must be the hero.
+- Poster-first beats photograph-first. Default to a premium festive poster, invitation-card, symbolic graphic, or lightly textured illustration unless the brief explicitly asks for photography.
+- Do not default to interiors, architecture, marble ledges, serene luxury spaces, or lifestyle scenes just to make the image feel premium.
+- Do not let typography or brand styling become the main subject. Brand influence should show up as taste, restraint, palette discipline, spacing, and a subtle footer/sign-off.
+- It is acceptable to describe festive poster containment for this route: invitation-card framing, central icon poster, lower greeting plaque, framed poster, airy header space, balanced decorative density.
+- Avoid project ads, amenity scenes, architectural hero shots, photoreal festive ads, and branded still-life photography unless the brief explicitly asks for that route.
 """.strip()
 
 SKILL_WORKFLOW_INSTRUCTION = """
@@ -292,6 +300,30 @@ def resolve_llm_config() -> tuple[str, str]:
             os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash"),
         )
     return ("openai", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
+
+
+def is_festival_playbook(payload: dict[str, Any]) -> bool:
+    bundle = normalize_external_truth_bundle(payload.get("truthBundle") or {})
+    post_type = bundle.get("postTypeContract") or {}
+    return post_type.get("playbookKey") == "festival-post-playbook"
+
+
+def build_playbook_override(payload: dict[str, Any]) -> str:
+    if not is_festival_playbook(payload):
+        return ""
+
+    festival = (normalize_external_truth_bundle(payload.get("truthBundle") or {}).get("festivalTruth") or {})
+    festival_name = festival.get("name") or "festival greeting"
+    return (
+        "## Playbook Override\n"
+        f"This request is using `festival-post-playbook` for {festival_name}.\n"
+        "- Keep the result festival-first, not project-first or architecture-first.\n"
+        "- Default to a premium festive poster, invitation-card composition, symbolic devotional graphic, or lightly textured illustration.\n"
+        "- Use one clear festival hero idea, one poster archetype, one illustration family, and controlled decorative density.\n"
+        "- Brand colors and typography may influence taste and finish, but they must not turn the image into a luxury interior scene or a branded still life.\n"
+        "- Do not default to serene architectural interiors, marble ledges, lifestyle photography, or building-led visuals unless the brief explicitly asks for that.\n"
+        "- Prefer poster containment, symbolic composition, breathing room, curated multi-color festive palettes, and restrained ornament.\n\n"
+    )
 
 
 def truth_bundle() -> dict[str, Any]:
@@ -1072,6 +1104,7 @@ def build_crafter_context(payload: dict[str, Any]) -> str:
     brand = bundle.get("brandTruth") or {}
     project = bundle.get("projectTruth") or {}
     post_type = bundle.get("postTypeContract") or {}
+    festival = bundle.get("festivalTruth") or {}
     amenity_resolution = bundle.get("amenityResolution") or {}
     generation = bundle.get("generationContract") or {}
     exact_assets = bundle.get("exactAssetContract") or {}
@@ -1092,6 +1125,7 @@ def build_crafter_context(payload: dict[str, Any]) -> str:
             "imageTreatment": (brand.get("visualSystem") or {}).get("imageTreatment"),
         },
         "projectName": project.get("name"),
+        "festivalName": festival.get("name"),
         "postTypeCode": post_type.get("code"),
         "playbookKey": post_type.get("playbookKey"),
         "amenityFocus": post_type.get("amenityFocus"),
@@ -1309,6 +1343,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             "Using the analyzed brief and preloaded skills below, return the final prompt package JSON.\n"
             f"Create exactly {resolve_variation_count(normalized_payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
             "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n\n"
+            f"{build_playbook_override(normalized_payload)}"
             "## Loaded Skills\n"
             f"{skill_packet}\n\n"
             "## Request Truth Context\n"
@@ -1349,6 +1384,7 @@ def execute_with_trace(
             "Using the analyzed brief and preloaded skills below, return the final prompt package JSON.\n"
             f"Create exactly {resolve_variation_count(normalized_payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
             "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n\n"
+            f"{build_playbook_override(normalized_payload)}"
             "## Loaded Skills\n"
             f"{skill_packet}\n\n"
             "## Request Truth Context\n"

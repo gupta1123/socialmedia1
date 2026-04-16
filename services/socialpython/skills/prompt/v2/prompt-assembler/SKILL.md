@@ -20,12 +20,14 @@ Use this skill after planning.
 - Do not make logo placement a headline design decision. If logo is enabled, describe it only as a small supplied footer/corner signature or omit it.
 - Seed prompts should be looser than final prompts, but both must stay truthful.
 
-## Brand Colors & Typography (MANDATORY for ALL post types)
-- You MUST apply the brand palette (primary, secondary, accent, neutrals) to ALL visual elements: typography, overlay tints, divider lines, accent elements, and any graphic embellishments.
-- Use the exact headline font family and body font family specified in the brand's visualSystem. Match the typography mood (e.g., bold contemporary sans-serif, refined serif, etc.).
+## Brand Colors & Typography (MANDATORY for ALL post types, with festive exception behavior)
+- You MUST apply the brand palette (primary, secondary, accent, neutrals) to ALL visual elements: typography, overlay tints, divider lines, accent elements, graphic embellishments, and any symbolic/festive decorations.
 - Typography must feel premium and cohesive with the image - the fonts should look like they belong in the scene, not pasted on top of it.
 - Brand colors should guide the overall color grading and mood of the image so text and visuals feel unified.
-- When specifying text elements, describe them using the brand's exact font style (e.g., "bold Gotham sans-serif", "clean Helvetica Neue", "refined Playfair Display serif").
+- When specifying text elements, use the brand's font style to describe them (e.g., "bold Gotham sans-serif text" or "clean contemporary typography").
+- For FESTIVE GREETINGS without text overlays: Incorporate brand colors into the festive imagery itself (e.g., diyas/flames in brand accent color, rangoli patterns using brand palette, festive decorations in brand colors, or overall color grading that reflects the brand palette).
+- For ALL post types: The brand's imageTreatment (e.g., "warm natural light", "premium realism") should guide the photography style and lighting mood.
+- FESTIVE GREETING EXCEPTION: The festival remains the hero. Brand influence should mostly show up as palette discipline, restraint, finish quality, spacing, and subtle sign-off treatment. Do not let brand typography or premium lifestyle styling turn the prompt into an interior scene, architectural still life, or project ad.
 
 ## Logo Integration (MANDATORY when logo is enabled)
 - The brand logo must integrate SEAMLESSLY with the image - it should look like it belongs in the scene, NOT like a sticker or clip-art pasted on top.
@@ -41,6 +43,7 @@ Use this skill after planning.
 - NEVER use words like: design, create a poster, layout, structure, zones, header, footer, strip, area
 - Instead describe what the IMAGE LOOKS LIKE: what is shown in the scene, how it is lit, what mood it conveys
 - Think: "What would a photographer or director capture?" not "What should a designer create?"
+- FESTIVE GREETING EXCEPTION: For `festival-post-playbook`, you may use poster-archetype language such as invitation-card composition, central icon poster, framed poster, greeting plaque, airy header space, or contained devotional graphic, because that route is intentionally poster-first rather than photography-first. Even then, keep the prompt concise and visual, not like designer instructions.
 
 ## Prompt Writing Pattern
 For the final prompt, write as if describing a photograph/artwork to someone who cannot see it:
@@ -78,6 +81,7 @@ For the final prompt, write as if describing a photograph/artwork to someone who
 - site-visit-invite: Use the project exterior as hero. Reference it as "the site reference".
 - location-advantage: Use the aerial/street view as hero. Reference it as "the location reference".
 - festive-greeting: Can be standalone (no hero image) or use an interior/generic reference as mood anchor.
+- festive-greeting: Prefer standalone symbolic/illustrative poster logic by default. Do not default to an interior, architectural vignette, marble styling surface, or luxury lifestyle scene unless the brief explicitly asks for that direction.
 
 ## Construction update specific
 - For construction updates with a project anchor, say: "Use the supplied project image as the identity reference."
