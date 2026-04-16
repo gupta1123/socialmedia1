@@ -194,7 +194,7 @@ const defaultBriefForm: BriefFormState = {
   goal: "Drive enquiries for a premium residential project",
   prompt: "Create a premium real-estate post with a clear visual angle and restrained copy.",
   audience: "Homebuyers and investors",
-  copyMode: "manual",
+  copyMode: "auto",
   offer: "",
   exactText: "",
   includeBrandLogo: false,

@@ -2978,7 +2978,7 @@ export default function CreatePage() {
                         The agent will decide whether the image needs a headline or CTA, then write concise copy that fits the brief and format.
                       </p>
                     ) : (
-                      <div className="create-field-group-row">
+                      <>
                         <label className="create-field-label">
                           Offer / CTA
                           <input
@@ -2998,7 +2998,7 @@ export default function CreatePage() {
                             className="create-field-input"
                           />
                         </label>
-                      </div>
+                      </>
                     )}
                   </div>
                 </div>
