@@ -167,6 +167,18 @@ def runtime_diagnostics(agent: Any | None = None) -> dict[str, Any]:
     skills_runtime_available = SKILLS_DIR.exists()
     supabase_url = os.getenv("SUPABASE_URL", "").strip()
     supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    use_openrouter = os.getenv("USE_OPENROUTER", "false").lower() == "true"
+    llm_provider = "openrouter" if use_openrouter else "openai"
+    llm_model = (
+        os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash")
+        if use_openrouter
+        else os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    )
+    llm_base_url = (
+        "https://openrouter.ai/api/v1"
+        if use_openrouter
+        else os.getenv("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1"
+    )
 
     return {
         "skillsRuntimeAvailable": skills_runtime_available,
@@ -181,6 +193,10 @@ def runtime_diagnostics(agent: Any | None = None) -> dict[str, Any]:
         "skillFirstMode": os.getenv("AGNO_SKILL_FIRST_MODE", "0") == "1",
         "openAiTimeoutSec": float(os.getenv("AGNO_OPENAI_TIMEOUT_SEC", "20")),
         "openAiMaxRetries": int(os.getenv("AGNO_OPENAI_MAX_RETRIES", "1")),
+        "useOpenRouter": use_openrouter,
+        "llmProvider": llm_provider,
+        "llmModel": llm_model,
+        "llmBaseUrl": llm_base_url,
         "supabaseConfigured": bool(supabase_url and supabase_service_role_key),
         "supabaseHost": urlparse(supabase_url).netloc if supabase_url else None,
     }
@@ -1031,7 +1047,11 @@ class PromptLabHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 {
                     "ok": True,
-                    "agentReady": bool(os.getenv("OPENAI_API_KEY")),
+                    "agentReady": bool(
+                        os.getenv("OPENROUTER_API_KEY")
+                        if os.getenv("USE_OPENROUTER", "false").lower() == "true"
+                        else os.getenv("OPENAI_API_KEY")
+                    ),
                     "mode": os.getenv("CREATIVE_DIRECTOR_MODE", "agno"),
                     "openAiModel": os.getenv("OPENAI_MODEL", "unset"),
                     "runtime": runtime_diagnostics()

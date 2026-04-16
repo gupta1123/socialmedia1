@@ -31,12 +31,16 @@ class ImageEditPlanOutput(BaseModel):
     targetObject: str
     editIntent: str
     rewrittenPrompt: str
-    segmentationHints: SegmentationHintsOutput = Field(default_factory=SegmentationHintsOutput)
+    segmentationHints: SegmentationHintsOutput = Field(
+        default_factory=SegmentationHintsOutput
+    )
     ambiguityNotes: list[str] = Field(default_factory=list)
     plannerTrace: dict[str, Any] = Field(default_factory=dict)
 
 
-DEFAULT_SKILLS_DIR = Path(__file__).resolve().parents[1] / "skills" / "image-edit" / "v1"
+DEFAULT_SKILLS_DIR = (
+    Path(__file__).resolve().parents[1] / "skills" / "image-edit" / "v1"
+)
 
 SKILLS_DIR = Path(os.getenv("AI_EDIT_DIRECTOR_SKILLS_DIR", str(DEFAULT_SKILLS_DIR)))
 
@@ -73,19 +77,33 @@ def list_local_skill_names() -> list[str]:
     if not SKILLS_DIR.exists():
         return []
 
-    return sorted(path.name for path in SKILLS_DIR.iterdir() if path.is_dir() and (path / "SKILL.md").is_file())
+    return sorted(
+        path.name
+        for path in SKILLS_DIR.iterdir()
+        if path.is_dir() and (path / "SKILL.md").is_file()
+    )
+
+
+def use_openrouter_for_llm() -> bool:
+    return os.getenv("USE_OPENROUTER", "false").lower() == "true"
 
 
 def build_agent() -> Agent:
-    base_url = os.getenv("OPENAI_BASE_URL")
+    use_openrouter = use_openrouter_for_llm()
     model_kwargs: dict[str, Any] = {
-        "id": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
         "timeout": float(os.getenv("AGNO_OPENAI_TIMEOUT_SEC", "20")),
         "max_retries": int(os.getenv("AGNO_OPENAI_MAX_RETRIES", "1")),
     }
 
-    if base_url:
-        model_kwargs["base_url"] = base_url
+    if use_openrouter:
+        model_kwargs["id"] = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash")
+        model_kwargs["api_key"] = os.getenv("OPENROUTER_API_KEY")
+        model_kwargs["base_url"] = "https://openrouter.ai/api/v1"
+    else:
+        base_url = os.getenv("OPENAI_BASE_URL")
+        model_kwargs["id"] = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+        if base_url:
+            model_kwargs["base_url"] = base_url
 
     instructions = [
         "You are an AI Edit Planner for a mask-based image editing tool.",
@@ -143,7 +161,9 @@ def execute(agent: Agent, payload: dict[str, Any]) -> dict[str, Any]:
         return decorate_result(ImageEditPlanOutput.model_validate(content).model_dump())
 
     if isinstance(content, str):
-        return decorate_result(ImageEditPlanOutput.model_validate_json(content).model_dump())
+        return decorate_result(
+            ImageEditPlanOutput.model_validate_json(content).model_dump()
+        )
 
     raise RuntimeError(f"Unexpected Agno output type: {type(content)!r}")
 
@@ -176,9 +196,15 @@ def run_persistent() -> None:
 
         try:
             result = execute(agent, request["payload"])
-            print(json.dumps({"request_id": request_id, "ok": True, "result": result}), flush=True)
+            print(
+                json.dumps({"request_id": request_id, "ok": True, "result": result}),
+                flush=True,
+            )
         except Exception as exc:  # pragma: no cover
-            print(json.dumps({"request_id": request_id, "ok": False, "error": str(exc)}), flush=True)
+            print(
+                json.dumps({"request_id": request_id, "ok": False, "error": str(exc)}),
+                flush=True,
+            )
 
 
 def main() -> None:

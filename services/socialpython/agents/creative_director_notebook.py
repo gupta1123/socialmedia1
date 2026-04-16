@@ -281,6 +281,19 @@ def choose_image_model() -> str:
     return os.getenv("FAL_FINAL_MODEL", "fal-ai/nano-banana/edit")
 
 
+def use_openrouter_for_llm() -> bool:
+    return os.getenv("USE_OPENROUTER", "false").lower() == "true"
+
+
+def resolve_llm_config() -> tuple[str, str]:
+    if use_openrouter_for_llm():
+        return (
+            "openrouter",
+            os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash"),
+        )
+    return ("openai", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
+
+
 def truth_bundle() -> dict[str, Any]:
     bundle = current_payload().get("truthBundle")
     if not isinstance(bundle, dict):
@@ -916,15 +929,21 @@ def build_agents() -> tuple[Agent, Agent]:
     if AGENTS is not None:
         return AGENTS
 
-    base_url = os.getenv("OPENAI_BASE_URL")
+    use_openrouter = use_openrouter_for_llm()
     model_kwargs: dict[str, Any] = {
-        "id": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         "timeout": float(os.getenv("AGNO_OPENAI_TIMEOUT_SEC", "20")),
         "max_retries": int(os.getenv("AGNO_OPENAI_MAX_RETRIES", "1")),
     }
 
-    if base_url:
-        model_kwargs["base_url"] = base_url
+    if use_openrouter:
+        model_kwargs["id"] = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash")
+        model_kwargs["api_key"] = os.getenv("OPENROUTER_API_KEY")
+        model_kwargs["base_url"] = "https://openrouter.ai/api/v1"
+    else:
+        base_url = os.getenv("OPENAI_BASE_URL")
+        model_kwargs["id"] = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        if base_url:
+            model_kwargs["base_url"] = base_url
 
     brief_analyst = Agent(
         name="Brief Analyst",
@@ -1350,6 +1369,7 @@ def execute_with_trace(
             if call.get("toolName") == "get_skill_instructions"
         ]
 
+        llm_provider, llm_model = resolve_llm_config()
         trace = {
             "eventCount": len(tool_calls),
             "toolCallCount": len(tool_calls),
@@ -1359,8 +1379,8 @@ def execute_with_trace(
             "skillToolCalls": skill_tool_calls,
             "runId": None,
             "sessionId": None,
-            "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            "modelProvider": "openai-responses",
+            "model": llm_model,
+            "modelProvider": llm_provider,
             "analystOutput": analyst_output,
             "loadedSkillNames": loaded_skill_names,
             "loadedSkillCount": len(loaded_skill_names),
