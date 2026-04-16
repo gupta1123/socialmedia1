@@ -755,6 +755,19 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         projectProfile: projectProfileVersion?.profile ?? null,
         inferredReference: inferredReferenceSelection,
         postTypeGuidance: postTypeGuidance.manifest,
+        festivalTruth: festival
+          ? {
+              id: festival.id,
+              code: festival.code,
+              name: festival.name,
+              category: festival.category,
+              community: festival.community,
+              regions: festival.regions,
+              meaning: festival.meaning,
+              dateLabel: festival.dateLabel,
+              nextOccursOn: festival.nextOccursOn,
+            }
+          : null,
         autoCopyStripped
       }
     };
