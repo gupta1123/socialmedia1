@@ -21,6 +21,8 @@ Use this skill for style exploration and any multi-variation request.
 - Do not vary by inventing unsupported camera sources such as aerial/drone/from-above views.
 - For `festival-post-playbook`, vary inside festival-poster families only: central icon poster, invitation-card poster, motif-frame poster, symbolic silhouette poster, or restrained illustrative composition.
 - For `festival-post-playbook`, vary poster archetype, ornament density, palette mood, icon treatment, and text placement rhythm. Do not vary into interior still-life, luxury lifestyle, architecture-led, or photoreal ceremonial scene routes unless the brief explicitly asks for them.
+- For `festival-post-playbook`, do not let all routes collapse into centered-card logic. At least one route should break center symmetry when the festival allows it.
+- For `festival-post-playbook`, do not reduce every route to dual-tone. Use softened 4-5 color palettes when culturally appropriate.
 - For construction updates, vary the property-first treatment: overlay position, headline placement, footer strip, image crop balance, daylight mood, and brand-color accent usage.
 - For construction updates, do not use close-up/detail crop as a variation route unless the brief explicitly asks for facade detail, material detail, slab work, or close-up progress.
 - For construction updates, do not vary by adding dashboard-like cards, chips, task rows, or UI panels.

@@ -28,6 +28,7 @@ Use this skill after planning.
 - For FESTIVE GREETINGS without text overlays: Incorporate brand colors into the festive imagery itself (e.g., diyas/flames in brand accent color, rangoli patterns using brand palette, festive decorations in brand colors, or overall color grading that reflects the brand palette).
 - For ALL post types: The brand's imageTreatment (e.g., "warm natural light", "premium realism") should guide the photography style and lighting mood.
 - FESTIVE GREETING EXCEPTION: The festival remains the hero. Brand influence should mostly show up as palette discipline, restraint, finish quality, spacing, and subtle sign-off treatment. Do not let brand typography or premium lifestyle styling turn the prompt into an interior scene, architectural still life, or project ad.
+- FESTIVE GREETING EXCEPTION: Use 4-5 softened curated colors when the festival truth benefits from it. Do not collapse festive or patriotic posters into brand-only dual-tone unless the brief explicitly asks for a monochrome or two-tone route.
 
 ## Logo Integration (MANDATORY when logo is enabled)
 - The brand logo must integrate SEAMLESSLY with the image - it should look like it belongs in the scene, NOT like a sticker or clip-art pasted on top.
@@ -45,6 +46,7 @@ Use this skill after planning.
 - Think: "What would a photographer or director capture?" not "What should a designer create?"
 - FESTIVE GREETING EXCEPTION: For `festival-post-playbook`, you may use poster-archetype language such as invitation-card composition, central icon poster, framed poster, greeting plaque, airy header space, or contained devotional graphic, because that route is intentionally poster-first rather than photography-first. Even then, keep the prompt concise and visual, not like designer instructions.
 - FESTIVE GREETING EXCEPTION: Unless the brief explicitly asks for photography, do not use shot-language such as studio quality, shallow depth of field, top-down shot, wide-angle interior, prop styling, or cinematic still-life phrasing.
+- FESTIVE GREETING EXCEPTION: Do not default to the same centered emblem/card on a dark solid background. Vary poster logic and allow asymmetry, bands, framing systems, and layered color-fields where appropriate.
 
 ## Prompt Writing Pattern
 For the final prompt, write as if describing a photograph/artwork to someone who cannot see it:
