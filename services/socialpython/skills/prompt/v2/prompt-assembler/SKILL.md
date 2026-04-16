@@ -20,6 +20,21 @@ Use this skill after planning.
 - Do not make logo placement a headline design decision. If logo is enabled, describe it only as a small supplied footer/corner signature or omit it.
 - Seed prompts should be looser than final prompts, but both must stay truthful.
 
+## Brand Colors & Typography (MANDATORY for ALL post types)
+- You MUST apply the brand palette (primary, secondary, accent, neutrals) to ALL visual elements: typography, overlay tints, divider lines, accent elements, and any graphic embellishments.
+- Use the exact headline font family and body font family specified in the brand's visualSystem. Match the typography mood (e.g., bold contemporary sans-serif, refined serif, etc.).
+- Typography must feel premium and cohesive with the image - the fonts should look like they belong in the scene, not pasted on top of it.
+- Brand colors should guide the overall color grading and mood of the image so text and visuals feel unified.
+- When specifying text elements, describe them using the brand's exact font style (e.g., "bold Gotham sans-serif", "clean Helvetica Neue", "refined Playfair Display serif").
+
+## Logo Integration (MANDATORY when logo is enabled)
+- The brand logo must integrate SEAMLESSLY with the image - it should look like it belongs in the scene, NOT like a sticker or clip-art pasted on top.
+- NEVER describe a white or solid-color background behind the logo - the logo must appear with transparency/knockout against the image.
+- If the image has a light/white sky or background, use a version of the logo that has good contrast (e.g., dark logo on light areas, or light logo on dark areas).
+- Position the logo subtly: small footer corner, bottom-right signature zone, or integrated into the design in a way that feels natural to the scene.
+- The logo should enhance brand recognition without distracting from the main subject.
+- Never say "logo on a white background" or "logo with white backing" - instead say the logo should be placed where it naturally contrasts with the image.
+
 ## CRITICAL - Describe the IMAGE, not the LAYOUT
 - Your prompts go to an IMAGE GENERATION MODEL (like FAL or DALL-E), NOT to a graphic designer
 - NEVER describe layout structure like "header at top", "content area in middle", "footer at bottom"

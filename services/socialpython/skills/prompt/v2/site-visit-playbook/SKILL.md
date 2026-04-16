@@ -26,7 +26,22 @@ Invite action without sounding cheap.
 - Use a small brand/header area, one invitation headline zone, one short support line, and one quiet footer/signature treatment.
 - Avoid crowded offer bars, stacked CTA behavior, and hard-sell sales styling.
 
+## Brand Colors & Typography (MANDATORY)
+- Apply the brand palette (primary, secondary, accent, neutrals) to typography, CTA elements, overlay accents, and graphic embellishments.
+- Use the brand's exact headline font family for headlines and CTA text.
+- Typography must feel premium and cohesive with the project imagery - NOT like a sticker on top.
+- Brand colors should unify the invitation imagery with the text.
+- When describing text in the scene, use the brand's exact font style (e.g., "bold Gotham sans-serif invitation text").
+
+## Logo Integration (when enabled)
+- Logo must integrate seamlessly with the project imagery - NOT look like a sticker on top.
+- Never place logo on a white/solid background - use transparent logo that blends naturally with the scene.
+- Position subtly in a footer corner or signature zone where it contrasts naturally with the image.
+- The logo should enhance brand recognition without distracting from the invite CTA.
+
 ## Must not leak
 - Hard-sell discount energy
 - Overcrowded CTA stacks
 - Generic fake property imagery
+- Text that doesn't match brand typography style
+- Logo that looks pasted on top of the scene

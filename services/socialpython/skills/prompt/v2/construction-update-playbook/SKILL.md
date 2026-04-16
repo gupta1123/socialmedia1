@@ -34,6 +34,19 @@ Write prompts that answer: "What do I see in this image?"
 Example good prompt structure:
 "A premium real estate photograph showing [PROJECT NAME] tower at [VISIBLE CONSTRUCTION STAGE]. The [CONSTRUCTION ELEMENTS - scaffolding/glass installation/balconies] dominate the frame. Natural overcast daylight illuminates the facade. Clean branded text '[TEXT]' appears on the building. Minimal sky, 85% building in frame. Photography style: clean, premium, trust-building."
 
+## Brand Colors & Typography (MANDATORY)
+- Apply the brand palette (primary, secondary, accent, neutrals) to typography, overlay elements, divider lines, and small accents.
+- Use the brand's exact headline font family for branded text and headlines.
+- Typography must feel premium and integrated with the construction imagery - NOT like a sticker on top.
+- Brand colors should unify the construction scene with the text overlays.
+- When describing text in the scene, use the brand's exact font style (e.g., "bold Gotham sans-serif branded text").
+
+## Logo Integration (when enabled)
+- Logo must integrate seamlessly with the construction imagery - NOT look like a sticker on top.
+- Never place logo on a white/solid background - use transparent logo that blends naturally with the scene.
+- Position subtly in a footer corner or signature zone where it contrasts naturally with the image.
+- The logo should feel like part of the scene, not an afterthought.
+
 ## Must not leak
 - Completed lifestyle fantasy scenes with furniture, people enjoying amenities
 - Generic stock construction graphics or stock building photos
@@ -42,3 +55,5 @@ Example good prompt structure:
 - Finished-possession visuals (furnished rooms, happy families) when construction progress is the ask
 - Dashboard-style overlays, progress meters, infographics, pie charts
 - Software UI, dashboards, app screens, cards, chips, task boards
+- Text that doesn't match brand typography style
+- Logo that looks pasted on top of the scene
