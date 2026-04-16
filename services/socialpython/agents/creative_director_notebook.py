@@ -139,24 +139,40 @@ Return a distilled prompt package, not a manifest dump.
 - Each variation must have its own seedPrompt and finalPrompt; both should describe one finished post option, not a draft style board.
 - Variation prompts must differ in composition strategy, visual hierarchy, mood/lighting, and copy treatment.
 - Do not make variations minor rewordings of the same prompt.
-- Keep both prompts image-first. Do not dump brand manifest prose into them, but do be explicit about layout, text-safe zones, graphic hierarchy, overlay treatment, and negative constraints.
+- Keep both prompts IMAGE-FIRST. You are writing for an IMAGE GENERATION MODEL (FAL/DALL-E), not giving instructions to a graphic designer.
+
+🚨 CRITICAL - Write DESCRIPTIVE prompts, not INSTRUCTIONAL prompts:
+
+✅ DESCRIBE WHAT THE IMAGE LOOKS LIKE:
+- "A modern apartment tower showing construction progress with scaffolding on upper floors, concrete facade in natural daylight"
+- "Luxurious amenity clubhouse interior with floor-to-ceiling windows, plush seating, modern architecture"
+- "Aerial view of residential complex surrounded by landscaping, warm sunset lighting"
+
+❌ NEVER USE INSTRUCTIONAL/LAYOUT LANGUAGE:
+- ❌ "Design a poster with header at top, content area in middle, footer at bottom"
+- ❌ "Create a graphic with logo in corner, text overlay in designated safe zones"
+- ❌ "Layout should have the property as hero with brand strip overlay"
+- ❌ "Use a composition with header zone, content zone, and footer zone"
+
+Think: "What would a photographer or film director capture?" not "What should a graphic designer create?"
+
 - Use the analyst output plus loaded skills to synthesize, not restate.
-- If exact text is provided, preserve it exactly.
-- If logo or RERA QR toggles are on, require exact supplied assets or clean omission. Never invent placeholders.
+- If exact text is provided, describe how it appears visually in the scene ("bold white text reading 'LAUNCH' positioned at top of frame")
+- If logo or RERA QR toggles are on, describe them as visual elements ("small brand logo watermark at bottom right" or "RERA QR code visible in corner")
+- Never invent placeholders - if not enabled, omit mention entirely
 - Never describe mood boards, tiled boards, mockup sheets, artboards, multiple posters, or "style exploration" inside one frame.
 - Top-level seedPrompt and finalPrompt must be aliases of variations[0].seedPrompt and variations[0].finalPrompt.
-- Prefer a detailed poster-spec order inside finalPrompt:
-  1. output type / aspect ratio / campaign intent
-  2. hero subject truth from supplied asset(s)
-  3. poster structure and zone plan
-  4. text hierarchy and allowed copy behavior
-  5. graphic system, palette, typography mood, logo/QR behavior
-  6. scene / lighting / material direction
-  7. explicit negative prompt
+
+Final prompt order (describe in this sequence, but write naturally):
+1. Main subject and setting (what is the image OF - the building, amenity, scene)
+2. Visible characteristics (construction stage, lighting, mood, colors)
+3. Text elements as they appear visually (not as "header" or "footer" but as positioned text)
+4. Composition note (dominates frame, 80% subject, etc.)
+5. Negative constraints (what to avoid)
 
 🚨 CRITICAL - Asset Usage - NEVER do this:
 - ❌ DO NOT say "Image 1 is the amenity truth reference (filename.jpg)"
-- ❌ DO NOT say "Image 2 is the project reference" 
+- ❌ DO NOT say "Image 2 is the project reference"
 - ❌ DO NOT say "Image 3 is supporting reference"
 - ❌ DO NOT list multiple image filenames in the prompt
 - ❌ DO NOT say "use Image 1 for X, Image 2 for Y"
@@ -169,13 +185,11 @@ Return a distilled prompt package, not a manifest dump.
 - ✅ "Include the brand logo in the footer as supplied."
 - ✅ If no reference needed: describe the scene without mentioning images
 
-The prompt goes to an image generation model that may receive one hero reference plus a very small number of secondary references from the system. Never narrate them as "Image 1", "Image 2", or filename lists. Describe the role of the reference in plain text and keep the hero reference primary.
-
 Example of CORRECT prompt:
-"Create a premium amenity spotlight showing a kids' room with soft natural lighting. Use the amenity reference as the hero. Include 'Amenity Spotlight' text at top in refined font. Add project name as brand context."
+"A premium real estate photograph showing a modern apartment tower mid-construction. Scaffolding visible on upper floors, concrete facade in natural overcast daylight. The building dominates 85% of the frame. Bold white brand text 'PROJECT NAME' appears on the upper portion of the building. Clean, professional photography style. No logos, no people, no text other than the brand name."
 
-Example of INCORRECT prompt (NEVER write this):
-"Image 1 is the amenity (kids_room.jpg), Image 2 is the project (tower.jpg), Image 3 is mood (interior.png)..."
+Example of INCORRECT prompt (NEVER write this - this is instructional, not descriptive):
+"Design a construction update poster for Miami with a contemporary style. The header should occupy the upper portion, followed by a content area describing project progress. Reserve the footer for branding."
 """.strip()
 
 SKILL_WORKFLOW_INSTRUCTION = """

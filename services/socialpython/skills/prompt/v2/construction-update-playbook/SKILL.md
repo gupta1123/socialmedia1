@@ -18,27 +18,27 @@ Show visible construction progress and build trust without drifting away from th
 - Do not invent exact dates, percentages, workers, cranes, machinery, milestone labels, or handover claims unless provided in the brief or project truth.
 - If no progress level is provided, use generic visible progress language rather than a precise completion claim.
 
-## Composition families
-- Full-bleed property progress image with one quiet brand-colored overlay
-- Medium-wide construction progress hero with a minimal headline/status strip
-- Photography-led trust update with one restrained footer/proof line
-- Render-to-progress reinterpretation using the supplied project identity and minimal brand-system overlay
+## Visual Direction (describe scenes, not layouts)
+When writing prompts for construction updates, think like a photographer describing what to capture:
 
-## Required prompt behavior
-- The prompt must explicitly read as a construction/progress update, not a generic architecture beauty shot.
-- The property/construction image must dominate the frame. Aim for a full-bleed or near full-bleed visual with 75-90% of the canvas led by the project image.
-- Use minimal brand-colored overlay elements only: project name, one construction update headline, one short status/progress line, and optionally one restrained footer/proof line.
-- Use the saved brand palette for typography, overlay tint, thin divider lines, and small accents. Do not use generic orange sunset styling by default.
-- Default framing is medium-wide or full-building, so the project remains recognizable from podium to upper structure.
-- Include one restrained update cue: headline-safe overlay, slim footer strip, or small status label. Do not create a dashboard, multi-card layout, or dense infographic.
-- Use language like "visible progress", "active project update", "build quality", "site progress", or "trust-led update" only when supported by the brief.
-- Keep typography sparse, but do not omit the update structure entirely.
-- Do not create close-up/detail crops unless the brief explicitly asks for facade detail, material detail, slab work, or close-up progress.
+- **Visual anchors**: What does the project look like RIGHT NOW? Partially completed facade? Scaffolding on upper floors? Glass panels being installed? Concrete structure visible?
+- **Setting**: Daylit construction site with the building as hero, surrounded by safety barriers or temporary fencing, construction equipment visible or implied, clear Pune/Mumbai sky backdrop
+- **Mood**: Trust-building realism, clean professional photography, premium real estate photography style, not stock real estate brochure
+- **Lighting**: Natural daylight (overcast or soft sun preferred), clean bright atmosphere, avoid harsh shadows or orange sunset defaults
+- **Brand elements**: Text appears as clean white or brand-colored lettering on the building facade or as subtle overlay - describe as "branded text reading '[text]'" not "header zone with brand strip"
+- **Progress cues**: Show scaffolding levels, unfinished balcony railings, glass-not-yet-installed windows, construction activity implied through visible site conditions
+
+## Describe visible subject matter first
+Write prompts that answer: "What do I see in this image?"
+
+Example good prompt structure:
+"A premium real estate photograph showing [PROJECT NAME] tower at [VISIBLE CONSTRUCTION STAGE]. The [CONSTRUCTION ELEMENTS - scaffolding/glass installation/balconies] dominate the frame. Natural overcast daylight illuminates the facade. Clean branded text '[TEXT]' appears on the building. Minimal sky, 85% building in frame. Photography style: clean, premium, trust-building."
 
 ## Must not leak
-- Completed lifestyle fantasy
-- Generic stock construction graphics
+- Completed lifestyle fantasy scenes with furniture, people enjoying amenities
+- Generic stock construction graphics or stock building photos
 - Exaggerated percentages or unsupported milestone claims
-- Lifestyle-family or amenity-led launch composition unless explicitly requested
-- Finished-possession visuals when the post is asking for construction progress
-- Software UI, dashboards, app screens, cards, chips, task boards, browser chrome, form fields, or wireframe language
+- Interior lifestyle shots when exterior construction is the brief
+- Finished-possession visuals (furnished rooms, happy families) when construction progress is the ask
+- Dashboard-style overlays, progress meters, infographics, pie charts
+- Software UI, dashboards, app screens, cards, chips, task boards

@@ -19,9 +19,32 @@ Use this skill after planning.
 - Keep logo and QR instructions short and exact.
 - Do not make logo placement a headline design decision. If logo is enabled, describe it only as a small supplied footer/corner signature or omit it.
 - Seed prompts should be looser than final prompts, but both must stay truthful.
-- For final prompts, prefer a poster-spec order: output type and intent, hero truth, layout/zones, text behavior, graphic system, lighting/materials, then negative prompt.
-- For text-bearing real-estate posts, explicitly describe the poster zones: brand/header strip, headline-safe zone, support/CTA zone, hero area, footer/signature zone.
-- Make it clear how many overlays, cards, badges, or chips are allowed. Default to very few.
+
+## CRITICAL - Describe the IMAGE, not the LAYOUT
+- Your prompts go to an IMAGE GENERATION MODEL (like FAL or DALL-E), NOT to a graphic designer
+- NEVER describe layout structure like "header at top", "content area in middle", "footer at bottom"
+- NEVER use words like: design, create a poster, layout, structure, zones, header, footer, strip, area
+- Instead describe what the IMAGE LOOKS LIKE: what is shown in the scene, how it is lit, what mood it conveys
+- Think: "What would a photographer or director capture?" not "What should a designer create?"
+
+## Prompt Writing Pattern
+For the final prompt, write as if describing a photograph/artwork to someone who cannot see it:
+- Start with the MAIN SUBJECT and its VISIBLE CHARACTERISTICS
+- Add the SETTING and BACKDROP
+- Describe LIGHTING and MOOD
+- Mention TEXT ELEMENTS only as they appear visually ("bold white text reading 'LAUNCH' at top")
+- End with any negative constraints (what to avoid)
+
+## Example GOOD prompts (for FAL/DALL-E style image gen):
+✅ "A premium real estate construction progress shot showing a modern apartment tower mid-construction in Pune. The tower dominates the frame with scaffolding visible on upper floors, concrete facade in warm natural daylight. Clean brand name text 'PROJECT NAME' appears at top. Minimalist composition with 80% building, 20% sky. No logos, no people."
+✅ "Create a wide-angle photograph of a luxury clubhouse interior with natural light streaming through floor-to-ceiling windows. Plush seating arrangement in foreground, modern architecture throughout. Text overlay 'AMENITY' in clean sans-serif at bottom left corner."
+✅ "An aerial view of a residential complex showing lush landscaping surrounding modern low-rise buildings. Sunset lighting creates warm golden tones. Small brand logo watermark at bottom right. Realistic photography style, no illustrations."
+
+## Example BAD prompts (NEVER write these):
+❌ "Design a poster with header at top, content in middle, footer at bottom"
+❌ "Create a social media graphic with brand strip at top and CTA at bottom"
+❌ "Layout should have the property image as hero, logo in bottom corner, text overlays in designated safe zones"
+❌ "The composition uses a header zone, content zone, and footer zone"
 
 ## Asset Usage Rules (CRITICAL)
 - ALWAYS use only ONE hero image in the prompt. The Brief Analyst has already selected the best asset via get_assets_for_post_type.
