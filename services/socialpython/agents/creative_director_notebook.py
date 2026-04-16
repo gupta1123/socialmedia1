@@ -1176,7 +1176,8 @@ def normalize_prompt_package(
                 if asset.get("id")
             ],
             "amenityImageAssetIds": amenity_resolution.get("selectedAssetIds") or [],
-            "amenityFocus": post_type_contract.get("amenityFocus"),
+            "amenityFocus": post_type_contract.get("amenityFocus")
+            or amenity_resolution.get("selectedAmenity"),
             "projectAnchorAssetId": exact_asset_contract.get(
                 "requiredProjectAnchorAssetId"
             ),
