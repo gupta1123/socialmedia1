@@ -324,6 +324,9 @@ def normalize_external_truth_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
         "candidateAssets": _normalize_external_assets(
             external.get("assets") or [], external.get("project")
         ),
+        "amenityResolution": _build_amenity_resolution(
+            external.get("projectProfile") or {}, external.get("assets") or []
+        ),
         "generationContract": {
             "aspectRatio": _derive_aspect_ratio_from_external(external),
             "variationCount": external.get("variationCount"),
@@ -410,6 +413,59 @@ def _normalize_external_assets(assets: list[Any], project: Any) -> list[dict[str
             }
         )
     return normalized
+
+
+def _build_amenity_resolution(
+    project_profile: Any, assets: list[Any]
+) -> dict[str, Any]:
+    """Build amenityResolution from project profile amenities and assets."""
+    if not isinstance(project_profile, dict):
+        return {
+            "availableAmenities": [],
+            "selectedAmenity": None,
+            "selectedAssetIds": [],
+            "hasExactAssetMatch": False,
+        }
+
+    hero_amenities = project_profile.get("heroAmenities") or []
+    amenities = project_profile.get("amenities") or []
+
+    all_amenity_names = []
+    seen = set()
+    for name in hero_amenities + amenities:
+        normalized = str(name).strip()
+        if normalized and normalized.lower() not in seen:
+            seen.add(normalized.lower())
+            all_amenity_names.append(normalized)
+
+    asset_map: dict[str, list[str]] = {}
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        metadata = asset.get("metadataJson") or {}
+        amenity_name = metadata.get("amenityName")
+        if amenity_name:
+            normalized = str(amenity_name).strip()
+            if normalized:
+                if normalized not in asset_map:
+                    asset_map[normalized] = []
+                asset_id = asset.get("id")
+                if asset_id:
+                    asset_map[normalized].append(asset_id)
+
+    available_amenities = []
+    for amenity_name in all_amenity_names:
+        entry: dict[str, Any] = {"name": amenity_name, "assetIds": []}
+        if amenity_name in asset_map:
+            entry["assetIds"] = asset_map[amenity_name]
+        available_amenities.append(entry)
+
+    return {
+        "availableAmenities": available_amenities,
+        "selectedAmenity": None,
+        "selectedAssetIds": [],
+        "hasExactAssetMatch": False,
+    }
 
 
 def _normalize_brand(brand: Any, brandProfile: Any = None) -> dict[str, Any]:
