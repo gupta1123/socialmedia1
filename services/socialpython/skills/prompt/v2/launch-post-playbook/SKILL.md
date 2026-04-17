@@ -42,12 +42,13 @@ The image should:
 
 ## Non-negotiable rules
 
-1. **Use the real project image as truth anchor**
-2. **Preserve exact building identity**
-3. **Keep the project as the hero**
-4. **Design it as a social poster, not a plain render**
-5. **Use a clear launch-message zone**
-6. **Keep hierarchy strong and clean**
+1. **BRIEF OVERRIDES THIS SKILL: If the brief explicitly specifies mood, lighting, style, colors, or atmosphere, that ALWAYS takes priority over any preference in this skill. For example: if brief says "Night view", use night lighting even if this skill suggests daylight.**
+2. **Use the real project image as truth anchor**
+3. **Preserve exact building identity**
+4. **Keep the project as the hero**
+5. **Design it as a social poster, not a plain render**
+6. **Use a clear launch-message zone**
+7. **Keep hierarchy strong and clean**
 7. **Avoid brochure clutter**
 8. **Do not overfill with legal/compliance unless required in brief**
 
@@ -119,7 +120,9 @@ Do **not** ask for:
 - random decorative clutter
 
 ### 4. Define mood
-Prefer:
+**IMPORTANT: These are defaults only - if the brief specifies different mood/lighting, ALWAYS follow the brief.**
+
+Prefer (when brief doesn't specify):
 - clean daylight
 - soft premium daylight
 - quiet dusk / early evening

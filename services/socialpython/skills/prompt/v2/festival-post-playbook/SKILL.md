@@ -102,18 +102,19 @@ Variety should happen **inside good taste**, not by becoming flashy.
 
 ## Non-negotiable principles
 
-1. **Festival-first, not project-first**
-2. **Poster-first, not plain image-first**
-3. **Premium restraint over loud celebration**
-4. **Illustrative / graphic treatment over photoreal festival fantasy**
-5. **Controlled multi-color is welcome**
-6. **Muted does not mean beige-only**
-7. **Use whitespace and containment**
-8. **One strong hero idea is better than many competing ideas**
-9. **Decorative systems should feel intentional, not crowded**
-10. **Every prompt should pick a clear aesthetic family before writing**
-11. **Do not let every festival collapse into the same centered premium card**
-12. **Do not reduce culturally rich festivals to only one dark background plus one metallic accent unless the brief explicitly asks for that**
+1. **BRIEF OVERRIDES THIS SKILL: If the brief explicitly specifies mood, lighting, style, colors, atmosphere, or visual direction, that ALWAYS takes priority over any preference in this skill.**
+2. **Festival-first, not project-first**
+3. **Poster-first, not plain image-first**
+4. **Premium restraint over loud celebration**
+5. **Illustrative / graphic treatment over photoreal festival fantasy**
+6. **Controlled multi-color is welcome**
+7. **Muted does not mean beige-only**
+8. **Use whitespace and containment**
+9. **One strong hero idea is better than many competing ideas**
+10. **Decorative systems should feel intentional, not crowded**
+11. **Every prompt should pick a clear aesthetic family before writing**
+12. **Do not let every festival collapse into the same centered premium card**
+13. **Do not reduce culturally rich festivals to only one dark background plus one metallic accent unless the brief explicitly asks for that**
 
 ---
 
@@ -206,6 +207,8 @@ Avoid glossy 3D, photoreal, or hyper-rendered festive art.
 ---
 
 ### Step 4 — Choose a palette mood
+**IMPORTANT: If the brief specifies colors, or the brand provides a palette, those take priority. These palette mood examples are defaults when brief doesn't specify.**
+
 Muted does **not** mean beige-only.
 
 Use 3 to 5 coordinated colors.
