@@ -2047,6 +2047,7 @@ function buildV2CompactGuardrailClauses(input: Input) {
   const sharedClauses = [
     "One complete image only.",
     `This must read like a finished poster-style ${deriveAspectRatio(input.brief.format)} social creative, not a short mood note or generic concept summary.`,
+    "CRITICAL: The brief is the source of truth. Follow the brief's explicit requirements exactly (mood, lighting, colors, atmosphere, style). Playbook skill rules are defaults that apply only when the brief does NOT specify.",
     "Describe the image in a practical production order: output type and campaign intent, hero subject truth, poster structure and text-safe zones, graphic system and typography treatment, scene/light direction, then the negative prompt.",
     "If any supplied reference is an amenity image, use exactly one amenity image as the subject-truth reference for that output. Do not merge multiple amenity references or different facilities into the same scene.",
     buildBrandPaletteClause(input),

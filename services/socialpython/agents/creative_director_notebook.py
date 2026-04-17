@@ -133,6 +133,15 @@ The prompt crafter will use only these selected assets in the final prompt packa
 CRAFTER_OUTPUT_INSTRUCTION = """
 Return a distilled prompt package, not a manifest dump.
 
+🚨 CRITICAL - BRIEF IS THE SOURCE OF TRUTH (ALWAYS):
+- ALWAYS follow the brief's explicit requirements exactly: mood, lighting, style, subject, colors, atmosphere, composition preference, etc.
+- Playbook skill rules provide quality standards and fill gaps ONLY when the brief does NOT specify something.
+- If brief says "Night view" → the image MUST be night view, regardless of any playbook preference for daylight.
+- If brief says "warm tones" or "golden hour" → use warm tones, even if playbook prefers cool palette.
+- If brief says "minimalist" → prioritize minimalism even if playbook normally suggests richer decoration.
+- If brief specifies a mood, lighting, color temperature, or visual direction → it overrides any conflicting playbook default.
+- The playbook is the "how to do it well" guide; the brief is the "what to do" mandate.
+
 - seedPrompt: compatibility alias only; make it the same finished-post intent as finalPrompt.
 - finalPrompt: detailed, resolved, production-ready, single-image poster-spec post option.
 - variations: create exactly the requested number of distinct finished post options.
@@ -204,6 +213,11 @@ FESTIVAL OVERRIDE (MANDATORY when postTypeContract.playbookKey == "festival-post
 
 SKILL_WORKFLOW_INSTRUCTION = """
 Use the provided Loaded Skills packet as your skill context.
+
+🚨 CRITICAL - BRIEF OVERRIDES SKILL RULES:
+- The brief is the source of truth. If the brief explicitly specifies something (mood, lighting, colors, style, atmosphere), that ALWAYS takes priority over any skill or playbook preference.
+- Skills provide quality standards, defaults, and fill gaps when brief doesn't specify. They do NOT override explicit brief requirements.
+- If brief says "Night view" and a skill says "prefer daylight" → brief wins.
 
 - Treat every listed skill as already loaded.
 - Do not call, fetch, or request skill instructions again.
@@ -314,7 +328,12 @@ def build_playbook_override(payload: dict[str, Any]) -> str:
     if not is_festival_playbook(payload):
         return ""
 
-    festival = (normalize_external_truth_bundle(payload.get("truthBundle") or {}).get("festivalTruth") or {})
+    festival = (
+        normalize_external_truth_bundle(payload.get("truthBundle") or {}).get(
+            "festivalTruth"
+        )
+        or {}
+    )
     festival_name = festival.get("name") or "festival greeting"
     return (
         "## Playbook Override\n"
