@@ -164,17 +164,31 @@ Use when needed:
 ---
 
 ## Text / Messaging Rules (MANDATORY)
-Construction update posts usually include a small amount of status messaging.
 
-Use:
-- exact status text from the brief, if provided
-- otherwise use safe generic construction-update language
+Construction update posts MUST have multiple layers of text for good poster design:
 
-Typical text layers may include:
-- main headline such as "Construction Update"
-- short support line describing visible progress
-- project name or project label
-- month / phase / tower label only if provided in the brief
+**CRITICAL: Never use single-line text. Always include BOTH headline AND support line.**
+
+**REQUIRED text hierarchy:**
+1. **Headline** (main focal text) - Bold, prominent. Examples: "Construction Update", "Site Progress", "Work in Progress"
+2. **Support line** (descriptive subtitle BELOW headline) - CRITICAL! Examples:
+   - "Structures taking shape,梦想 at Level 15"
+   - "Progress rising steadily towards completion"
+   - "Modern living taking form floor by floor"
+   - "Excellence under construction"
+3. **Footer** (optional small element) - logo or brand name
+
+**Bad (reject):** "Construction Update" alone
+**Good (accept):** "Construction Update" + "Structures rising at Level 15"
+
+The support line must describe WHAT is visible in the image - the progress, the stage, what can be seen.
+
+**Good examples:**
+- Headline: "Construction Update" + Support: "Structure taking shape at Level 12"
+- Headline: "Site Progress" + Support: "Modern living comes to life"  
+- Headline: "Work In Progress" + Support: "Excellence rising floor by floor"
+
+Do NOT use only: "Construction Update"
 
 Do not invent:
 - percentages
@@ -205,11 +219,18 @@ If no brief text is given, keep messaging generic and credible, for example:
 ## Default prompt template
 
 ```text
-Create a premium real-estate construction update social poster using the supplied project image as the truth anchor. Preserve the exact building identity, silhouette, massing, facade rhythm, podium proportions, and real visible progress state. The image should feel photoreal, credible, and builder-grade.
+Create a premium real-estate construction update social poster.
 
-The result should read as a designed social-media post rather than a raw site photo. Keep the building as the hero and add a refined graphic design treatment with clear hierarchy, clean visual containment, and a polished premium finish. The design layer should feel restrained and modern, not like a dashboard or cluttered progress sheet.
+MUST include TWO lines of text on the image:
+1. HEADLINE in bold: Something like "Construction Update", "Site Progress", or "Work In Progress"
+2. SUPPORT LINE below headline: Describe what can be seen, like "Structures rising at Level 12", "Modern living taking form", "Progressing steadily towards completion"
 
-Use neutral daylight or soft overcast premium light. Keep the composition architectural, trustworthy, and visually clean. Avoid infographic overload, fake percentages, fake milestone claims, orange cinematic glow, excessive workers, heavy machinery spectacle, flyer clutter, or any distortion of the project's true identity.
+Example format on image:
+- Top area: "CONSTRUCTION UPDATE" (bold, large)
+- Below it: "Structures taking shape,梦想 at Level 12" (smaller, descriptive)
+- Bottom corner: small logo or "Pride Group"
+
+Use the project image as truth anchor. Add refined graphic design treatment. Keep building as hero. Text in bold Gotham sans-serif. Use brand colors for accents.
 ```
 
 ## Must not leak
