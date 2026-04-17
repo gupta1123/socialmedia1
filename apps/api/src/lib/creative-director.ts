@@ -2004,6 +2004,10 @@ function buildV2AgentPayload(input: Input): V2AgentPayload {
   };
 }
 
+export function buildCanonicalV2AgentPayload(input: CreativeDirectorInput): V2AgentPayload {
+  return buildV2AgentPayload(normalizeCreativeDirectorInput(input));
+}
+
 function buildBrandPaletteClause(input: Input) {
   const { primary, secondary, accent } = input.brandProfile.palette;
   return `Use the saved brand palette for graphic elements: primary ${primary}, secondary ${secondary}, accent ${accent}. Apply these to typography, overlays, divider lines, and restrained highlights instead of generic colors.`;

@@ -286,7 +286,6 @@ export default function CreatePage() {
   const [runDetail, setRunDetail] = useState<CreativeRunDetail | null>(null);
   const [runLoading, setRunLoading] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
-  const [compiledFingerprint, setCompiledFingerprint] = useState<string | null>(null);
   const [runRefreshToken, setRunRefreshToken] = useState(0);
   const [pendingCanvasAction, setPendingCanvasAction] = useState<"explore" | null>(null);
   const [activePicker, setActivePicker] = useState<CreatePicker | null>(null);
@@ -879,10 +878,14 @@ export default function CreatePage() {
     [creativeFlowVersion, promptPackage]
   );
 
+  const canReuseCompiledPromptPackage = Boolean(
+    promptPackage &&
+      promptPackageFingerprint &&
+      promptPackageFingerprint === briefFingerprint
+  );
   const isCompiledStale = Boolean(
     promptPackage &&
-      (promptPackageFingerprint ?? compiledFingerprint) &&
-      (promptPackageFingerprint ?? compiledFingerprint) !== briefFingerprint
+      (!promptPackageFingerprint || promptPackageFingerprint !== briefFingerprint)
   );
   const isPreviewPromptPackage =
     promptPackage?.compilerTrace?.preview === true && promptPackage.compilerTrace?.persisted === false;
@@ -1381,9 +1384,8 @@ export default function CreatePage() {
       return;
     }
 
-    const nextFingerprint = briefFingerprint;
     const compiled =
-      promptPackage && !isCompiledStale
+      canReuseCompiledPromptPackage
         ? promptPackage
         : await compilePromptPackage({ silentSuccess: true });
     if (!compiled) return;
@@ -1405,7 +1407,6 @@ export default function CreatePage() {
       return;
     }
 
-    setCompiledFingerprint(nextFingerprint);
     const submitted = await generateFinalImagesForPackage(compiled.id, selectedTemplateId);
     if (submitted) rearmRunPolling();
   }
@@ -1432,16 +1433,14 @@ export default function CreatePage() {
       return;
     }
     setPendingCanvasAction("explore");
-    const nextFingerprint = briefFingerprint;
     const compiled =
-      promptPackage && !isCompiledStale
+      canReuseCompiledPromptPackage
         ? promptPackage
         : await compilePromptPackage({ silentSuccess: true });
     if (!compiled) {
       setPendingCanvasAction(null);
       return;
     }
-    setCompiledFingerprint(nextFingerprint);
     const submitted = await generateSeedsForPackage(compiled.id, compiled);
     if (submitted) {
       rearmRunPolling();

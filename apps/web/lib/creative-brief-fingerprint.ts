@@ -1,4 +1,4 @@
-import type { CreativeBrief, PromptPackage } from "@image-lab/contracts";
+import { CreativeBriefSchema, type CreativeBrief, type PromptPackage } from "@image-lab/contracts";
 import type { CreativeFlowVersion } from "./api";
 
 type FingerprintBriefInput = {
@@ -83,15 +83,20 @@ export function getPromptPackageBriefFingerprint(
     return null;
   }
 
-  const sourceBrief = asRecord(promptPackage.compilerTrace?.sourceBrief);
-  if (Object.keys(sourceBrief).length === 0) {
+  const rawSourceBrief = asRecord(promptPackage.compilerTrace?.sourceBrief);
+  if (Object.keys(rawSourceBrief).length === 0) {
     return null;
   }
+  const sourceBriefParse = CreativeBriefSchema.safeParse(rawSourceBrief);
+  if (!sourceBriefParse.success) {
+    return null;
+  }
+  const sourceBrief = sourceBriefParse.data;
 
   const resolvedConstraints = asRecord(promptPackage.resolvedConstraints);
   const sourceVariationCount =
-    typeof sourceBrief.variationCount === "number" && Number.isFinite(sourceBrief.variationCount)
-      ? Math.trunc(sourceBrief.variationCount)
+    typeof rawSourceBrief.variationCount === "number" && Number.isFinite(rawSourceBrief.variationCount)
+      ? Math.trunc(rawSourceBrief.variationCount)
       : typeof resolvedConstraints.variationCount === "number" && Number.isFinite(resolvedConstraints.variationCount)
         ? Math.trunc(resolvedConstraints.variationCount)
         : promptPackage.variations.length > 0
@@ -103,38 +108,33 @@ export function getPromptPackageBriefFingerprint(
     creativeFlowVersion,
     styleVariationCount: sourceVariationCount,
     brief: {
-      createMode: asOptionalString(sourceBrief.createMode) as CreativeBrief["createMode"] | undefined,
-      deliverableId: asOptionalString(sourceBrief.deliverableId) ?? promptPackage.deliverableId ?? undefined,
-      campaignId: asOptionalString(sourceBrief.campaignId),
-      campaignPlanId: asOptionalString(sourceBrief.campaignPlanId),
-      seriesId: asOptionalString(sourceBrief.seriesId),
-      festivalId: asOptionalString(sourceBrief.festivalId),
-      sourceOutputId: asOptionalString(sourceBrief.sourceOutputId),
-      projectId: asOptionalString(sourceBrief.projectId) ?? promptPackage.projectId ?? undefined,
-      postTypeId: asOptionalString(sourceBrief.postTypeId) ?? promptPackage.postTypeId ?? undefined,
-      creativeTemplateId:
-        asOptionalString(sourceBrief.creativeTemplateId) ?? promptPackage.creativeTemplateId ?? undefined,
-      channel: sourceBrief.channel as CreativeBrief["channel"],
-      format: sourceBrief.format as CreativeBrief["format"],
-      seriesOutputKind: sourceBrief.seriesOutputKind as CreativeBrief["seriesOutputKind"],
+      createMode: sourceBrief.createMode,
+      deliverableId: sourceBrief.deliverableId ?? promptPackage.deliverableId ?? undefined,
+      campaignId: sourceBrief.campaignId,
+      campaignPlanId: sourceBrief.campaignPlanId,
+      seriesId: sourceBrief.seriesId,
+      festivalId: sourceBrief.festivalId,
+      sourceOutputId: sourceBrief.sourceOutputId,
+      projectId: sourceBrief.projectId ?? promptPackage.projectId ?? undefined,
+      postTypeId: sourceBrief.postTypeId ?? promptPackage.postTypeId ?? undefined,
+      creativeTemplateId: sourceBrief.creativeTemplateId ?? promptPackage.creativeTemplateId ?? undefined,
+      channel: sourceBrief.channel,
+      format: sourceBrief.format,
+      seriesOutputKind: sourceBrief.seriesOutputKind,
       slideCount: typeof sourceBrief.slideCount === "number" ? sourceBrief.slideCount : undefined,
-      templateType:
-        (asOptionalString(sourceBrief.templateType) ??
-          (promptPackage.templateType ?? undefined)) as CreativeBrief["templateType"],
-      goal: asOptionalString(sourceBrief.goal) ?? "",
-      prompt: asOptionalString(sourceBrief.prompt) ?? "",
-      audience: asOptionalString(sourceBrief.audience),
-      copyMode: sourceBrief.copyMode as CreativeBrief["copyMode"],
-      offer: asOptionalString(sourceBrief.offer),
-      exactText: asOptionalString(sourceBrief.exactText),
+      templateType: sourceBrief.templateType ?? promptPackage.templateType ?? undefined,
+      goal: sourceBrief.goal,
+      prompt: sourceBrief.prompt,
+      audience: sourceBrief.audience,
+      copyMode: sourceBrief.copyMode,
+      offer: sourceBrief.offer,
+      exactText: sourceBrief.exactText,
       includeBrandLogo: Boolean(sourceBrief.includeBrandLogo ?? resolvedConstraints.includeBrandLogo),
       includeReraQr: Boolean(sourceBrief.includeReraQr ?? resolvedConstraints.includeReraQr),
-      logoAssetId:
-        asOptionalString(sourceBrief.logoAssetId) ??
-        asOptionalString(resolvedConstraints.brandLogoAssetId),
+      logoAssetId: sourceBrief.logoAssetId ?? asOptionalString(resolvedConstraints.brandLogoAssetId),
       selectedReferenceAssetIds:
-        asStringArray(sourceBrief.referenceAssetIds).length > 0
-          ? asStringArray(sourceBrief.referenceAssetIds)
+        asStringArray(rawSourceBrief.referenceAssetIds).length > 0
+          ? asStringArray(rawSourceBrief.referenceAssetIds)
           : promptPackage.referenceAssetIds,
     },
   });

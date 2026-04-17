@@ -54,7 +54,11 @@ import {
 } from "../lib/creative-reference-selection.js";
 import { buildPostTypePromptGuidance } from "../lib/post-type-prompt-guidance.js";
 import { getCreativeRunDetail, listWorkspaceRuns } from "../lib/runs.js";
-import { compilePromptPackageV2, normalizeCreativeBriefForCompilation } from "../lib/creative-director.js";
+import {
+  buildCanonicalV2AgentPayload,
+  compilePromptPackageV2,
+  normalizeCreativeBriefForCompilation
+} from "../lib/creative-director.js";
 
 const MAX_SUPPORTING_REFERENCE_IMAGES = 2;
 const CreativeCompileV2RequestSchema = CreativeBriefSchema.extend({
@@ -516,6 +520,11 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       ? explicitLogoAsset ?? allAssets.find((asset) => asset.kind === "logo") ?? null
       : null;
     const selectedReraQrAsset = brief.includeReraQr ? allAssets.find((asset) => asset.kind === "rera_qr") ?? null : null;
+    const requestedVariationCount = brief.variationCount ?? env.CREATIVE_STYLE_VARIATION_COUNT;
+    const sourceBriefSnapshot = {
+      ...brief,
+      variationCount: requestedVariationCount
+    };
 
     let compiled;
     try {
@@ -570,9 +579,9 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
             }
           : null,
         deliverableSnapshot: null,
-        brief,
+        brief: sourceBriefSnapshot,
         referenceLabels: referenceAssets.map((asset) => asset.label),
-        variationCount: brief.variationCount ?? env.CREATIVE_STYLE_VARIATION_COUNT
+        variationCount: requestedVariationCount
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Creative v2 compile failed";
@@ -626,7 +635,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       },
       compilerTrace: {
         ...compiled.compilerTrace,
-        sourceBrief: brief,
+        sourceBrief: sourceBriefSnapshot,
         preview: true,
         previewId: `preview_v2_${now}`,
         endpoint: "/api/creative/compile-v2",
@@ -686,8 +695,47 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       return reply.badRequest("Post type does not belong to the selected workspace");
     }
 
+    if (reusableTemplateDetail?.template && (
+      reusableTemplateDetail.template.workspaceId !== brand.workspaceId ||
+      reusableTemplateDetail.template.brandId !== brand.id
+    )) {
+      return reply.badRequest("Template does not belong to the selected brand/workspace");
+    }
+
+    if (calendarItem && (calendarItem.workspaceId !== brand.workspaceId || calendarItem.brandId !== brand.id)) {
+      return reply.badRequest("Calendar item does not belong to the selected brand/workspace");
+    }
+
+    if (campaign && (campaign.workspaceId !== brand.workspaceId || campaign.brandId !== brand.id)) {
+      return reply.badRequest("Campaign does not belong to the selected brand/workspace");
+    }
+
+    if (series && (series.workspaceId !== brand.workspaceId || series.brandId !== brand.id)) {
+      return reply.badRequest("Series does not belong to the selected brand/workspace");
+    }
+
+    if (campaignPlan && !campaign) {
+      return reply.badRequest("A campaign is required when selecting a planned asset");
+    }
+
+    if (campaignPlan && campaign && campaignPlan.campaignId !== campaign.id) {
+      return reply.badRequest("Planned asset does not belong to the selected campaign");
+    }
+
+    if (sourceOutput && (sourceOutput.workspace_id !== brand.workspaceId || sourceOutput.brand_id !== brand.id)) {
+      return reply.badRequest("Source post does not belong to the selected brand/workspace");
+    }
+
+    if (festival && festival.workspaceId && festival.workspaceId !== brand.workspaceId) {
+      return reply.badRequest("Festival does not belong to the selected workspace");
+    }
+
     if (!postType) {
       return reply.badRequest("Choose a post type before compiling v2 prompts");
+    }
+
+    if (postType.code === "festive-greeting" && !festival) {
+      return reply.badRequest("Choose a festival before creating a festive greeting");
     }
 
     const [brandProfileVersion, allAssets, projectProfileVersion] = await Promise.all([
@@ -731,52 +779,80 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       focusAmenity: postTypeGuidance.manifest.amenityFocus ?? null,
     });
 
-    const preparedPayload = {
+    const reusableTemplate = reusableTemplateDetail?.template ?? null;
+    const reusableTemplateAssets = reusableTemplateDetail?.assets ?? [];
+    const requestedVariationCount = brief.variationCount ?? env.CREATIVE_STYLE_VARIATION_COUNT;
+    const sourceBrief = {
       ...brief,
-      brandId: brand.id,
-      projectId: project?.id ?? brief.projectId ?? null,
-      postTypeId: postType.id,
-      creativeTemplateId: reusableTemplateDetail?.template.id ?? brief.creativeTemplateId ?? null,
-      calendarItemId: calendarItem?.id ?? brief.calendarItemId ?? null,
-      channel: brief.channel ?? postType.config.defaultChannels[0],
-      format: brief.format ?? postType.config.allowedFormats[0],
-      goal: brief.goal ?? (postType.config as Record<string, unknown>)?.defaultGoal as string ?? postType.name,
-      prompt: brief.prompt,
-      exactText: brief.exactText,
-      audience: brief.audience,
-      offer: brief.offer,
-      copyMode: brief.copyMode,
-      logoAssetId: brief.logoAssetId ?? null,
-      templateType: brief.templateType ?? null,
-      seriesOutputKind: brief.seriesOutputKind ?? null,
-      slideCount: brief.slideCount ?? null,
-      includeBrandLogo: brief.includeBrandLogo,
-      includeReraQr: brief.includeReraQr,
-      variationCount: brief.variationCount ?? env.CREATIVE_STYLE_VARIATION_COUNT,
-      referenceAssetIds: inferredReferenceSelection.referenceAssetIds,
-      truthBundle: {
-        brand: { id: brand.id, name: brand.name },
-        project: project ? { id: project.id, name: project.name, stage: project.stage } : null,
-        postType: { id: postType.id, code: postType.code, name: postType.name },
-        brandProfile: brandProfileVersion.profile,
-        assets: allAssets,
-        projectProfile: projectProfileVersion?.profile ?? null,
-        inferredReference: inferredReferenceSelection,
-        postTypeGuidance: postTypeGuidance.manifest,
-        festivalTruth: festival
-          ? {
-              id: festival.id,
-              code: festival.code,
-              name: festival.name,
-              category: festival.category,
-              community: festival.community,
-              regions: festival.regions,
-              meaning: festival.meaning,
-              dateLabel: festival.dateLabel,
-              nextOccursOn: festival.nextOccursOn,
-            }
-          : null,
-        autoCopyStripped
+      variationCount: requestedVariationCount
+    };
+    const compileInput = {
+      workspaceId: brand.workspaceId,
+      brandName: brand.name,
+      brandProfile: brandProfileVersion.profile,
+      brandAssets: allAssets,
+      projectId: project?.id ?? null,
+      projectName: project?.name ?? null,
+      projectStage: project?.stage ?? null,
+      projectProfile: projectProfileVersion?.profile ?? null,
+      festival,
+      postType: {
+        code: postType.code,
+        name: postType.name,
+        config: postType.config
+      },
+      template: reusableTemplate
+        ? {
+            id: reusableTemplate.id,
+            name: reusableTemplate.name,
+            channel: reusableTemplate.channel,
+            format: reusableTemplate.format,
+            basePrompt: reusableTemplate.basePrompt,
+            config: reusableTemplate.config,
+            linkedAssets: reusableTemplateAssets.map((asset) => ({
+              assetId: asset.assetId,
+              role: asset.role
+            }))
+          }
+        : null,
+      templateAssets: reusableTemplateAssets.map((asset) => ({
+        assetId: asset.assetId,
+        role: asset.role
+      })),
+      calendarItem: calendarItem
+        ? {
+            title: calendarItem.title,
+            objective: calendarItem.objective,
+            scheduledFor: calendarItem.scheduledFor,
+            status: calendarItem.status
+          }
+        : null,
+      series: series
+        ? {
+            id: series.id,
+            name: series.name,
+            description: series.description,
+            contentFormat: series.contentFormat,
+            sourceBriefJson: series.sourceBriefJson
+          }
+        : null,
+      deliverableSnapshot: null,
+      brief: sourceBrief,
+      referenceLabels: sortAssetsByIdOrder(
+        allAssets.filter((asset) => inferredReferenceSelection.referenceAssetIds.includes(asset.id)),
+        inferredReferenceSelection.referenceAssetIds
+      ).map((asset) => asset.label),
+      variationCount: requestedVariationCount
+    } as const;
+    const preparedPayload = {
+      sourceBrief,
+      payload: buildCanonicalV2AgentPayload(compileInput),
+      meta: {
+        autoCopyStripped,
+        brandProfileVersionId: brandProfileVersion.id,
+        postTypeCode: postType.code,
+        referenceAssetIds: inferredReferenceSelection.referenceAssetIds,
+        amenityAssetIds: inferredReferenceSelection.amenityAssetIds
       }
     };
 
@@ -896,6 +972,13 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       .eq("id", promptPackage.id)
       .maybeSingle();
     if (persistedPromptPackageError) {
+      if (isPromptPackageVariationsSchemaError(persistedPromptPackageError)) {
+        return reply.code(500).send({
+          statusCode: 500,
+          error: "Internal Server Error",
+          message: "Database schema is missing prompt_packages.variations. Apply the prompt package variations compatibility migration before generating options."
+        });
+      }
       throw persistedPromptPackageError;
     }
     const persistedDeliverableId =
@@ -993,6 +1076,13 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     );
 
     if (promptPackageError) {
+      if (isPromptPackageVariationsSchemaError(promptPackageError)) {
+        return reply.code(500).send({
+          statusCode: 500,
+          error: "Internal Server Error",
+          message: "Database schema is missing prompt_packages.variations. Apply the prompt package variations compatibility migration before generating options."
+        });
+      }
       throw promptPackageError;
     }
 
@@ -2844,23 +2934,36 @@ async function buildAsyncV2PromptPackage(params: {
     result: unknown;
   };
 }) {
-  const inputBrief = asObject(params.compileJob.input_brief);
+  const envelope = asObject(params.compileJob.input_brief);
+  const sourceBriefPayload = asObject(envelope.sourceBrief);
+  const payload = asObject(envelope.payload);
+  const meta = asObject(envelope.meta);
+  const inputBrief = Object.keys(sourceBriefPayload).length > 0 ? sourceBriefPayload : envelope;
+  const compilePayload = Object.keys(payload).length > 0 ? payload : envelope;
   const rawResultEnvelope = asObject(params.compileJob.result);
   const rawCompiled = asObject("result" in rawResultEnvelope ? rawResultEnvelope.result : rawResultEnvelope);
 
-  const brandProfileVersion = await getActiveBrandProfile(params.brand.id);
-  const truthBundle = asObject(inputBrief.truthBundle);
-  const requestContext = asObject(truthBundle.requestContext);
+  const persistedBrandProfileVersionId = asOptionalString(meta.brandProfileVersionId);
+  const brandProfileVersion = persistedBrandProfileVersionId ? null : await getActiveBrandProfile(params.brand.id);
+  const truthBundle = asObject(compilePayload.truthBundle);
+  const exactAssetContract = asObject(truthBundle.exactAssetContract);
+  const amenityResolution = asObject(truthBundle.amenityResolution);
+  const postTypeContract = asObject(truthBundle.postTypeContract);
+  const truthProject = asObject(truthBundle.projectTruth);
   const truthProjectProfile = asObject(truthBundle.projectProfile);
-  const inferredReference = asObject(truthBundle.inferredReference);
   const rawResolvedConstraints = asObject(rawCompiled.resolvedConstraints);
   const rawCompilerTrace = asObject(rawCompiled.compilerTrace);
   const allAssets = await listBrandAssets(params.brand.id);
 
-  const referenceAssetIds = asUuidArray(inputBrief.referenceAssetIds ?? requestContext.referenceAssetIds);
-  const explicitLogoAssetId = asOptionalString(inputBrief.logoAssetId);
+  const sourceBrief = CreativeCompileV2RequestSchema.parse({
+    ...inputBrief,
+    brandId: asOptionalString(inputBrief.brandId) ?? params.brand.id
+  });
+  const referenceAssetIds = asUuidArray(meta.referenceAssetIds ?? sourceBrief.referenceAssetIds);
+  const amenityAssetIds = asUuidArray(meta.amenityAssetIds ?? amenityResolution.selectedAssetIds);
+  const explicitLogoAssetId = sourceBrief.logoAssetId ?? asOptionalString(exactAssetContract.logoAssetId);
   const selectedBrandLogoAsset =
-    (asOptionalBoolean(inputBrief.includeBrandLogo ?? requestContext.includeBrandLogo) ?? false) === true
+    sourceBrief.includeBrandLogo === true
       ? explicitLogoAssetId
         ? allAssets.find((asset) => asset.id === explicitLogoAssetId && asset.kind === "logo") ??
           allAssets.find((asset) => asset.kind === "logo") ??
@@ -2868,46 +2971,13 @@ async function buildAsyncV2PromptPackage(params: {
         : allAssets.find((asset) => asset.kind === "logo") ?? null
       : null;
   const selectedReraQrAsset =
-    (asOptionalBoolean(inputBrief.includeReraQr ?? requestContext.includeReraQr) ?? false) === true
-      ? allAssets.find((asset) => asset.kind === "rera_qr") ?? null
+    sourceBrief.includeReraQr === true
+      ? (asOptionalString(exactAssetContract.reraQrAssetId)
+          ? allAssets.find((asset) => asset.id === exactAssetContract.reraQrAssetId && asset.kind === "rera_qr") ??
+            allAssets.find((asset) => asset.kind === "rera_qr") ??
+            null
+          : allAssets.find((asset) => asset.kind === "rera_qr") ?? null)
       : null;
-
-  const brief = CreativeBriefSchema.parse({
-    brandId: params.brand.id,
-    createMode: asOptionalString(inputBrief.createMode) ?? asOptionalString(requestContext.createMode) ?? "post",
-    deliverableId: asOptionalString(inputBrief.deliverableId),
-    campaignId: asOptionalString(inputBrief.campaignId),
-    campaignPlanId: asOptionalString(inputBrief.campaignPlanId),
-    seriesId: asOptionalString(inputBrief.seriesId),
-    festivalId: asOptionalString(inputBrief.festivalId),
-    sourceOutputId: asOptionalString(inputBrief.sourceOutputId),
-    projectId: asOptionalString(inputBrief.projectId),
-    postTypeId: asOptionalString(inputBrief.postTypeId),
-    creativeTemplateId: asOptionalString(inputBrief.creativeTemplateId),
-    calendarItemId: asOptionalString(inputBrief.calendarItemId),
-    channel: (inputBrief.channel ?? requestContext.channel) as CreativeBrief["channel"],
-    format: (inputBrief.format ?? requestContext.format) as CreativeBrief["format"],
-    goal: asOptionalString(inputBrief.goal) ?? asOptionalString(requestContext.goal) ?? "",
-    prompt: asOptionalString(inputBrief.prompt) ?? asOptionalString(requestContext.prompt) ?? "",
-    audience: asOptionalString(inputBrief.audience) ?? asOptionalString(requestContext.audience),
-    copyMode: (inputBrief.copyMode ?? requestContext.copyMode) === "auto" ? "auto" : "manual",
-    offer: asOptionalString(inputBrief.offer) ?? asOptionalString(requestContext.offer),
-    exactText: asOptionalString(inputBrief.exactText) ?? asOptionalString(requestContext.exactText),
-    referenceAssetIds,
-    includeBrandLogo: asOptionalBoolean(inputBrief.includeBrandLogo ?? requestContext.includeBrandLogo) ?? false,
-    includeReraQr: asOptionalBoolean(inputBrief.includeReraQr ?? requestContext.includeReraQr) ?? false,
-    logoAssetId: explicitLogoAssetId,
-    templateType:
-      normalizeAsyncTemplateType(inputBrief.templateType ?? requestContext.templateType) as CreativeBrief["templateType"],
-    seriesOutputKind: inputBrief.seriesOutputKind as CreativeBrief["seriesOutputKind"],
-    slideCount: typeof inputBrief.slideCount === "number" ? inputBrief.slideCount : undefined,
-    variationCount:
-      typeof inputBrief.variationCount === "number"
-        ? inputBrief.variationCount
-        : typeof requestContext.variationCount === "number"
-          ? requestContext.variationCount
-          : undefined
-  });
 
   const referenceStrategy = normalizeAsyncReferenceStrategy(rawCompiled.referenceStrategy, referenceAssetIds);
   const seedPrompt = asOptionalString(rawCompiled.seedPrompt) ?? asOptionalString(rawCompiled.finalPrompt) ?? "";
@@ -2921,12 +2991,12 @@ async function buildAsyncV2PromptPackage(params: {
     workspaceId: params.brand.workspaceId,
     brandId: params.brand.id,
     deliverableId: null,
-    projectId: asOptionalString(inputBrief.projectId) ?? null,
-    postTypeId: asOptionalString(inputBrief.postTypeId) ?? null,
-    creativeTemplateId: asOptionalString(inputBrief.creativeTemplateId) ?? null,
-    calendarItemId: asOptionalString(inputBrief.calendarItemId) ?? null,
+    projectId: sourceBrief.projectId ?? null,
+    postTypeId: sourceBrief.postTypeId ?? null,
+    creativeTemplateId: sourceBrief.creativeTemplateId ?? null,
+    calendarItemId: sourceBrief.calendarItemId ?? null,
     creativeRequestId: params.compileJob.id,
-    brandProfileVersionId: brandProfileVersion.id,
+    brandProfileVersionId: persistedBrandProfileVersionId ?? brandProfileVersion!.id,
     promptSummary: asOptionalString(rawCompiled.promptSummary) ?? "Compiled prompt package",
     seedPrompt,
     finalPrompt,
@@ -2942,32 +3012,32 @@ async function buildAsyncV2PromptPackage(params: {
     }),
     resolvedConstraints: {
       ...rawResolvedConstraints,
-      projectImageAssetIds: asUuidArray(truthProjectProfile.actualProjectImageIds),
-      sampleFlatImageIds: asUuidArray(truthProjectProfile.sampleFlatImageIds),
-      amenityImageAssetIds: asUuidArray(inferredReference.amenityAssetIds),
-      includeBrandLogo: brief.includeBrandLogo,
-      includeReraQr: brief.includeReraQr,
+      projectImageAssetIds: asUuidArray(truthProject.actualProjectImageIds ?? truthProjectProfile.actualProjectImageIds),
+      sampleFlatImageIds: asUuidArray(truthProject.sampleFlatImageIds ?? truthProjectProfile.sampleFlatImageIds),
+      amenityImageAssetIds: amenityAssetIds,
+      includeBrandLogo: sourceBrief.includeBrandLogo,
+      includeReraQr: sourceBrief.includeReraQr,
       brandLogoAssetId: selectedBrandLogoAsset?.id ?? null,
       brandLogoLabel: selectedBrandLogoAsset?.label ?? null,
       reraQrAssetId: selectedReraQrAsset?.id ?? null,
       reraQrLabel: selectedReraQrAsset?.label ?? null,
-      postTypeGuidance: rawResolvedConstraints.postTypeGuidance ?? asObject(truthBundle.postTypeGuidance)
+      postTypeGuidance: rawResolvedConstraints.postTypeGuidance ?? postTypeContract
     },
     compilerTrace: {
       ...rawCompilerTrace,
       ...asObject(rawResultEnvelope.trace),
       runtime: rawResultEnvelope.runtime,
-      sourceBrief: brief,
+      sourceBrief,
       preview: true,
       previewId: `preview_v2_${params.compileJob.id}`,
       endpoint: "/api/creative/compile-v2",
       persisted: false,
-      postTypeCode: asOptionalString(asObject(truthBundle.postType).code) ?? asOptionalString(rawCompilerTrace.postTypeCode),
+      postTypeCode: asOptionalString(meta.postTypeCode) ?? asOptionalString(postTypeContract.code) ?? asOptionalString(rawCompilerTrace.postTypeCode),
       promptDetailMode: "poster-spec",
       autoCopySanitized:
         typeof rawCompilerTrace.autoCopySanitized === "boolean"
           ? rawCompilerTrace.autoCopySanitized
-          : asOptionalBoolean(truthBundle.autoCopyStripped) ?? false
+          : asOptionalBoolean(meta.autoCopyStripped) ?? false
     }
   });
 }
@@ -3009,6 +3079,16 @@ function serializeSubmissionError(error: unknown) {
     message: "Image generation request failed",
     statusCode: statusCode ?? 500
   };
+}
+
+function isPromptPackageVariationsSchemaError(error: unknown) {
+  const message =
+    typeof error === "object" && error && "message" in error && typeof error.message === "string"
+      ? error.message
+      : error instanceof Error
+        ? error.message
+        : "";
+  return /prompt_packages/i.test(message) && /variations/i.test(message) && /schema cache/i.test(message);
 }
 
 function getErrorStatusCode(error: unknown) {

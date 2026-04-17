@@ -131,6 +131,21 @@ AGENT_LOCK = threading.Lock()
 AI_EDIT_AGENT = None
 AI_EDIT_AGENT_LOCK = threading.Lock()
 SKILLS_DIR = Path(getattr(CREATIVE_DIRECTOR, "SKILLS_DIR", PROMPT_SKILLS_DIR))
+CANONICAL_TRUTH_BUNDLE_KEYS = (
+    "requestContext",
+    "brandTruth",
+    "postTypeContract",
+    "generationContract",
+)
+LEGACY_COMPILE_FIELD_KEYS = (
+    "brandId",
+    "postTypeId",
+    "channel",
+    "format",
+    "goal",
+    "prompt",
+    "copyMode",
+)
 
 
 def get_agent():
@@ -153,6 +168,52 @@ def get_ai_edit_agent():
         return AI_EDIT_AGENT
 
 
+def get_effective_llm_runtime() -> dict[str, Any]:
+    use_openrouter = os.getenv("USE_OPENROUTER", "false").lower() == "true"
+    provider = "openrouter" if use_openrouter else "openai"
+    model = (
+        os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash")
+        if use_openrouter
+        else os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    )
+    base_url = (
+        os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").strip()
+        if use_openrouter
+        else os.getenv("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1"
+    )
+    api_key_present = bool(
+        os.getenv("OPENROUTER_API_KEY") if use_openrouter else os.getenv("OPENAI_API_KEY")
+    )
+    config_warnings: list[str] = []
+    if (
+        not use_openrouter
+        and (
+            os.getenv("OPENROUTER_API_KEY")
+            or os.getenv("OPENROUTER_MODEL")
+            or os.getenv("OPENROUTER_BASE_URL")
+        )
+    ):
+        config_warnings.append(
+            "OpenRouter environment variables are set but USE_OPENROUTER is false, so prompt compilation is using the OpenAI runtime."
+        )
+    if use_openrouter and not os.getenv("OPENROUTER_API_KEY"):
+        config_warnings.append(
+            "USE_OPENROUTER is true but OPENROUTER_API_KEY is missing, so prompt compilation cannot authenticate."
+        )
+    if not use_openrouter and not os.getenv("OPENAI_API_KEY"):
+        config_warnings.append(
+            "USE_OPENROUTER is false but OPENAI_API_KEY is missing, so prompt compilation cannot authenticate."
+        )
+    return {
+        "useOpenRouter": use_openrouter,
+        "llmProvider": provider,
+        "llmModel": model,
+        "llmBaseUrl": base_url,
+        "llmApiKeyPresent": api_key_present,
+        "configWarnings": config_warnings,
+    }
+
+
 def runtime_diagnostics(agent: Any | None = None) -> dict[str, Any]:
     skill_names = (
         CREATIVE_DIRECTOR.list_local_skill_names()
@@ -167,18 +228,7 @@ def runtime_diagnostics(agent: Any | None = None) -> dict[str, Any]:
     skills_runtime_available = SKILLS_DIR.exists()
     supabase_url = os.getenv("SUPABASE_URL", "").strip()
     supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-    use_openrouter = os.getenv("USE_OPENROUTER", "false").lower() == "true"
-    llm_provider = "openrouter" if use_openrouter else "openai"
-    llm_model = (
-        os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash")
-        if use_openrouter
-        else os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    )
-    llm_base_url = (
-        "https://openrouter.ai/api/v1"
-        if use_openrouter
-        else os.getenv("OPENAI_BASE_URL", "").strip() or "https://api.openai.com/v1"
-    )
+    llm_runtime = get_effective_llm_runtime()
 
     return {
         "skillsRuntimeAvailable": skills_runtime_available,
@@ -193,10 +243,7 @@ def runtime_diagnostics(agent: Any | None = None) -> dict[str, Any]:
         "skillFirstMode": os.getenv("AGNO_SKILL_FIRST_MODE", "0") == "1",
         "openAiTimeoutSec": float(os.getenv("AGNO_OPENAI_TIMEOUT_SEC", "20")),
         "openAiMaxRetries": int(os.getenv("AGNO_OPENAI_MAX_RETRIES", "1")),
-        "useOpenRouter": use_openrouter,
-        "llmProvider": llm_provider,
-        "llmModel": llm_model,
-        "llmBaseUrl": llm_base_url,
+        **llm_runtime,
         "supabaseConfigured": bool(supabase_url and supabase_service_role_key),
         "supabaseHost": urlparse(supabase_url).netloc if supabase_url else None,
     }
@@ -894,11 +941,14 @@ def options_payload() -> dict[str, Any]:
 def describe_runtime_failure(exc: Exception) -> str:
     message = (str(exc) or exc.__class__.__name__).strip()
     if message.lower() == "connection error.":
-        base_url = os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
-        model = os.getenv("OPENAI_MODEL", "unset")
+        llm_runtime = get_effective_llm_runtime()
+        provider = llm_runtime["llmProvider"]
+        base_url = llm_runtime["llmBaseUrl"]
+        model = llm_runtime["llmModel"]
+        key_name = "OPENROUTER_API_KEY" if llm_runtime["useOpenRouter"] else "OPENAI_API_KEY"
         return (
-            "Agno could not reach the configured chat model. "
-            f"Check OPENAI_API_KEY, OPENAI_BASE_URL ({base_url}), network access, and model availability ({model})."
+            f"Agno could not reach the configured {provider} chat model. "
+            f"Check {key_name}, the effective base URL ({base_url}), network access, and model availability ({model})."
         )
     return message
 
@@ -929,6 +979,30 @@ def log_request_start(request_path: str, payload: dict[str, Any]) -> None:
             "reraQr": exact_asset_contract.get("reraQrAssetId"),
         },
     }
+
+
+def has_canonical_truth_bundle(payload: dict[str, Any]) -> bool:
+    bundle = payload.get("truthBundle")
+    if not isinstance(bundle, dict):
+        return False
+    return all(isinstance(bundle.get(key), dict) for key in CANONICAL_TRUTH_BUNDLE_KEYS)
+
+
+def has_legacy_compile_fields(payload: dict[str, Any]) -> bool:
+    return any(key in payload for key in LEGACY_COMPILE_FIELD_KEYS)
+
+
+def normalize_compile_v2_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    if isinstance(payload.get("truthBundle"), dict):
+        if has_canonical_truth_bundle(payload):
+            return payload, "canonical"
+        if has_legacy_compile_fields(payload):
+            return build_request_payload(payload), "rebuilt_from_partial_truth_bundle"
+        raise ValueError(
+            "Malformed V2 payload: truthBundle is present but missing canonical sections such as requestContext, brandTruth, postTypeContract, or generationContract."
+        )
+
+    return build_request_payload(payload), "rebuilt_from_legacy_fields"
     print("\n=== Agno Prompt Lab Request Started ===", flush=True)
     print(json.dumps(summary, indent=2, ensure_ascii=False), flush=True)
 
@@ -1113,8 +1187,17 @@ class PromptLabHandler(BaseHTTPRequestHandler):
             payload = body.get("payload", body)
             if not isinstance(payload, dict):
                 raise ValueError("Expected a compiler payload object.")
-            if not isinstance(payload.get("truthBundle"), dict):
-                payload = build_request_payload(payload)
+            payload, contract_mode = normalize_compile_v2_payload(payload)
+            print(
+                json.dumps(
+                    {
+                        "path": "/api/compile-v2",
+                        "requestContractMode": contract_mode,
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
 
             log_request_start("/api/compile-v2", payload)
             result, trace, runtime = execute_payload_with_trace(payload)
@@ -1126,6 +1209,7 @@ class PromptLabHandler(BaseHTTPRequestHandler):
                 **compiler_trace,
                 **trace,
                 "runtime": runtime,
+                "requestContract": {"mode": contract_mode},
                 "pipeline": "v2-notebook-two-agent",
                 "pythonServer": {
                     "url": f"http://{HOST}:{PORT}",
