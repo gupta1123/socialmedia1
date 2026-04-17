@@ -1362,10 +1362,16 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         )
         skill_names, skill_packet = build_skill_packet(normalized_payload)
 
+        brief_prompt = (
+            normalized_payload.get("truthBundle", {})
+            .get("requestContext", {})
+            .get("prompt", "")
+        )
         crafter_input = (
             "Using the analyzed brief and preloaded skills below, return the final prompt package JSON.\n"
             f"Create exactly {resolve_variation_count(normalized_payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
             "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n\n"
+            f"🚨 CRITICAL: The brief's exact creative prompt is '{brief_prompt}'. You MUST incorporate this specific request into generated prompts. If brief says 'show a family', include a family. If brief says 'night view', use night lighting.\n\n"
             f"{build_playbook_override(normalized_payload)}"
             "## Loaded Skills\n"
             f"{skill_packet}\n\n"
@@ -1403,10 +1409,16 @@ def execute_with_trace(
         )
         skill_names, skill_packet = build_skill_packet(normalized_payload)
 
+        brief_prompt = (
+            normalized_payload.get("truthBundle", {})
+            .get("requestContext", {})
+            .get("prompt", "")
+        )
         crafter_input = (
             "Using the analyzed brief and preloaded skills below, return the final prompt package JSON.\n"
             f"Create exactly {resolve_variation_count(normalized_payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
             "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n\n"
+            f"🚨 CRITICAL: The brief's exact creative prompt is '{brief_prompt}'. You MUST incorporate this specific request into generated prompts. If brief says 'show a family', include a family. If brief says 'night view', use night lighting.\n\n"
             f"{build_playbook_override(normalized_payload)}"
             "## Loaded Skills\n"
             f"{skill_packet}\n\n"
