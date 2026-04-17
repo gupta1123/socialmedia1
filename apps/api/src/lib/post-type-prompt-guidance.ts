@@ -37,6 +37,7 @@ export type PostTypePromptGuidance = {
     negativePrompt: string;
     amenityFocus?: string | null;
     amenitySelectionSource?: "explicit" | "inferred" | "none";
+    playbookKey?: string | null;
   };
 };
 
@@ -315,18 +316,31 @@ function buildAmenitySpotlightGuidance(
       `Negative prompt: ${recipe.negativePrompt}`,
       `CRITICAL: Reference any supplied truth or style images only in plain language by role. Never say "Image 1 is X, Image 2 is Y", and never enumerate filenames.`
     ]),
-    manifest: {
+manifest: {
       code: input.postType?.code ?? null,
       name: input.postType?.name ?? null,
       aspectRatio: input.aspectRatio,
-      usesProjectImage: input.projectHasActualImage,
+      usesProjectImage: true,
       recipeKey: recipe.key,
       recipeDirection: recipe.direction,
       negativePrompt: recipe.negativePrompt,
-      amenityFocus: amenityChoice.focusAmenity ?? null,
-      amenitySelectionSource: amenityChoice.source
+      playbookKey: getPlaybookKey(input.postType?.code)
     }
   };
+}
+
+function getPlaybookKey(postTypeCode: string | null | undefined): string | null {
+  if (!postTypeCode) return null;
+  const mapping: Record<string, string> = {
+    "construction-update": "construction-update-playbook",
+    "amenity-spotlight": "amenity-spotlight-playbook",
+    "project-launch": "launch-post-playbook",
+    "site-visit-invite": "site-visit-playbook",
+    "location-advantage": "location-advantage-playbook",
+    "testimonial": "testimonial-playbook",
+    "festive-greeting": "festival-post-playbook"
+  };
+  return mapping[postTypeCode] ?? null;
 }
 
 function buildProjectLaunchGuidance(

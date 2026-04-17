@@ -1848,7 +1848,7 @@ function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
         requiredBriefFields: [],
         safeZoneGuidance: [],
       },
-      playbookKey: inferPlaybookKey(input.postType?.code),
+      playbookKey: postTypeGuidance.manifest.playbookKey ?? inferPlaybookKey(input.postType?.code),
       requiredFields: input.postType?.config?.requiredBriefFields ?? [],
       safeZoneGuidance: input.postType?.config?.safeZoneGuidance ?? [],
       amenityFocus: postTypeGuidance.manifest.amenityFocus ?? null,
