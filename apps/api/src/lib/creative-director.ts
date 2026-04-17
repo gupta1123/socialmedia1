@@ -2035,12 +2035,12 @@ function buildV2CompactGuardrailClauses(input: Input) {
   const textGuardrail =
     postTypeCode === "construction-update"
       ? [
-          "If on-canvas text is used, keep it sparse and limited to project name, Construction Update/Progress Update/Site Progress labels, exact requested text, and brief-provided progress/status cues.",
-          progressCue ? `The only allowed specific progress cue is: ${progressCue}.` : "Do not invent a progress percentage, date, possession claim, phone number, price, or RERA fact."
+          "MUST include TWO separate text elements: (1) Bold HEADLINE text like 'CONSTRUCTION UPDATE' or 'SITE PROGRESS' at top, (2) Smaller SUPPORT LINE below describing visible progress like 'Structures rising at Level 12' or 'Modern living taking form'. Never use only single text.",
+          progressCue ? `The only allowed specific progress cue is: ${progressCue}.` : "Do not invent exact percentages, dates, possession claims, phone numbers, prices, or RERA facts."
         ].join(" ")
       : input.brief.copyMode === "auto"
-        ? "Write concise on-image copy only if it materially improves the concept. Choose suitable headline or CTA language yourself based on the brief, post type, and brand tone. Keep it sparse, premium, and platform-appropriate. Treat the image as final consumer-facing creative: never use placeholders, bracketed instructions, sample contact information, sample URLs, sample QR references, sample calendar text, dummy phone numbers, or 'replace this' style scaffolding. If a required factual detail is unavailable, omit that line instead of inventing filler."
-      : exactText
+        ? "MUST include proper headline + support line text hierarchy. For poster-style posts: (1) Bold HEADLINE text at top like 'PROJECT LAUNCH' or 'NOW OPEN', (2) Smaller SUPPORT LINE below with context like 'Premium residences now available' or 'Book your visit today'. Never output only a single word or project name. Keep text premium and sparse - avoid clutter."
+      : exactText && exactText.trim()
         ? `Use only this requested on-image text: "${exactText}".`
         : null;
 

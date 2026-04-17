@@ -57,9 +57,9 @@ For the final prompt, write as if describing a photograph/artwork to someone who
 - End with any negative constraints (what to avoid)
 
 ## Example GOOD prompts (for FAL/DALL-E style image gen):
-✅ "A premium real estate construction progress shot showing a modern apartment tower mid-construction in Pune. The tower dominates the frame with scaffolding visible on upper floors, concrete facade in warm natural daylight. Clean brand name text 'PROJECT NAME' appears at top. Minimalist composition with 80% building, 20% sky. No logos, no people."
-✅ "Create a wide-angle photograph of a luxury clubhouse interior with natural light streaming through floor-to-ceiling windows. Plush seating arrangement in foreground, modern architecture throughout. Text overlay 'AMENITY' in clean sans-serif at bottom left corner."
-✅ "An aerial view of a residential complex showing lush landscaping surrounding modern low-rise buildings. Sunset lighting creates warm golden tones. Small brand logo watermark at bottom right. Realistic photography style, no illustrations."
+✅ "A premium real estate construction progress shot showing a modern apartment tower mid-construction in Pune. The tower dominates the frame with scaffolding visible on upper floors, concrete facade in warm natural daylight. Bold text 'CONSTRUCTION UPDATE' in clean sans-serif at top, with smaller support line 'Structures rising steadily' below it. Minimalist composition with 80% building, 20% sky. Small brand logo at bottom right."
+✅ "Create a wide-angle photograph of a luxury clubhouse interior with natural light streaming through floor-to-ceiling windows. Plush seating arrangement in foreground, modern architecture throughout. Bold headline 'YOUR PRIVATE OASIS' in clean sans-serif at bottom, support line 'Swimming Pool | Clubhouse' below. Realistic photography style."
+✅ "A festive Diwali poster featuring an elegant diya arrangement with warm golden light. Bold greeting text 'Happy Diwali' in refined sans-serif centered, with soft support line 'Festival of Lights' below. Premium muted color palette. Small brand logo watermark at bottom right."
 
 ## Example BAD prompts (NEVER write these):
 ❌ "Design a poster with header at top, content in middle, footer at bottom"
@@ -89,8 +89,14 @@ For the final prompt, write as if describing a photograph/artwork to someone who
 ## Construction update specific
 - For construction updates with a project anchor, say: "Use the supplied project image as the identity reference."
 - For construction updates, preserve tower silhouette, massing, facade rhythm, podium proportions, balcony language, and recognizable project identity.
-- For construction updates, start from a property-first brief: "Create a premium full-bleed real-estate construction update image for [project name]."
-- For construction updates, make the project/construction image dominate the frame and add only minimal brand-colored overlay elements: project name, one clean construction update headline, one short progress/status line, and optionally a slim footer/proof line.
+- For construction updates, start from a property-first brief: "Create a premium full-bleed real-estate construction update image."
+- **TEXT ON IMAGE IS MANDATORY - NEVER OMIT TEXT**
+- **The image MUST have TWO separate text elements:**
+  1. HEADLINE: Bold, large text at top or center. Examples: "CONSTRUCTION UPDATE" or "SITE PROGRESS" or "WORK IN PROGRESS" or "ON-SITE PROGRESS"
+  2. SUPPORT LINE: Smaller text BELOW the headline. Examples: "Structures rising at Level 15" or "Modern living taking form" or "Progressing steadily towards your future home" or "Excellence under construction"
+- **INCORRECT: "Bold white text reading 'Site Progress'"** - this is only ONE text element
+- **CORRECT: "Bold white text 'SITE PROGRESS' at top, with smaller support line 'Modern living taking form' below"**
+- The headline and support line must be described as SEPARATE text elements in the prompt
 - For construction updates, mention the saved brand palette explicitly and apply it to typography, overlay tint, divider lines, and small accents.
 - For construction updates, request realistic daylight or clean overcast premium light by default. Do not default to orange sunset, fake glow, or oversaturated amber grading.
 - If the brief includes a progress percentage or stage, say to visually suggest that approximate construction stage without inventing unsupported labels.
