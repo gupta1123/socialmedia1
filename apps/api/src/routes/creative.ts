@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   type CreativeJobRecord,
   type BrandAssetRecord,
+  type CreativeBrief,
   CreativeRunDetailSchema,
   CreativeRunSummarySchema,
   CreativeBriefSchema,
@@ -731,9 +732,12 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     });
 
     const preparedPayload = {
+      ...brief,
       brandId: brand.id,
-      projectId: project?.id ?? null,
+      projectId: project?.id ?? brief.projectId ?? null,
       postTypeId: postType.id,
+      creativeTemplateId: reusableTemplateDetail?.template.id ?? brief.creativeTemplateId ?? null,
+      calendarItemId: calendarItem?.id ?? brief.calendarItemId ?? null,
       channel: brief.channel ?? postType.config.defaultChannels[0],
       format: brief.format ?? postType.config.allowedFormats[0],
       goal: brief.goal ?? (postType.config as Record<string, unknown>)?.defaultGoal as string ?? postType.name,
@@ -742,6 +746,10 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       audience: brief.audience,
       offer: brief.offer,
       copyMode: brief.copyMode,
+      logoAssetId: brief.logoAssetId ?? null,
+      templateType: brief.templateType ?? null,
+      seriesOutputKind: brief.seriesOutputKind ?? null,
+      slideCount: brief.slideCount ?? null,
       includeBrandLogo: brief.includeBrandLogo,
       includeReraQr: brief.includeReraQr,
       variationCount: brief.variationCount ?? env.CREATIVE_STYLE_VARIATION_COUNT,
@@ -2842,25 +2850,31 @@ async function buildAsyncV2PromptPackage(params: {
 
   const brandProfileVersion = await getActiveBrandProfile(params.brand.id);
   const truthBundle = asObject(inputBrief.truthBundle);
+  const requestContext = asObject(truthBundle.requestContext);
   const truthProjectProfile = asObject(truthBundle.projectProfile);
   const inferredReference = asObject(truthBundle.inferredReference);
   const rawResolvedConstraints = asObject(rawCompiled.resolvedConstraints);
   const rawCompilerTrace = asObject(rawCompiled.compilerTrace);
   const allAssets = await listBrandAssets(params.brand.id);
 
-  const referenceAssetIds = asUuidArray(inputBrief.referenceAssetIds);
+  const referenceAssetIds = asUuidArray(inputBrief.referenceAssetIds ?? requestContext.referenceAssetIds);
+  const explicitLogoAssetId = asOptionalString(inputBrief.logoAssetId);
   const selectedBrandLogoAsset =
-    asOptionalBoolean(inputBrief.includeBrandLogo) === true
-      ? allAssets.find((asset) => asset.kind === "logo") ?? null
+    (asOptionalBoolean(inputBrief.includeBrandLogo ?? requestContext.includeBrandLogo) ?? false) === true
+      ? explicitLogoAssetId
+        ? allAssets.find((asset) => asset.id === explicitLogoAssetId && asset.kind === "logo") ??
+          allAssets.find((asset) => asset.kind === "logo") ??
+          null
+        : allAssets.find((asset) => asset.kind === "logo") ?? null
       : null;
   const selectedReraQrAsset =
-    asOptionalBoolean(inputBrief.includeReraQr) === true
+    (asOptionalBoolean(inputBrief.includeReraQr ?? requestContext.includeReraQr) ?? false) === true
       ? allAssets.find((asset) => asset.kind === "rera_qr") ?? null
       : null;
 
   const brief = CreativeBriefSchema.parse({
     brandId: params.brand.id,
-    createMode: asOptionalString(inputBrief.createMode) ?? "post",
+    createMode: asOptionalString(inputBrief.createMode) ?? asOptionalString(requestContext.createMode) ?? "post",
     deliverableId: asOptionalString(inputBrief.deliverableId),
     campaignId: asOptionalString(inputBrief.campaignId),
     campaignPlanId: asOptionalString(inputBrief.campaignPlanId),
@@ -2871,18 +2885,28 @@ async function buildAsyncV2PromptPackage(params: {
     postTypeId: asOptionalString(inputBrief.postTypeId),
     creativeTemplateId: asOptionalString(inputBrief.creativeTemplateId),
     calendarItemId: asOptionalString(inputBrief.calendarItemId),
-    channel: inputBrief.channel,
-    format: inputBrief.format,
-    goal: inputBrief.goal,
-    prompt: inputBrief.prompt,
-    audience: asOptionalString(inputBrief.audience),
-    copyMode: inputBrief.copyMode === "auto" ? "auto" : "manual",
-    offer: asOptionalString(inputBrief.offer),
-    exactText: asOptionalString(inputBrief.exactText),
+    channel: (inputBrief.channel ?? requestContext.channel) as CreativeBrief["channel"],
+    format: (inputBrief.format ?? requestContext.format) as CreativeBrief["format"],
+    goal: asOptionalString(inputBrief.goal) ?? asOptionalString(requestContext.goal) ?? "",
+    prompt: asOptionalString(inputBrief.prompt) ?? asOptionalString(requestContext.prompt) ?? "",
+    audience: asOptionalString(inputBrief.audience) ?? asOptionalString(requestContext.audience),
+    copyMode: (inputBrief.copyMode ?? requestContext.copyMode) === "auto" ? "auto" : "manual",
+    offer: asOptionalString(inputBrief.offer) ?? asOptionalString(requestContext.offer),
+    exactText: asOptionalString(inputBrief.exactText) ?? asOptionalString(requestContext.exactText),
     referenceAssetIds,
-    includeBrandLogo: asOptionalBoolean(inputBrief.includeBrandLogo) ?? false,
-    includeReraQr: asOptionalBoolean(inputBrief.includeReraQr) ?? false,
-    variationCount: typeof inputBrief.variationCount === "number" ? inputBrief.variationCount : undefined
+    includeBrandLogo: asOptionalBoolean(inputBrief.includeBrandLogo ?? requestContext.includeBrandLogo) ?? false,
+    includeReraQr: asOptionalBoolean(inputBrief.includeReraQr ?? requestContext.includeReraQr) ?? false,
+    logoAssetId: explicitLogoAssetId,
+    templateType:
+      normalizeAsyncTemplateType(inputBrief.templateType ?? requestContext.templateType) as CreativeBrief["templateType"],
+    seriesOutputKind: inputBrief.seriesOutputKind as CreativeBrief["seriesOutputKind"],
+    slideCount: typeof inputBrief.slideCount === "number" ? inputBrief.slideCount : undefined,
+    variationCount:
+      typeof inputBrief.variationCount === "number"
+        ? inputBrief.variationCount
+        : typeof requestContext.variationCount === "number"
+          ? requestContext.variationCount
+          : undefined
   });
 
   const referenceStrategy = normalizeAsyncReferenceStrategy(rawCompiled.referenceStrategy, referenceAssetIds);

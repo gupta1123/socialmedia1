@@ -42,6 +42,10 @@ import {
   getPlacementSpec
 } from "../../../lib/placement-specs";
 import { formatDisplayDate } from "../../../lib/formatters";
+import {
+  buildCreativeBriefFingerprint,
+  getPromptPackageBriefFingerprint
+} from "../../../lib/creative-brief-fingerprint";
 import { getCurrentCreatePostTaskId } from "../../../lib/workflow";
 import { ImagePreviewTrigger } from "../image-preview";
 import { useRegisterTopbarControls, useRegisterTopbarMeta } from "../topbar-actions-context";
@@ -829,35 +833,14 @@ export default function CreatePage() {
 
   const briefFingerprint = useMemo(
     () =>
-      JSON.stringify({
+      buildCreativeBriefFingerprint({
         activeBrandId,
-        createMode: briefForm.createMode,
-        deliverableId: briefForm.deliverableId ?? null,
-        campaignId: briefForm.campaignId ?? null,
-        campaignPlanId: briefForm.campaignPlanId ?? null,
-        seriesId: briefForm.seriesId ?? null,
-        festivalId: briefForm.festivalId ?? null,
-        sourceOutputId: briefForm.sourceOutputId ?? null,
-        projectId: briefForm.projectId ?? null,
-        postTypeId: briefForm.postTypeId ?? null,
-        creativeTemplateId: briefForm.creativeTemplateId ?? null,
-        channel: briefForm.channel,
-        format: briefForm.format,
-        seriesOutputKind: briefForm.seriesOutputKind ?? null,
-        slideCount: briefForm.slideCount ?? null,
-        templateType: briefForm.templateType,
-        goal: briefForm.goal,
-        prompt: briefForm.prompt,
-        audience: briefForm.audience ?? "",
-        copyMode: briefForm.copyMode,
-        offer: briefForm.offer ?? "",
-        exactText: briefForm.exactText ?? "",
-        includeBrandLogo: briefForm.includeBrandLogo,
-        includeReraQr: briefForm.includeReraQr,
-        logoAssetId: briefForm.logoAssetId,
-        referenceAssetIds: briefForm.selectedReferenceAssetIds,
         creativeFlowVersion,
-        styleVariationCount
+        styleVariationCount,
+        brief: {
+          ...briefForm,
+          selectedReferenceAssetIds: briefForm.selectedReferenceAssetIds
+        }
       }),
     [
       activeBrandId,
@@ -891,8 +874,15 @@ export default function CreatePage() {
     ]
   );
 
+  const promptPackageFingerprint = useMemo(
+    () => getPromptPackageBriefFingerprint(promptPackage, creativeFlowVersion),
+    [creativeFlowVersion, promptPackage]
+  );
+
   const isCompiledStale = Boolean(
-    promptPackage && compiledFingerprint && compiledFingerprint !== briefFingerprint
+    promptPackage &&
+      (promptPackageFingerprint ?? compiledFingerprint) &&
+      (promptPackageFingerprint ?? compiledFingerprint) !== briefFingerprint
   );
   const isPreviewPromptPackage =
     promptPackage?.compilerTrace?.preview === true && promptPackage.compilerTrace?.persisted === false;
