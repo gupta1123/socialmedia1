@@ -799,7 +799,8 @@ function buildFestiveGreetingGuidance(
       usesProjectImage: false,
       recipeKey: recipe.key,
       recipeDirection: recipe.direction,
-      negativePrompt: recipe.negativePrompt
+      negativePrompt: recipe.negativePrompt,
+      playbookKey: getPlaybookKey(input.postType?.code)
     }
   };
 }
