@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
+  CreateWorkspaceMemberSchema,
   CreateSeriesSchema,
   type DeliverableRecord,
   DeliverableSchema,
@@ -8,9 +9,17 @@ import {
   PlanOverviewSchema,
   QueueEntrySchema,
   type QueueStatusGroup,
+  SetWorkspaceMemberPasswordSchema,
   SeriesSchema,
   UpdateSeriesSchema,
-  WorkspaceMemberSchema
+  UpdateWorkspaceMemberRoleSchema,
+  WorkspaceMemberDeleteResponseSchema,
+  type WorkspaceMemberRecord,
+  WorkspaceMemberPasswordSetResponseSchema,
+  WorkspaceMemberRoleUpdateResponseSchema,
+  WorkspaceMemberSchema,
+  WorkspaceMemberUpsertResponseSchema,
+  type WorkspaceRole
 } from "@image-lab/contracts";
 import { assertWorkspaceRole, getBrand, getPrimaryWorkspace } from "../lib/repository.js";
 import {
@@ -26,10 +35,14 @@ import { getCreativeTemplate, getPostType, getProject } from "../lib/planning-re
 import { supabaseAdmin } from "../lib/supabase.js";
 import { randomId } from "../lib/utils.js";
 import { invalidateRuntimeCache } from "../lib/runtime-cache.js";
+import { env } from "../lib/config.js";
 
 const MaterializeSeriesSchema = z.object({
   startAt: z.string().optional(),
   endAt: z.string().optional()
+});
+const WorkspaceMemberParamsSchema = z.object({
+  userId: z.string().uuid()
 });
 
 export async function registerWorkRoutes(app: FastifyInstance) {
@@ -378,12 +391,347 @@ export async function registerWorkRoutes(app: FastifyInstance) {
     const members = await listWorkspaceMembers(workspace.id);
     return members.map((member) => WorkspaceMemberSchema.parse(member));
   });
+
+  app.post("/api/workspace-members", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) return reply.unauthorized();
+
+    const workspace = await getPrimaryWorkspace(viewer);
+    if (!workspace) {
+      return reply.badRequest("No workspace available");
+    }
+
+    await assertWorkspaceRole(viewer, workspace.id, ["owner", "admin"], request.log);
+    const body = CreateWorkspaceMemberSchema.parse(request.body);
+    const email = normalizeEmail(body.email);
+    const role = mapWorkspaceUiRoleToMembershipRole(body.role);
+    const authRedirectTo = getWorkspaceAuthRedirectTo();
+
+    let profile = await findProfileByEmail(email);
+    let status: "added" | "invited" | "exists" = "added";
+
+    if (!profile) {
+      const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+        redirectTo: authRedirectTo
+      });
+
+      if (inviteError) {
+        if (!isUserAlreadyRegisteredError(inviteError)) {
+          throw inviteError;
+        }
+      } else {
+        status = "invited";
+        const invitedUserId = inviteData.user?.id ?? null;
+        if (invitedUserId) {
+          await ensureProfile(invitedUserId, email);
+          profile = {
+            id: invitedUserId,
+            email,
+            display_name: null
+          };
+        }
+      }
+    }
+
+    profile = profile ?? await findProfileByEmail(email);
+
+    if (!profile) {
+      return reply.badRequest("User profile is not ready yet. Try again in a moment.");
+    }
+
+    const membershipResult = await ensureWorkspaceMembership(workspace.id, profile.id, role);
+    if (membershipResult.status === "exists") {
+      status = "exists";
+    }
+
+    invalidateWorkspaceMemberCaches(workspace.id, [profile.id]);
+    const member = await getWorkspaceMemberById(workspace.id, profile.id);
+
+    if (!member) {
+      throw new Error("Workspace member lookup failed after add/invite");
+    }
+
+    return WorkspaceMemberUpsertResponseSchema.parse({
+      status,
+      member
+    });
+  });
+
+  app.patch("/api/workspace-members/:userId", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) return reply.unauthorized();
+
+    const workspace = await getPrimaryWorkspace(viewer);
+    if (!workspace) {
+      return reply.badRequest("No workspace available");
+    }
+
+    await assertWorkspaceRole(viewer, workspace.id, ["owner", "admin"], request.log);
+    const { userId } = WorkspaceMemberParamsSchema.parse(request.params);
+    const body = UpdateWorkspaceMemberRoleSchema.parse(request.body);
+    const currentMembership = await getWorkspaceMembership(workspace.id, userId);
+    if (!currentMembership) {
+      return reply.notFound("Workspace member not found");
+    }
+
+    if (currentMembership.role === "owner") {
+      return reply.badRequest("Owner role cannot be changed");
+    }
+
+    const nextRole = mapWorkspaceUiRoleToMembershipRole(body.role);
+    if (isAdminRole(currentMembership.role) && !isAdminRole(nextRole)) {
+      const adminCount = await countWorkspaceAdmins(workspace.id);
+      if (adminCount <= 1) {
+        return reply.badRequest("Keep at least one admin in this workspace");
+      }
+    }
+
+    if (currentMembership.role !== nextRole) {
+      const { error } = await supabaseAdmin
+        .from("workspace_memberships")
+        .update({ role: nextRole })
+        .eq("workspace_id", workspace.id)
+        .eq("user_id", userId);
+
+      if (error) throw error;
+      invalidateWorkspaceMemberCaches(workspace.id, [userId]);
+    }
+
+    const member = await getWorkspaceMemberById(workspace.id, userId);
+    if (!member) {
+      return reply.notFound("Workspace member not found");
+    }
+
+    return WorkspaceMemberRoleUpdateResponseSchema.parse({
+      status: "updated",
+      member
+    });
+  });
+
+  app.delete("/api/workspace-members/:userId", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) return reply.unauthorized();
+
+    const workspace = await getPrimaryWorkspace(viewer);
+    if (!workspace) {
+      return reply.badRequest("No workspace available");
+    }
+
+    await assertWorkspaceRole(viewer, workspace.id, ["owner", "admin"], request.log);
+    const { userId } = WorkspaceMemberParamsSchema.parse(request.params);
+    const currentMembership = await getWorkspaceMembership(workspace.id, userId);
+    if (!currentMembership) {
+      return reply.notFound("Workspace member not found");
+    }
+
+    if (currentMembership.role === "owner") {
+      return reply.badRequest("Workspace owner cannot be removed");
+    }
+
+    if (isAdminRole(currentMembership.role)) {
+      const adminCount = await countWorkspaceAdmins(workspace.id);
+      if (adminCount <= 1) {
+        return reply.badRequest("Keep at least one admin in this workspace");
+      }
+    }
+
+    const { error } = await supabaseAdmin
+      .from("workspace_memberships")
+      .delete()
+      .eq("workspace_id", workspace.id)
+      .eq("user_id", userId);
+
+    if (error) throw error;
+
+    invalidateWorkspaceMemberCaches(workspace.id, [userId]);
+    return WorkspaceMemberDeleteResponseSchema.parse({
+      status: "removed",
+      removedUserId: userId
+    });
+  });
+
+  app.post("/api/workspace-members/:userId/password-reset", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) return reply.unauthorized();
+
+    const workspace = await getPrimaryWorkspace(viewer);
+    if (!workspace) {
+      return reply.badRequest("No workspace available");
+    }
+
+    await assertWorkspaceRole(viewer, workspace.id, ["owner", "admin"], request.log);
+    const { userId } = WorkspaceMemberParamsSchema.parse(request.params);
+    const body = SetWorkspaceMemberPasswordSchema.parse(request.body);
+    const membership = await getWorkspaceMembership(workspace.id, userId);
+    if (!membership) {
+      return reply.notFound("Workspace member not found");
+    }
+
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      password: body.newPassword
+    });
+    if (error) {
+      throw error;
+    }
+
+    return WorkspaceMemberPasswordSetResponseSchema.parse({
+      status: "password_updated",
+      userId
+    });
+  });
 }
 
 function invalidateWorkOverviewCaches(workspaceId: string) {
   invalidateRuntimeCache(`home-overview:${workspaceId}:`);
   invalidateRuntimeCache(`plan-overview:${workspaceId}:`);
   invalidateRuntimeCache(`queue:${workspaceId}:`);
+}
+
+function invalidateWorkspaceMemberCaches(workspaceId: string, userIds: string[]) {
+  invalidateRuntimeCache(`workspace-members:${workspaceId}`);
+
+  for (const userId of userIds) {
+    invalidateRuntimeCache(`workspace-role:${userId}:${workspaceId}`);
+    invalidateRuntimeCache(`primary-workspace:${userId}`);
+  }
+}
+
+function mapWorkspaceUiRoleToMembershipRole(role: "admin" | "team"): WorkspaceRole {
+  return role === "admin" ? "admin" : "editor";
+}
+
+function isAdminRole(role: WorkspaceRole) {
+  return role === "owner" || role === "admin";
+}
+
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function getWorkspaceAuthRedirectTo() {
+  return `${env.API_ORIGIN.replace(/\/$/, "")}/login`;
+}
+
+async function getWorkspaceMembership(workspaceId: string, userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("workspace_memberships")
+    .select("workspace_id, user_id, role")
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return (data as { workspace_id: string; user_id: string; role: WorkspaceRole } | null);
+}
+
+async function countWorkspaceAdmins(workspaceId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("workspace_memberships")
+    .select("user_id")
+    .eq("workspace_id", workspaceId)
+    .in("role", ["owner", "admin"]);
+
+  if (error) throw error;
+  return (data ?? []).length;
+}
+
+async function findProfileByEmail(email: string) {
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("id, email, display_name")
+    .eq("email", email)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return (data as { id: string; email: string; display_name: string | null } | null);
+}
+
+async function getProfileById(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("id, email, display_name")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return (data as { id: string; email: string; display_name: string | null } | null);
+}
+
+async function ensureProfile(userId: string, email: string) {
+  const { error } = await supabaseAdmin
+    .from("profiles")
+    .upsert(
+      {
+        id: userId,
+        email
+      },
+      { onConflict: "id" }
+    );
+
+  if (error) throw error;
+}
+
+async function ensureWorkspaceMembership(workspaceId: string, userId: string, role: WorkspaceRole) {
+  const existing = await getWorkspaceMembership(workspaceId, userId);
+  if (existing) {
+    return {
+      status: "exists" as const,
+      role: existing.role
+    };
+  }
+
+  const { error } = await supabaseAdmin.from("workspace_memberships").insert({
+    workspace_id: workspaceId,
+    user_id: userId,
+    role
+  });
+
+  if (!error) {
+    return {
+      status: "added" as const,
+      role
+    };
+  }
+
+  if (!isUniqueConstraintError(error)) {
+    throw error;
+  }
+
+  const raceMembership = await getWorkspaceMembership(workspaceId, userId);
+  if (!raceMembership) {
+    throw error;
+  }
+
+  return {
+    status: "exists" as const,
+    role: raceMembership.role
+  };
+}
+
+async function getWorkspaceMemberById(workspaceId: string, userId: string): Promise<WorkspaceMemberRecord | null> {
+  const members = await listWorkspaceMembers(workspaceId);
+  return members.find((member) => member.id === userId) ?? null;
+}
+
+function isUniqueConstraintError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const code = "code" in error ? error.code : null;
+  return code === "23505";
+}
+
+function isUserAlreadyRegisteredError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const message = "message" in error && typeof error.message === "string"
+    ? error.message.toLowerCase()
+    : "";
+
+  return message.includes("already") && message.includes("registered");
 }
 
 async function validateSeriesRelations(params: {

@@ -113,6 +113,7 @@ type OutputRow = {
   review_state: CreativeOutputRecord["reviewState"];
   latest_feedback_verdict: CreativeOutputRecord["latestVerdict"];
   reviewed_at: string | null;
+  created_by: string | null;
 };
 
 export async function getPrimaryWorkspace(viewer: AuthenticatedViewer): Promise<WorkspaceSummary | null> {
@@ -448,7 +449,7 @@ export async function listWorkspaceOutputs(workspaceId: string, brandId?: string
   let query = supabaseAdmin
     .from("creative_outputs")
     .select(
-      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at"
+      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at, created_by"
     )
     .eq("workspace_id", workspaceId);
 
@@ -482,7 +483,8 @@ export async function listWorkspaceOutputs(workspaceId: string, brandId?: string
     outputIndex: output.output_index,
     reviewState: output.review_state,
     latestVerdict: output.latest_feedback_verdict,
-    reviewedAt: output.reviewed_at
+    reviewedAt: output.reviewed_at,
+    createdBy: output.created_by
   }));
 }
 

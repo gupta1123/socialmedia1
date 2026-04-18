@@ -1,5 +1,21 @@
 import type {
   AiImageEditResponse,
+  AdminAuditResponse,
+  AdminCreditAdjustRequest,
+  AdminCreditGrantRequest,
+  AdminCreditMutationResponse,
+  AdminCreditWorkspaceListResponse,
+  AdminOpsSummary,
+  AdminOrgDetail,
+  AdminOrgListResponse,
+  AdminOverview,
+  AdminPlatformAdminListResponse,
+  AdminPlatformAdminMutationResponse,
+  AdminPlatformAdminUpdateRequest,
+  AdminPlatformAdminUpsertRequest,
+  WorkspaceCreditLedgerResponse,
+  WorkspaceCreditWallet,
+  ImageEditPromptComposerResponse,
   AiSegmentationResponse,
   CampaignDeliverablePlanRecord,
   CampaignRecord,
@@ -9,6 +25,8 @@ import type {
   CalendarItemRecord,
   ChannelAccountRecord,
   ContentPillarRecord,
+  CreateWorkspaceMemberInput,
+  SetWorkspaceMemberPasswordInput,
   CreateCampaignDeliverablePlanInput,
   CreateCampaignInput,
   CreateSeriesInput,
@@ -60,7 +78,12 @@ import type {
   UpdatePublicationInput,
   UpdateProjectInput,
   UpdateSeriesInput,
+  UpdateWorkspaceMemberRoleInput,
+  WorkspaceMemberDeleteResponse,
+  WorkspaceMemberPasswordSetResponse,
   WorkspaceMemberRecord,
+  WorkspaceMemberRoleUpdateResponse,
+  WorkspaceMemberUpsertResponse,
   StyleSeedRequest
 } from "@image-lab/contracts";
 
@@ -168,6 +191,18 @@ function getCacheTtlMs(path: string) {
 
   if (path.startsWith("/api/workspace-members")) {
     return 20_000;
+  }
+
+  if (path.startsWith("/api/credits")) {
+    return 10_000;
+  }
+
+  if (path.startsWith("/api/admin/credits")) {
+    return 6_000;
+  }
+
+  if (path.startsWith("/api/admin/")) {
+    return 6_000;
   }
 
   if (path.startsWith("/api/brands/") && !path.includes("/assets")) {
@@ -730,6 +765,20 @@ export function planImageEdit(
   });
 }
 
+export function composeImageEditPrompt(
+  token: string,
+  payload: {
+    brandId: string;
+    changes: string[];
+  }
+) {
+  return request<ImageEditPromptComposerResponse>("/api/creative/image-edit-compose-prompt", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
 export function applyMaskedImageEdit(
   token: string,
   payload: {
@@ -906,6 +955,197 @@ export function getQueue(
 
 export function getWorkspaceMembers(token: string) {
   return request<WorkspaceMemberRecord[]>("/api/workspace-members", token);
+}
+
+export function addWorkspaceMember(token: string, payload: CreateWorkspaceMemberInput) {
+  return request<WorkspaceMemberUpsertResponse>("/api/workspace-members", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateWorkspaceMemberRole(token: string, userId: string, payload: UpdateWorkspaceMemberRoleInput) {
+  return request<WorkspaceMemberRoleUpdateResponse>(`/api/workspace-members/${userId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function removeWorkspaceMember(token: string, userId: string) {
+  return request<WorkspaceMemberDeleteResponse>(`/api/workspace-members/${userId}`, token, {
+    method: "DELETE"
+  });
+}
+
+export function setWorkspaceMemberPassword(token: string, userId: string, payload: SetWorkspaceMemberPasswordInput) {
+  return request<WorkspaceMemberPasswordSetResponse>(`/api/workspace-members/${userId}/password-reset`, token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getWorkspaceCreditWallet(token: string) {
+  return request<WorkspaceCreditWallet>("/api/credits/wallet", token);
+}
+
+export function getWorkspaceCreditLedger(
+  token: string,
+  options?: {
+    limit?: number;
+    offset?: number;
+  }
+) {
+  return request<WorkspaceCreditLedgerResponse>(
+    withQuery("/api/credits/ledger", {
+      limit: typeof options?.limit === "number" ? String(options.limit) : undefined,
+      offset: typeof options?.offset === "number" ? String(options.offset) : undefined
+    }),
+    token
+  );
+}
+
+export function getAdminCreditWorkspaces(
+  token: string,
+  options?: {
+    query?: string;
+    limit?: number;
+  }
+) {
+  return request<AdminCreditWorkspaceListResponse>(
+    withQuery("/api/admin/credits/workspaces", {
+      query: options?.query,
+      limit: typeof options?.limit === "number" ? String(options.limit) : undefined
+    }),
+    token
+  );
+}
+
+export function getAdminWorkspaceCreditWallet(token: string, workspaceId: string) {
+  return request<WorkspaceCreditWallet>(`/api/admin/credits/workspaces/${workspaceId}/wallet`, token);
+}
+
+export function getAdminWorkspaceCreditLedger(
+  token: string,
+  workspaceId: string,
+  options?: {
+    limit?: number;
+    offset?: number;
+  }
+) {
+  return request<WorkspaceCreditLedgerResponse>(
+    withQuery(`/api/admin/credits/workspaces/${workspaceId}/ledger`, {
+      limit: typeof options?.limit === "number" ? String(options.limit) : undefined,
+      offset: typeof options?.offset === "number" ? String(options.offset) : undefined
+    }),
+    token
+  );
+}
+
+export function grantAdminWorkspaceCredits(token: string, payload: AdminCreditGrantRequest) {
+  return request<AdminCreditMutationResponse>("/api/admin/credits/grant", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function adjustAdminWorkspaceCredits(token: string, payload: AdminCreditAdjustRequest) {
+  return request<AdminCreditMutationResponse>("/api/admin/credits/adjust", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getSuperAdminOverview(token: string) {
+  return request<AdminOverview>("/api/admin/overview", token);
+}
+
+export function getSuperAdminOrgs(
+  token: string,
+  options?: {
+    query?: string;
+    limit?: number;
+    offset?: number;
+  }
+) {
+  return request<AdminOrgListResponse>(
+    withQuery("/api/admin/orgs", {
+      query: options?.query,
+      limit: typeof options?.limit === "number" ? String(options.limit) : undefined,
+      offset: typeof options?.offset === "number" ? String(options.offset) : undefined
+    }),
+    token
+  );
+}
+
+export function getSuperAdminOrgDetail(token: string, workspaceId: string) {
+  return request<AdminOrgDetail>(`/api/admin/orgs/${workspaceId}`, token);
+}
+
+export function getSuperAdminCreditLedger(
+  token: string,
+  options?: {
+    workspaceId?: string;
+    limit?: number;
+    offset?: number;
+  }
+) {
+  return request<WorkspaceCreditLedgerResponse>(
+    withQuery("/api/admin/credits/ledger", {
+      workspaceId: options?.workspaceId,
+      limit: typeof options?.limit === "number" ? String(options.limit) : undefined,
+      offset: typeof options?.offset === "number" ? String(options.offset) : undefined
+    }),
+    token
+  );
+}
+
+export function getSuperAdminPlatformAdmins(token: string) {
+  return request<AdminPlatformAdminListResponse>("/api/admin/platform-admins", token);
+}
+
+export function createSuperAdminPlatformAdmin(token: string, payload: AdminPlatformAdminUpsertRequest) {
+  return request<AdminPlatformAdminMutationResponse>("/api/admin/platform-admins", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateSuperAdminPlatformAdmin(
+  token: string,
+  userId: string,
+  payload: AdminPlatformAdminUpdateRequest
+) {
+  return request<AdminPlatformAdminMutationResponse>(`/api/admin/platform-admins/${userId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getSuperAdminOps(token: string) {
+  return request<AdminOpsSummary>("/api/admin/ops", token);
+}
+
+export function getSuperAdminAudit(
+  token: string,
+  options?: {
+    limit?: number;
+    offset?: number;
+  }
+) {
+  return request<AdminAuditResponse>(
+    withQuery("/api/admin/audit", {
+      limit: typeof options?.limit === "number" ? String(options.limit) : undefined,
+      offset: typeof options?.offset === "number" ? String(options.offset) : undefined
+    }),
+    token
+  );
 }
 
 export function getPublications(
@@ -1151,6 +1391,26 @@ export function getStyleTemplate(token: string, templateId: string) {
 
 export function getCreativeOutput(token: string, outputId: string) {
   return request<CreativeOutputRecord>(`/api/creative/outputs/${outputId}`, token);
+}
+
+export function getCreativeOutputs(
+  token: string,
+  filters?: {
+    brandId?: string;
+    reviewState?: CreativeOutputRecord["reviewState"];
+    limit?: number;
+    offset?: number;
+  }
+) {
+  return request<CreativeOutputRecord[]>(
+    withQuery("/api/creative/outputs", {
+      brandId: filters?.brandId,
+      reviewState: filters?.reviewState,
+      limit: typeof filters?.limit === "number" ? String(filters.limit) : undefined,
+      offset: typeof filters?.offset === "number" ? String(filters.offset) : undefined
+    }),
+    token
+  );
 }
 
 export function submitFeedback(token: string, outputId: string, payload: FeedbackRequest) {

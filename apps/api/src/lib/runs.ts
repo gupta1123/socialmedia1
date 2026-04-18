@@ -88,6 +88,7 @@ type OutputRow = {
   review_state: CreativeOutputRecord["reviewState"];
   latest_feedback_verdict: CreativeOutputRecord["latestVerdict"];
   reviewed_at: string | null;
+  created_by: string | null;
 };
 
 type StyleTemplateRow = {
@@ -325,7 +326,7 @@ async function listOutputsByJobIds(jobIds: string[]) {
   const { data, error } = await supabaseAdmin
     .from("creative_outputs")
     .select(
-      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at"
+      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at, created_by"
     )
     .in("job_id", jobIds);
 
@@ -588,7 +589,8 @@ function mapOutputRow(row: OutputRow, outputIndex = row.output_index): CreativeO
     outputIndex,
     reviewState: row.review_state,
     latestVerdict: row.latest_feedback_verdict,
-    reviewedAt: row.reviewed_at
+    reviewedAt: row.reviewed_at,
+    createdBy: row.created_by
   };
 }
 

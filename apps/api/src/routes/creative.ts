@@ -4,6 +4,7 @@ import {
   type CreativeJobRecord,
   type BrandAssetRecord,
   type CreativeBrief,
+  type CreativeOutputRecord,
   CreativeRunDetailSchema,
   CreativeRunSummarySchema,
   CreativeBriefSchema,
@@ -42,6 +43,13 @@ import { getFinalProviderModel, getStyleSeedProviderModel, resolveImageGeneratio
 import { getSignedPreview, persistCompletedJobImages, refreshJobOutputs } from "../lib/job-sync.js";
 import { env } from "../lib/config.js";
 import {
+  isInsufficientWorkspaceCreditsError,
+  isReservationAlreadySettledError,
+  releaseWorkspaceCreditReservation,
+  reserveWorkspaceCredits,
+  settleWorkspaceCreditReservation
+} from "../lib/credits.js";
+import {
   compileDeliverablePromptPackage,
   recordOutputFeedback,
   resolveOrCreateAdHocDeliverable
@@ -67,6 +75,12 @@ const CreativeCompileV2RequestSchema = CreativeBriefSchema.extend({
 const StyleSeedV2RequestSchema = z.object({
   promptPackage: PromptPackageSchema,
   variationCount: z.number().int().min(1).max(6).optional()
+});
+const CreativeOutputsQuerySchema = z.object({
+  brandId: z.string().uuid().optional(),
+  reviewState: z.enum(["pending_review", "approved", "needs_revision", "closed"]).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(48),
+  offset: z.coerce.number().int().min(0).default(0)
 });
 
 type RoleAwareReferencePlan = {
@@ -199,6 +213,66 @@ function resolveAmenityAnchorAsset(
       return best;
     }, null)?.asset ?? null
   );
+}
+
+function generationCreditAmount(kind: "style_seed" | "final", requestedCount: number) {
+  const units = Math.max(0, Math.trunc(requestedCount));
+  const perImage = kind === "style_seed" ? env.CREDITS_STYLE_SEED_PER_IMAGE : env.CREDITS_FINAL_PER_IMAGE;
+  return units * Math.max(0, perImage);
+}
+
+function insufficientCreditsMessage(error: unknown) {
+  if (isInsufficientWorkspaceCreditsError(error)) {
+    if (typeof error.required === "number" && typeof error.available === "number") {
+      return `Not enough credits. Required ${error.required}, available ${error.available}.`;
+    }
+
+    return "Not enough credits for this request.";
+  }
+
+  return "Not enough credits for this request.";
+}
+
+async function settleReservationIfPresent(
+  reservationId: string | null | undefined,
+  metadata?: Record<string, unknown>
+) {
+  if (!reservationId) {
+    return;
+  }
+
+  await settleWorkspaceCreditReservation({
+    reservationId,
+    ...(metadata ? { metadata } : {})
+  });
+}
+
+async function releaseReservationIfPresent(
+  reservationId: string | null | undefined,
+  params: {
+    actorUserId?: string | null;
+    note?: string | null;
+    metadata?: Record<string, unknown>;
+  }
+) {
+  if (!reservationId) {
+    return;
+  }
+
+  try {
+    await releaseWorkspaceCreditReservation({
+      reservationId,
+      actorUserId: params.actorUserId ?? null,
+      note: params.note ?? null,
+      metadata: params.metadata ?? {}
+    });
+  } catch (error) {
+    if (isReservationAlreadySettledError(error)) {
+      return;
+    }
+
+    throw error;
+  }
 }
 
 export async function registerCreativeRoutes(app: FastifyInstance) {
@@ -1270,6 +1344,51 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       };
     });
 
+    const optionReservationByJobId = new Map<string, string | null>();
+    const perOptionCreditAmount = generationCreditAmount("final", 1);
+
+    if (perOptionCreditAmount > 0) {
+      for (const option of preparedOptionJobs) {
+        try {
+          const reservation = await reserveWorkspaceCredits({
+            workspaceId: promptPackage.workspaceId,
+            source: "creative_job",
+            sourceRef: option.jobId,
+            amount: perOptionCreditAmount,
+            actorUserId: viewer.userId,
+            metadata: {
+              endpoint: "/api/creative/style-seeds-v2",
+              jobType: "final",
+              promptPackageId: promptPackage.id,
+              variationId: option.variationId
+            }
+          });
+          optionReservationByJobId.set(option.jobId, reservation.reservationId);
+        } catch (error) {
+          for (const reservationId of optionReservationByJobId.values()) {
+            await releaseReservationIfPresent(reservationId, {
+              actorUserId: viewer.userId,
+              note: "style-seeds-v2 reservation rollback",
+              metadata: {
+                endpoint: "/api/creative/style-seeds-v2",
+                reason: "reservation_rollback"
+              }
+            }).catch(() => null);
+          }
+
+          if (isInsufficientWorkspaceCreditsError(error)) {
+            return reply.code(402).send({
+              statusCode: 402,
+              error: "Payment Required",
+              message: insufficientCreditsMessage(error)
+            });
+          }
+
+          throw error;
+        }
+      }
+    }
+
     const { error } = await supabaseAdmin.from("creative_jobs").insert(
       preparedOptionJobs.map(({ jobId, variationId, variationTitle, variationStrategy, optionPromptWithRoles }) => ({
         id: jobId,
@@ -1297,11 +1416,22 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           variationStrategy,
           referenceCount: finalReferenceCount
         },
+        credit_reservation_id: optionReservationByJobId.get(jobId) ?? null,
         created_by: viewer.userId
       }))
     );
 
     if (error) {
+      for (const reservationId of optionReservationByJobId.values()) {
+        await releaseReservationIfPresent(reservationId, {
+          actorUserId: viewer.userId,
+          note: "style-seeds-v2 reservation rollback",
+          metadata: {
+            endpoint: "/api/creative/style-seeds-v2",
+            reason: "job_insert_failed"
+          }
+        }).catch(() => null);
+      }
       throw error;
     }
 
@@ -1334,6 +1464,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         void runImmediateProviderJob({
           job: {
             ...optionJob,
+            createdBy: viewer.userId,
+            creditReservationId: optionReservationByJobId.get(jobId) ?? null,
             providerRequestId: requestInfo.request_id,
             status: "processing"
           },
@@ -1553,6 +1685,37 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const seedProvider = resolveImageGenerationProvider();
     const seedProviderModel = getStyleSeedProviderModel(seedReferenceCount);
     const jobId = randomId();
+    const seedCreditAmount = generationCreditAmount("style_seed", body.count);
+    let seedReservationId: string | null = null;
+
+    if (seedCreditAmount > 0) {
+      try {
+        const reservation = await reserveWorkspaceCredits({
+          workspaceId: promptPackage.workspaceId,
+          source: "creative_job",
+          sourceRef: jobId,
+          amount: seedCreditAmount,
+          actorUserId: viewer.userId,
+          metadata: {
+            endpoint: "/api/creative/style-seeds",
+            jobType: "style_seed",
+            promptPackageId: promptPackage.id,
+            requestedCount: body.count
+          }
+        });
+        seedReservationId = reservation.reservationId;
+      } catch (error) {
+        if (isInsufficientWorkspaceCreditsError(error)) {
+          return reply.code(402).send({
+            statusCode: 402,
+            error: "Payment Required",
+            message: insufficientCreditsMessage(error)
+          });
+        }
+        throw error;
+      }
+    }
+
     const styleSeedJob: CreativeJobRecord = {
       id: jobId,
       workspaceId: promptPackage.workspaceId,
@@ -1612,10 +1775,19 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           supportingReferenceLabels: referencePlan.references.map((reference) => reference.label)
         }
       },
+      credit_reservation_id: seedReservationId,
       created_by: viewer.userId
     });
 
     if (error) {
+      await releaseReservationIfPresent(seedReservationId, {
+        actorUserId: viewer.userId,
+        note: "style-seed reservation rollback",
+        metadata: {
+          endpoint: "/api/creative/style-seeds",
+          reason: "job_insert_failed"
+        }
+      }).catch(() => null);
       throw error;
     }
 
@@ -1645,6 +1817,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       void runImmediateProviderJob({
         job: {
           ...styleSeedJob,
+          createdBy: viewer.userId,
+          creditReservationId: seedReservationId,
           providerRequestId: requestInfo.request_id,
           status: "processing"
         },
@@ -1831,6 +2005,37 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const expectedReferenceCount = filteredRefs.length;
     const finalProvider = resolveImageGenerationProvider();
     const finalProviderModel = getFinalProviderModel(expectedReferenceCount);
+    const finalCreditAmount = generationCreditAmount("final", body.count);
+    let finalReservationId: string | null = null;
+
+    if (finalCreditAmount > 0) {
+      try {
+        const reservation = await reserveWorkspaceCredits({
+          workspaceId: promptPackage.workspaceId,
+          source: "creative_job",
+          sourceRef: jobId,
+          amount: finalCreditAmount,
+          actorUserId: viewer.userId,
+          metadata: {
+            endpoint: "/api/creative/finals",
+            jobType: "final",
+            promptPackageId: promptPackage.id,
+            requestedCount: body.count
+          }
+        });
+        finalReservationId = reservation.reservationId;
+      } catch (error) {
+        if (isInsufficientWorkspaceCreditsError(error)) {
+          return reply.code(402).send({
+            statusCode: 402,
+            error: "Payment Required",
+            message: insufficientCreditsMessage(error)
+          });
+        }
+        throw error;
+      }
+    }
+
     const finalJobRecord: CreativeJobRecord = {
       id: jobId,
       workspaceId: promptPackage.workspaceId,
@@ -1887,10 +2092,19 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           supportingReferenceLabels: referencePlan.references.map((reference) => reference.label)
         }
       },
+      credit_reservation_id: finalReservationId,
       created_by: viewer.userId
     });
 
     if (error) {
+      await releaseReservationIfPresent(finalReservationId, {
+        actorUserId: viewer.userId,
+        note: "final reservation rollback",
+        metadata: {
+          endpoint: "/api/creative/finals",
+          reason: "job_insert_failed"
+        }
+      }).catch(() => null);
       throw error;
     }
 
@@ -1920,6 +2134,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       void runImmediateProviderJob({
         job: {
           ...finalJobRecord,
+          createdBy: viewer.userId,
+          creditReservationId: finalReservationId,
           providerRequestId: requestInfo.request_id,
           status: "processing"
         },
@@ -2027,7 +2243,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const { data: outputs, error: outputsError } = await supabaseAdmin
       .from("creative_outputs")
       .select(
-        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at"
+        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at, created_by"
       )
       .eq("job_id", jobId)
       .order("output_index", { ascending: true });
@@ -2079,6 +2295,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         reviewState: output.review_state,
         latestVerdict: output.latest_feedback_verdict,
         reviewedAt: output.reviewed_at,
+        createdBy: output.created_by,
         previewUrl: signedUrls[index] ?? undefined
       })),
       error: job.error_json
@@ -2191,6 +2408,104 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     };
   });
 
+  app.get("/api/creative/outputs", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    const workspace = await getPrimaryWorkspace(viewer);
+    if (!workspace) {
+      return [];
+    }
+
+    await assertWorkspaceRole(viewer, workspace.id, ["owner", "admin", "editor", "viewer"], request.log);
+
+    const parsedQuery = CreativeOutputsQuerySchema.safeParse(request.query ?? {});
+    if (!parsedQuery.success) {
+      return reply.badRequest(parsedQuery.error.issues[0]?.message ?? "Invalid outputs query");
+    }
+
+    const { brandId, reviewState, limit, offset } = parsedQuery.data;
+
+    if (brandId) {
+      const brand = await getBrand(brandId);
+      if (brand.workspaceId !== workspace.id) {
+        return reply.badRequest("Brand does not belong to this workspace");
+      }
+    }
+
+    let query = supabaseAdmin
+      .from("creative_outputs")
+      .select(
+        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at, created_by"
+      )
+      .eq("workspace_id", workspace.id);
+
+    if (brandId) {
+      query = query.eq("brand_id", brandId);
+    }
+
+    if (reviewState) {
+      query = query.eq("review_state", reviewState);
+    }
+
+    const { data, error } = await query
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1)
+      .returns<
+        Array<{
+          id: string;
+          workspace_id: string;
+          brand_id: string;
+          deliverable_id: string | null;
+          project_id: string | null;
+          post_type_id: string | null;
+          creative_template_id: string | null;
+          calendar_item_id: string | null;
+          job_id: string;
+          post_version_id: string | null;
+          kind: "style_seed" | "final";
+          storage_path: string;
+          provider_url: string | null;
+          output_index: number;
+          review_state: CreativeOutputRecord["reviewState"];
+          latest_feedback_verdict: CreativeOutputRecord["latestVerdict"];
+          reviewed_at: string | null;
+          created_by: string | null;
+        }>
+      >();
+
+    if (error) {
+      throw error;
+    }
+
+    const rows = data ?? [];
+    const previewUrls = await Promise.all(rows.map((row) => getSignedPreview(row.storage_path)));
+
+    return rows.map((output, index) => ({
+      id: output.id,
+      workspaceId: output.workspace_id,
+      brandId: output.brand_id,
+      deliverableId: output.deliverable_id,
+      projectId: output.project_id,
+      postTypeId: output.post_type_id,
+      creativeTemplateId: output.creative_template_id,
+      calendarItemId: output.calendar_item_id,
+      jobId: output.job_id,
+      postVersionId: output.post_version_id,
+      kind: output.kind,
+      storagePath: output.storage_path,
+      providerUrl: output.provider_url,
+      outputIndex: output.output_index,
+      reviewState: output.review_state,
+      latestVerdict: output.latest_feedback_verdict,
+      reviewedAt: output.reviewed_at,
+      createdBy: output.created_by,
+      previewUrl: previewUrls[index] ?? undefined
+    }));
+  });
+
   app.get("/api/creative/outputs/:outputId", { preHandler: app.authenticate }, async (request, reply) => {
     const viewer = request.viewer;
     if (!viewer) {
@@ -2201,7 +2516,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const { data, error } = await supabaseAdmin
       .from("creative_outputs")
       .select(
-        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at"
+        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at, created_by"
       )
       .eq("id", outputId)
       .maybeSingle();
@@ -2225,6 +2540,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           review_state: "pending_review" | "approved" | "needs_revision" | "closed";
           latest_feedback_verdict: "approved" | "close" | "off-brand" | "wrong-layout" | "wrong-text" | null;
           reviewed_at: string | null;
+          created_by: string | null;
         }
       | null;
 
@@ -2258,6 +2574,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       reviewState: output.review_state,
       latestVerdict: output.latest_feedback_verdict,
       reviewedAt: output.reviewed_at,
+      createdBy: output.created_by,
       previewUrl: previewUrl ?? undefined
     };
   });
@@ -2675,7 +2992,7 @@ async function runImmediateProviderJob({
   referencePlan,
   postTypeCode
 }: {
-  job: CreativeJobRecord;
+  job: CreativeJobRecord & { createdBy?: string | null; creditReservationId?: string | null };
   prompt: string;
   aspectRatio: string;
   referenceStoragePaths: string[];
@@ -2730,7 +3047,8 @@ async function runImmediateProviderJob({
         provider_model: result.providerModel,
         provider_request_id: result.request_id ?? job.providerRequestId,
         requested_count: job.requestedCount,
-        error_json: null
+        error_json: null,
+        created_by: job.createdBy ?? null
       },
       result.images
     );
@@ -2744,8 +3062,13 @@ async function runImmediateProviderJob({
         completed_at: new Date().toISOString()
       })
       .eq("id", job.id);
+
+    await settleReservationIfPresent(job.creditReservationId ?? null, {
+      endpoint: "runImmediateProviderJob",
+      jobId: job.id
+    });
   } catch (error) {
-    await failJobSubmission(job.id, error);
+    await failJobSubmission(job.id, error, job.creditReservationId ?? null);
   }
 }
 
@@ -3091,8 +3414,20 @@ async function buildAsyncV2PromptPackage(params: {
   });
 }
 
-async function failJobSubmission(jobId: string, error: unknown) {
+async function failJobSubmission(jobId: string, error: unknown, reservationIdHint?: string | null) {
   const serialized = serializeSubmissionError(error);
+
+  let reservationId = reservationIdHint ?? null;
+
+  if (!reservationId) {
+    const { data } = await supabaseAdmin
+      .from("creative_jobs")
+      .select("credit_reservation_id")
+      .eq("id", jobId)
+      .maybeSingle();
+
+    reservationId = (data as { credit_reservation_id?: string | null } | null)?.credit_reservation_id ?? null;
+  }
 
   await supabaseAdmin
     .from("creative_jobs")
@@ -3101,6 +3436,15 @@ async function failJobSubmission(jobId: string, error: unknown) {
       error_json: serialized
     })
     .eq("id", jobId);
+
+  await releaseReservationIfPresent(reservationId, {
+    note: "generation failed",
+    metadata: {
+      endpoint: "failJobSubmission",
+      jobId,
+      reason: serialized.message
+    }
+  }).catch(() => null);
 
   return serialized;
 }

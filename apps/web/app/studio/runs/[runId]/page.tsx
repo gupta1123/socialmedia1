@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CreativeRunDetail, OutputReviewState, OutputVerdict } from "@image-lab/contracts";
-import { getCreativeRun } from "../../../../lib/api";
+import type { CreativeRunDetail, OutputReviewState, OutputVerdict, WorkspaceMemberRecord } from "@image-lab/contracts";
+import { getCreativeRun, getWorkspaceMembers } from "../../../../lib/api";
 import { formatDisplayDate } from "../../../../lib/formatters";
 import { getPlacementSpec } from "../../../../lib/placement-specs";
 import { ImagePreviewTrigger } from "../../image-preview";
@@ -54,6 +54,7 @@ export default function RunDetailPage() {
     generateSeedsForPackage
   } = useStudio();
   const [detail, setDetail] = useState<CreativeRunDetail | null>(null);
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,8 +81,12 @@ export default function RunDetailPage() {
 
     try {
       setLoading(true);
-      const record = await getCreativeRun(sessionToken, params.runId);
+      const [record, members] = await Promise.all([
+        getCreativeRun(sessionToken, params.runId),
+        getWorkspaceMembers(sessionToken)
+      ]);
       setDetail(record);
+      setWorkspaceMembers(members);
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load run");
@@ -233,8 +238,11 @@ export default function RunDetailPage() {
 
             {detail.finalOutputs.length > 0 ? (
               <div className="gallery-review-grid">
-                {detail.finalOutputs.map((output) => (
-                  <article className="review-card" key={output.id}>
+                {detail.finalOutputs.map((output) => {
+                  const outputCreator = createdByLabel(output.createdBy, workspaceMembers);
+
+                  return (
+                    <article className="review-card" key={output.id}>
                     <div className="review-card-top">
                       <span className="review-tag">#{output.outputIndex + 1}</span>
                       <span className={`pill pill-review-${output.reviewState}`}>
@@ -250,7 +258,8 @@ export default function RunDetailPage() {
                           badges={[`Option ${output.outputIndex + 1}`, formatReviewState(output.reviewState)]}
                           details={[
                             { label: "Run", value: detail.run.promptSummary },
-                            { label: "State", value: formatReviewState(output.reviewState) }
+                            { label: "State", value: formatReviewState(output.reviewState) },
+                            { label: "Created by", value: outputCreator }
                           ]}
                           src={output.previewUrl}
                           subtitle={describeRunOutputSource(
@@ -273,6 +282,9 @@ export default function RunDetailPage() {
                       <div className="review-copy">
                         <strong>{getDecisionHeadline(output.reviewState)}</strong>
                         <p>{getDecisionDescription(output.reviewState, output.latestVerdict, output.reviewedAt)}</p>
+                        <p className="field-hint" style={{ marginTop: "6px" }}>
+                          Created by {outputCreator}
+                        </p>
                         <p className="field-hint" style={{ marginTop: "6px" }}>
                           {describeRunOutputSource(
                             output.jobId,
@@ -329,8 +341,9 @@ export default function RunDetailPage() {
                         </div>
                       )}
                     </div>
-                  </article>
-                ))}
+                    </article>
+                  );
+                })}
               </div>
             ) : (
               <div className="empty-state">
@@ -567,4 +580,9 @@ function formatVerdict(value: OutputVerdict) {
     default:
       return "approved";
   }
+}
+
+function createdByLabel(createdBy: string | null, members: WorkspaceMemberRecord[]) {
+  const creator = createdBy ? members.find((member) => member.id === createdBy) : null;
+  return creator?.displayName ?? creator?.email ?? "Unknown";
 }

@@ -557,6 +557,7 @@ export async function registerDeliverableRoutes(app: FastifyInstance) {
           reviewState: outputReviewState,
           latestVerdict: null,
           reviewedAt: reviewMode === "review" ? null : now,
+          createdBy: viewer.userId,
           previewUrl
         })
       });

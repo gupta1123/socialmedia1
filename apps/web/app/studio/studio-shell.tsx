@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ImagePreviewProvider } from "./image-preview";
@@ -8,7 +8,7 @@ import { CalendarSkeleton } from "./skeleton";
 import { StudioProvider, useStudio } from "./studio-context";
 import { TopbarActionsProvider, useTopbarActions } from "./topbar-actions-context";
 
-const navigation = [
+const primaryNavigation = [
   // {
   //   href: "/studio",
   //   label: "Home",
@@ -78,6 +78,17 @@ const navigation = [
       </svg>
     )
   },
+  {
+    href: "/studio/gallery",
+    label: "Gallery",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <circle cx="8.5" cy="8.5" r="1.5" />
+        <path d="M21 16l-5-5-4 4-3-3-6 6" />
+      </svg>
+    )
+  },
   // {
   //   href: "/studio/calendar",
   //   label: "Calendar",
@@ -98,6 +109,129 @@ const navigation = [
         <path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>
       </svg>
     )
+  }
+];
+
+const superAdminNavigationItem = {
+  href: "/studio/admin",
+  label: "Admin",
+  icon: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V7l8-4z" />
+      <path d="M9.5 12l2 2 3.5-4" />
+    </svg>
+  )
+};
+
+const adminSidebarNavigation = [
+  {
+    category: "Mode",
+    items: [
+      {
+        href: "/studio",
+        label: "Back to App",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m15 18-6-6 6-6" />
+            <path d="M9 12h12" />
+          </svg>
+        )
+      }
+    ]
+  },
+  {
+    category: "Platform",
+    items: [
+      {
+        href: "/studio/admin",
+        label: "Dashboard",
+        matchPath: "/studio/admin",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 13h6V5H4z" />
+            <path d="M14 19h6V5h-6z" />
+            <path d="M4 19h6v-2H4z" />
+          </svg>
+        )
+      },
+      {
+        href: "/studio/admin/orgs",
+        label: "Organizations",
+        matchPath: "/studio/admin/orgs",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 21h18" />
+            <path d="M5 21V7l7-4 7 4v14" />
+            <path d="M9 10h.01" />
+            <path d="M15 10h.01" />
+            <path d="M9 14h.01" />
+            <path d="M15 14h.01" />
+          </svg>
+        )
+      },
+      {
+        href: "/studio/admin/credits",
+        label: "Credits",
+        matchPath: "/studio/admin/credits",
+        excludeMatchPrefixes: ["/studio/admin/credits/ledger"],
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="8" />
+            <path d="M9.5 9.5c0-1.1 1-2 2.5-2s2.5.9 2.5 2-1 1.7-2.5 2-2.5.9-2.5 2 1 2 2.5 2 2.5-.9 2.5-2" />
+          </svg>
+        )
+      },
+      {
+        href: "/studio/admin/credits/ledger",
+        label: "Credit Ledger",
+        matchPath: "/studio/admin/credits/ledger",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 4h11l3 3v13H5z" />
+            <path d="M14 4v3h3" />
+            <path d="M8 11h8" />
+            <path d="M8 15h8" />
+          </svg>
+        )
+      },
+      {
+        href: "/studio/admin/platform-admins",
+        label: "Platform Admins",
+        matchPath: "/studio/admin/platform-admins",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3l7 4v5c0 4.5-3 7.4-7 9-4-1.6-7-4.5-7-9V7l7-4Z" />
+            <path d="M9.5 12l1.7 1.7L14.8 10" />
+          </svg>
+        )
+      },
+      {
+        href: "/studio/admin/ops",
+        label: "Operations",
+        matchPath: "/studio/admin/ops",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 14h4l2-4 4 8 2-4h4" />
+            <path d="M4 6h16" />
+          </svg>
+        )
+      },
+      {
+        href: "/studio/admin/audit",
+        label: "Audit",
+        matchPath: "/studio/admin/audit",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M8 6h11" />
+            <path d="M8 12h11" />
+            <path d="M8 18h11" />
+            <path d="M3 6h.01" />
+            <path d="M3 12h.01" />
+            <path d="M3 18h.01" />
+          </svg>
+        )
+      }
+    ]
   }
 ];
 
@@ -154,9 +288,41 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
     title: "Review",
     subtitle: "Review post options and move approved work straight into scheduling.",
   },
+  "/studio/gallery": {
+    title: "Gallery",
+    subtitle: "Browse generated images across review states in one place.",
+  },
   "/studio/settings": {
     title: "Settings",
     subtitle: "Save preferred posting windows so scheduling forms can suggest your usual channel and time combinations.",
+  },
+  "/studio/admin/credits": {
+    title: "Admin Credits",
+    subtitle: "Platform super-admin controls for workspace credit balances and ledger monitoring.",
+  },
+  "/studio/admin": {
+    title: "Admin Dashboard",
+    subtitle: "Platform overview across organizations, credits, and operational health.",
+  },
+  "/studio/admin/orgs": {
+    title: "Organizations",
+    subtitle: "Inspect each client workspace, users, and credit balances.",
+  },
+  "/studio/admin/platform-admins": {
+    title: "Platform Admins",
+    subtitle: "Grant or revoke super-admin permissions.",
+  },
+  "/studio/admin/ops": {
+    title: "Operations",
+    subtitle: "Monitor job queue health, failures, and stuck workflows.",
+  },
+  "/studio/admin/audit": {
+    title: "Audit",
+    subtitle: "Track sensitive actions across credits, roles, and failures.",
+  },
+  "/studio/admin/credits/ledger": {
+    title: "Credit Ledger",
+    subtitle: "Cross-organization immutable history of credit activity.",
   },
 };
 
@@ -200,6 +366,18 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   const isCreateRoute = pathname === "/studio/create" || pathname.startsWith("/studio/create/");
   const isEditorRoute = pathname === "/studio/ai-edit" || pathname.startsWith("/studio/ai-edit/");
   const isCalendarRoute = pathname === "/studio/calendar" || pathname.startsWith("/studio/calendar/");
+  const isAdminRoute = pathname === "/studio/admin" || pathname.startsWith("/studio/admin/");
+  const isPlatformAdmin = bootstrap?.viewer.isPlatformAdmin === true;
+  const showAdminSidebar = isAdminRoute && isPlatformAdmin;
+  const navigation = useMemo(
+    () =>
+      showAdminSidebar
+        ? adminSidebarNavigation
+        : isPlatformAdmin
+          ? [...primaryNavigation, superAdminNavigationItem]
+          : primaryNavigation,
+    [showAdminSidebar, isPlatformAdmin]
+  );
   const shellCollapsed = isCreateRoute ? !createSidebarExpanded : isEditorRoute ? !editorSidebarExpanded : collapsed;
   const pageMeta = resolvePageMeta(pathname);
 
@@ -356,13 +534,20 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
 
   const topbarTitle = topbarMeta?.title ?? pageMeta.title;
   const topbarSubtitle = topbarMeta?.subtitle ?? pageMeta.subtitle;
+  const sidebarEyebrow = showAdminSidebar ? "Platform admin" : "Workspace";
+  const sidebarWordmark = showAdminSidebar ? "Admin Console" : "Briefly Social";
 
   return (
     <div className={shellCollapsed ? "workspace-shell sidebar-collapsed" : "workspace-shell"}>
       <aside className="workspace-sidebar">
         {/* Logo / Wordmark */}
         <div className="sidebar-brand">
-          {!shellCollapsed && <span className="sidebar-wordmark">Briefly Social</span>}
+          {!shellCollapsed ? (
+            <div className="sidebar-brand-copy">
+              <span className="sidebar-eyebrow">{sidebarEyebrow}</span>
+              <span className="sidebar-wordmark">{sidebarWordmark}</span>
+            </div>
+          ) : null}
           <button
             className="sidebar-toggle"
             aria-label={shellCollapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -383,9 +568,12 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
                 <div key={idx} className="nav-section">
                   {!shellCollapsed && <span className="nav-section-label">{item.category}</span>}
                   {item.items.map((sub: any) => {
+                    const matchPath = sub.matchPath ?? sub.href.split("?")[0];
+                    const excludedPrefixes = sub.excludeMatchPrefixes ?? [];
                     const active =
-                      pathname === sub.href ||
-                      (sub.href !== "/studio" && pathname.startsWith(`${sub.href}/`));
+                      !excludedPrefixes.some((prefix: string) => pathname.startsWith(prefix)) &&
+                      (pathname === matchPath ||
+                        (matchPath !== "/studio" && pathname.startsWith(`${matchPath}/`)));
                     return (
                       <Link
                         key={sub.href}
@@ -667,6 +855,34 @@ function resolvePageMeta(pathname: string) {
     return PAGE_META["/studio/calendar"] ?? { title: "Calendar", subtitle: "" };
   }
 
+  if (pathname.startsWith("/studio/admin/credits/ledger")) {
+    return PAGE_META["/studio/admin/credits/ledger"] ?? { title: "Credit Ledger", subtitle: "" };
+  }
+
+  if (pathname.startsWith("/studio/admin/credits")) {
+    return PAGE_META["/studio/admin/credits"] ?? { title: "Admin Credits", subtitle: "" };
+  }
+
+  if (pathname.startsWith("/studio/admin/orgs")) {
+    return PAGE_META["/studio/admin/orgs"] ?? { title: "Organizations", subtitle: "" };
+  }
+
+  if (pathname.startsWith("/studio/admin/platform-admins")) {
+    return PAGE_META["/studio/admin/platform-admins"] ?? { title: "Platform Admins", subtitle: "" };
+  }
+
+  if (pathname.startsWith("/studio/admin/ops")) {
+    return PAGE_META["/studio/admin/ops"] ?? { title: "Operations", subtitle: "" };
+  }
+
+  if (pathname.startsWith("/studio/admin/audit")) {
+    return PAGE_META["/studio/admin/audit"] ?? { title: "Audit", subtitle: "" };
+  }
+
+  if (pathname === "/studio/admin" || pathname.startsWith("/studio/admin/")) {
+    return PAGE_META["/studio/admin"] ?? { title: "Admin Dashboard", subtitle: "" };
+  }
+
   return PAGE_META[pathname] ?? { title: "Studio", subtitle: "" };
 }
 
@@ -676,7 +892,7 @@ function resolveBootstrapMode(pathname: string) {
   }
 
   if (pathname === "/studio/ai-edit" || pathname.startsWith("/studio/ai-edit/")) {
-    return "create" as const;
+    return "full" as const;
   }
 
   if (
@@ -687,10 +903,14 @@ function resolveBootstrapMode(pathname: string) {
     pathname.startsWith("/studio/queue/") ||
     pathname === "/studio/review" ||
     pathname.startsWith("/studio/review/") ||
+    pathname === "/studio/gallery" ||
+    pathname.startsWith("/studio/gallery/") ||
     pathname === "/studio/library" ||
     pathname.startsWith("/studio/library/") ||
     pathname === "/studio/settings" ||
     pathname.startsWith("/studio/settings/") ||
+    pathname === "/studio/admin" ||
+    pathname.startsWith("/studio/admin/") ||
     pathname === "/studio/brands" ||
     pathname.startsWith("/studio/brands/") ||
     pathname === "/studio/projects" ||

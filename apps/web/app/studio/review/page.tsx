@@ -171,7 +171,8 @@ export default function ReviewPage() {
             className="data-table-thumbnail"
             details={[
               { label: "Placement", value: entry.deliverable.placementCode },
-              { label: "Status", value: entry.deliverable.status }
+              { label: "Status", value: entry.deliverable.status },
+              { label: "Created by", value: createdByLabel(entry.previewOutput?.createdBy ?? null, workspaceMembers) }
             ]}
             meta={`${formatOrdinal(entry.postVersion.versionNumber)} version`}
             sections={[
@@ -202,7 +203,9 @@ export default function ReviewPage() {
           <div className="data-table-primary">
             <strong className="data-table-title">{entry.deliverable.title}</strong>
             <span className="data-table-subtitle">
-              {entry.previewOutput ? `${formatOrdinal(entry.postVersion.versionNumber)} version` : "Missing preview output"}
+              {entry.previewOutput
+                ? `${formatOrdinal(entry.postVersion.versionNumber)} version · Created by ${createdByLabel(entry.previewOutput.createdBy, workspaceMembers)}`
+                : "Missing preview output"}
             </span>
           </div>
         )
@@ -354,6 +357,9 @@ export default function ReviewPage() {
             <Link className="button button-ghost" href={`/studio/deliverables/${recentApproval.deliverableId}`}>
               Open post task
             </Link>
+            <Link className="button button-ghost" href="/studio/gallery">
+              Open gallery
+            </Link>
           </div>
         </div>
       ) : null}
@@ -381,6 +387,7 @@ export default function ReviewPage() {
               pendingAction={pendingAction}
               pendingTargetKey={pendingTargetKey}
               reviewerLabelFor={(reviewerUserId) => reviewerLabel(reviewerUserId, workspaceMembers)}
+              createdByLabelFor={(createdBy) => createdByLabel(createdBy, workspaceMembers)}
               focusedDeliverableId={focusedDeliverableId}
             />
           ) : (
@@ -454,6 +461,7 @@ function ReviewCardGallery({
   pendingAction,
   pendingTargetKey,
   reviewerLabelFor,
+  createdByLabelFor,
   focusedDeliverableId
 }: {
   entries: ReviewQueueEntry[];
@@ -462,6 +470,7 @@ function ReviewCardGallery({
   pendingAction: string | null;
   pendingTargetKey: string | null;
   reviewerLabelFor: (reviewerUserId: string | null) => string;
+  createdByLabelFor: (createdBy: string | null) => string;
   focusedDeliverableId: string | null;
 }) {
   if (loading) {
@@ -531,7 +540,8 @@ function ReviewCardGallery({
                 ]}
                 details={[
                   { label: "Placement", value: format },
-                  { label: "Reviewer", value: reviewerLabelFor(entry.deliverable.reviewerUserId) }
+                  { label: "Reviewer", value: reviewerLabelFor(entry.deliverable.reviewerUserId) },
+                  { label: "Created by", value: createdByLabelFor(entry.previewOutput?.createdBy ?? null) }
                 ]}
                 src={entry.previewOutput?.previewUrl}
                 subtitle={entry.deliverable.briefText ?? "Ready for review"}
@@ -549,6 +559,7 @@ function ReviewCardGallery({
               <div className="work-gallery-copy">
                 <Link href={`/studio/deliverables/${entry.deliverable.id}`}>{entry.deliverable.title}</Link>
                 <p>Reviewer: {reviewerLabelFor(entry.deliverable.reviewerUserId)}</p>
+                <p>Created by: {createdByLabelFor(entry.previewOutput?.createdBy ?? null)}</p>
               </div>
               <div className="work-gallery-footer">
                 <PlacementIcons channel={entry.deliverable.placementCode} compact format={format} interactive={false} />
@@ -634,6 +645,15 @@ function formatObjective(value: string) {
 function reviewerLabel(reviewerUserId: string | null, members: WorkspaceMemberRecord[]) {
   const reviewer = reviewerUserId ? members.find((member) => member.id === reviewerUserId) : null;
   return reviewer?.displayName ?? reviewer?.email ?? "Unassigned";
+}
+
+function createdByLabel(createdBy: string | null, members: WorkspaceMemberRecord[]) {
+  if (!createdBy) {
+    return "Unknown";
+  }
+
+  const creator = members.find((member) => member.id === createdBy);
+  return creator?.displayName ?? creator?.email ?? "Unknown";
 }
 
 function formatOrdinal(value: number) {

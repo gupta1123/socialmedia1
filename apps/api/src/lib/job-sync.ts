@@ -4,6 +4,11 @@ import { getFalResult, getFalStatus } from "./fal.js";
 import { buildStoragePath, randomId } from "./utils.js";
 import { ensurePostVersionForOutput } from "./deliverable-flow.js";
 import { env } from "./config.js";
+import {
+  isReservationAlreadySettledError,
+  releaseWorkspaceCreditReservation,
+  settleWorkspaceCreditReservation
+} from "./credits.js";
 
 type FalImage = {
   url: string;
@@ -11,11 +16,48 @@ type FalImage = {
   file_name?: string | null;
 };
 
+async function settleReservationIfPresent(
+  reservationId: string | null | undefined,
+  metadata?: Record<string, unknown>
+) {
+  if (!reservationId) {
+    return;
+  }
+
+  await settleWorkspaceCreditReservation({
+    reservationId,
+    ...(metadata ? { metadata } : {})
+  });
+}
+
+async function releaseReservationIfPresent(
+  reservationId: string | null | undefined,
+  metadata?: Record<string, unknown>
+) {
+  if (!reservationId) {
+    return;
+  }
+
+  try {
+    await releaseWorkspaceCreditReservation({
+      reservationId,
+      note: "job_sync failure release",
+      ...(metadata ? { metadata } : {})
+    });
+  } catch (error) {
+    if (isReservationAlreadySettledError(error)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
 export async function refreshJobOutputs(jobId: string) {
   const { data: job, error: jobError } = await supabaseAdmin
     .from("creative_jobs")
     .select(
-      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, prompt_package_id, selected_template_id, job_type, status, provider, provider_model, provider_request_id, requested_count, error_json"
+      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, prompt_package_id, selected_template_id, job_type, status, provider, provider_model, provider_request_id, requested_count, error_json, created_by, credit_reservation_id"
     )
     .eq("id", jobId)
     .maybeSingle();
@@ -39,6 +81,8 @@ export async function refreshJobOutputs(jobId: string) {
         provider_request_id: string | null;
         requested_count: number;
         error_json: Record<string, unknown> | null;
+        created_by: string | null;
+        credit_reservation_id: string | null;
       }
     | null;
 
@@ -53,6 +97,13 @@ export async function refreshJobOutputs(jobId: string) {
   const existingOutputs = await supabaseAdmin.from("creative_outputs").select("id").eq("job_id", row.id).limit(1);
 
   if (!row.provider_request_id || row.status === "failed") {
+    if (row.status === "failed") {
+      await releaseReservationIfPresent(row.credit_reservation_id, {
+        endpoint: "refreshJobOutputs",
+        jobId: row.id,
+        reason: "job_already_failed"
+      });
+    }
     return row;
   }
 
@@ -61,6 +112,11 @@ export async function refreshJobOutputs(jobId: string) {
   }
 
   if (row.status === "completed" && (existingOutputs.data ?? []).length > 0) {
+    await settleReservationIfPresent(row.credit_reservation_id, {
+      endpoint: "refreshJobOutputs",
+      jobId: row.id,
+      reason: "already_completed_with_outputs"
+    });
     return row;
   }
 
@@ -79,6 +135,12 @@ export async function refreshJobOutputs(jobId: string) {
           error_json: serializeProviderError(error)
         })
         .eq("id", row.id);
+
+      await releaseReservationIfPresent(row.credit_reservation_id, {
+        endpoint: "refreshJobOutputs",
+        jobId: row.id,
+        reason: "fal_status_error"
+      });
 
       return {
         ...row,
@@ -106,6 +168,12 @@ export async function refreshJobOutputs(jobId: string) {
             error_json: serializeProviderError(error)
           })
           .eq("id", row.id);
+
+        await releaseReservationIfPresent(row.credit_reservation_id, {
+          endpoint: "refreshJobOutputs",
+          jobId: row.id,
+          reason: "fal_result_error"
+        });
 
         return {
           ...row,
@@ -135,7 +203,20 @@ export async function refreshJobOutputs(jobId: string) {
         throw updateError;
       }
 
-      return row;
+      await releaseReservationIfPresent(row.credit_reservation_id, {
+        endpoint: "refreshJobOutputs",
+        jobId: row.id,
+        reason: "completed_without_images"
+      });
+
+      return {
+        ...row,
+        status: "failed",
+        error_json: {
+          message: "Fal reported completion but no images were found in the result payload",
+          providerResult: result
+        }
+      };
     }
 
     if ((existingOutputs.data ?? []).length === 0) {
@@ -153,6 +234,12 @@ export async function refreshJobOutputs(jobId: string) {
     if (updateError) {
       throw updateError;
     }
+
+    await settleReservationIfPresent(row.credit_reservation_id, {
+      endpoint: "refreshJobOutputs",
+      jobId: row.id,
+      reason: "completed"
+    });
   } else if (normalizedStatus.includes("failed")) {
     const { error: updateError } = await supabaseAdmin
       .from("creative_jobs")
@@ -165,6 +252,12 @@ export async function refreshJobOutputs(jobId: string) {
     if (updateError) {
       throw updateError;
     }
+
+    await releaseReservationIfPresent(row.credit_reservation_id, {
+      endpoint: "refreshJobOutputs",
+      jobId: row.id,
+      reason: "provider_failed_status"
+    });
   }
 
   return row;
@@ -188,6 +281,7 @@ type PersistableJobRow = {
   provider_request_id: string | null;
   requested_count: number;
   error_json: Record<string, unknown> | null;
+  created_by: string | null;
 };
 
 export async function persistCompletedJobImages(row: PersistableJobRow, images: FalImage[]) {
@@ -219,7 +313,7 @@ export async function persistCompletedJobImages(row: PersistableJobRow, images: 
         storage_path: storagePath,
         provider_url: image.url,
         output_index: index,
-        created_by: null
+        created_by: row.created_by
       };
     })
   );
@@ -247,7 +341,7 @@ export async function persistCompletedJobImages(row: PersistableJobRow, images: 
       label: `Seed ${index + 1}`,
       storage_path: output.storage_path,
       creative_output_id: output.id,
-      created_by: null
+      created_by: row.created_by
     }));
     const { error: templateError } = await supabaseAdmin.from("style_templates").insert(templates);
     if (templateError) {

@@ -1311,6 +1311,21 @@ textarea {
   padding: 0 2px 18px;
 }
 
+.sidebar-brand-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sidebar-eyebrow {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
 .sidebar-wordmark {
   font-size: 1.28rem;
   font-weight: 650;
@@ -7308,6 +7323,39 @@ textarea {
   gap: 8px;
 }
 
+.settings-inline-form {
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--paper-soft);
+  padding: 14px;
+}
+
+.settings-member-row {
+  align-items: flex-start;
+}
+
+.settings-member-row .settings-window-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.settings-member-row .settings-window-copy span {
+  word-break: break-all;
+}
+
+.settings-member-password-editor {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-member-password-editor .planner-form-actions {
+  grid-column: span 2;
+}
+
 .asset-check-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -10169,6 +10217,7 @@ textarea {
   .planning-context-grid,
   .create-context-grid,
   .planner-form-grid,
+  .settings-member-password-editor,
   .asset-check-grid,
   .planner-meta-grid {
     grid-template-columns: 1fr;

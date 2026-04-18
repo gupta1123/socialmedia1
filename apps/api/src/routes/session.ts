@@ -10,6 +10,7 @@ import {
   listWorkspaceTemplates
 } from "../lib/repository.js";
 import { env } from "../lib/config.js";
+import { isPlatformAdminUser } from "../lib/credits.js";
 import { createSignedUrl } from "../lib/storage.js";
 import { toViewerResponse } from "../lib/viewer.js";
 
@@ -27,7 +28,11 @@ export async function registerSessionRoutes(app: FastifyInstance) {
       return reply.unauthorized();
     }
 
-    const viewerResponse = toViewerResponse(viewer);
+    const isPlatformAdmin = await isPlatformAdminUser(viewer.userId);
+    const viewerResponse = toViewerResponse({
+      ...viewer,
+      isPlatformAdmin
+    });
     const workspace = await getPrimaryWorkspace(viewer);
 
     if (!workspace) {

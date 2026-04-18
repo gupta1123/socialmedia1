@@ -4,13 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { BootstrapResponse, ImageEditPlanResponse } from "@image-lab/contracts";
 import { useSearchParams } from "next/navigation";
-import { applyMaskedImageEdit, generateAutoMask, getCreativeOutput, planImageEdit } from "../../../lib/api";
+import { applyMaskedImageEdit, composeImageEditPrompt, generateAutoMask, getCreativeOutput, planImageEdit } from "../../../lib/api";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions, useRegisterTopbarControls, useRegisterTopbarMeta } from "../topbar-actions-context";
 
 type ToolMode = "select" | "target" | "brush" | "eraser" | "draw";
 type EditorPane = "uploads" | "ai-edit" | "assets" | "templates" | "elements" | "text" | "layers" | "draw";
 type DrawMode = "select" | "pen" | "highlighter";
+type PromptMode = "normal" | "list";
 
 type EditableImage = {
   file: File;
@@ -86,6 +87,7 @@ type CanvasLayer = CanvasTextLayer | CanvasImageLayer | CanvasShapeLayer | Canva
 type LayerDragState = {
   id: string;
   mode: "move" | "resize";
+  pushedHistory: boolean;
   startClientX: number;
   startClientY: number;
   startX: number;
@@ -139,14 +141,20 @@ const VISUAL_MASK_FILL = `rgba(${VISUAL_MASK_COLOR.red}, ${VISUAL_MASK_COLOR.gre
 )})`;
 
 export default function StudioAiEditPage() {
-  const { sessionToken, activeBrand, activeBrandId, activeAssets, bootstrap } = useStudio();
+  const { sessionToken, activeBrand, activeBrandId, activeAssets, bootstrap, recentOutputs } = useStudio();
   const searchParams = useSearchParams();
   const aiEditFlow = bootstrap?.aiEdit?.flow ?? "mask";
   const isMaskFlow = aiEditFlow === "mask";
   const outputId = searchParams.get("outputId");
   const [toolMode, setToolMode] = useState<ToolMode>("target");
   const [brushSize, setBrushSize] = useState(16);
+  const [promptMode, setPromptMode] = useState<PromptMode>("normal");
   const [prompt, setPrompt] = useState("");
+  const [listPromptItems, setListPromptItems] = useState<string[]>([""]);
+  const [isComposingPrompt, setIsComposingPrompt] = useState(false);
+  const [composedPrompt, setComposedPrompt] = useState<string>("");
+  const [composedPromptKey, setComposedPromptKey] = useState<string>("");
+  const [reraNumberText, setReraNumberText] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPlanning, setIsPlanning] = useState(false);
@@ -205,17 +213,29 @@ export default function StudioAiEditPage() {
     () => activeAssets.filter((asset) => asset.kind === "logo" || asset.kind === "rera_qr"),
     [activeAssets]
   );
+  const generatedOutputAssets = useMemo(
+    () => recentOutputs.filter((output) => output.previewUrl && output.id !== outputId).slice(0, 18),
+    [recentOutputs, outputId]
+  );
   const hasCanvasLayers = canvasLayers.length > 0;
   const canUndo = useMemo(() => layersHistory.length > 0, [layersHistory]);
   const canRedo = useMemo(() => layersFuture.length > 0, [layersFuture]);
   const stageScale = currentImage && stageWidth ? stageWidth / currentImage.width : 1;
   const promptTrimmed = prompt.trim();
-  const analysisIsStale = Boolean(editPlan) && plannedPrompt !== promptTrimmed;
-  const canAnalyze = Boolean(currentImage && promptTrimmed) && !isPlanning && !isApplying && !isSegmenting;
+  const normalizedListPromptItems = useMemo(
+    () => listPromptItems.map((item) => item.trim()).filter((item) => item.length > 0),
+    [listPromptItems]
+  );
+  const listPromptKey = useMemo(() => normalizedListPromptItems.join("\n"), [normalizedListPromptItems]);
+  const currentPromptSignature = promptMode === "normal" ? `normal:${promptTrimmed}` : `list:${listPromptKey}`;
+  const hasPromptInput = promptMode === "normal" ? promptTrimmed.length > 0 : normalizedListPromptItems.length > 0;
+  const hasFreshComposedPrompt = promptMode === "list" && composedPromptKey === listPromptKey && composedPrompt.trim().length > 0;
+  const analysisIsStale = Boolean(editPlan) && plannedPrompt !== currentPromptSignature;
+  const canAnalyze = Boolean(currentImage && hasPromptInput) && !isPlanning && !isApplying && !isSegmenting && !isComposingPrompt;
   const canGenerateMask = Boolean(editPlan && !analysisIsStale && currentImage) && !isPlanning && !isApplying && !isSegmenting;
   const canApplyMaskedEdit =
     Boolean(editPlan && !analysisIsStale && currentImage && hasMaskPreview) && !isPlanning && !isApplying && !isSegmenting;
-  const canApplyDirectEdit = Boolean(currentImage && promptTrimmed) && !isPlanning && !isApplying && !isSegmenting;
+  const canApplyDirectEdit = Boolean(currentImage && hasPromptInput) && !isPlanning && !isApplying && !isSegmenting && !isComposingPrompt;
   const primaryActionLabel = isMaskFlow
     ? isPlanning
       ? "Analyzing..."
@@ -230,7 +250,9 @@ export default function StudioAiEditPage() {
             : !hasMaskPreview
               ? "Generate target mask"
               : "Apply AI edit"
-    : isApplying
+    : isComposingPrompt
+      ? "Composing prompt..."
+      : isApplying
       ? "Applying..."
       : "Apply AI edit";
   const canRunPrimaryAction = isMaskFlow
@@ -462,6 +484,8 @@ export default function StudioAiEditPage() {
       setToolMode("select");
       setCanvasLayers([]);
       setSelectedLayerId(null);
+      setLayersHistory([]);
+      setLayersFuture([]);
       setStatus(
         isMaskFlow
           ? "Source image loaded. Describe the change, then analyze the edit."
@@ -604,6 +628,89 @@ export default function StudioAiEditPage() {
     setError(null);
   }
 
+  function handleListPromptItemChange(index: number, value: string) {
+    setListPromptItems((previous) => previous.map((entry, itemIndex) => (itemIndex === index ? value : entry)));
+  }
+
+  function handleAddListPromptItem() {
+    setListPromptItems((previous) => [...previous, ""]);
+  }
+
+  function handleRemoveListPromptItem(index: number) {
+    setListPromptItems((previous) => {
+      if (previous.length <= 1) {
+        return [""];
+      }
+
+      return previous.filter((_, itemIndex) => itemIndex !== index);
+    });
+  }
+
+  async function resolveActivePrompt() {
+    if (promptMode === "normal") {
+      if (!promptTrimmed) {
+        setError("Describe the edit before applying AI changes.");
+        return null;
+      }
+
+      return promptTrimmed;
+    }
+
+    if (normalizedListPromptItems.length === 0) {
+      setError("Add at least one edit item in list mode.");
+      return null;
+    }
+
+    if (!sessionToken) {
+      setError("Your session is missing. Refresh the page and try again.");
+      return null;
+    }
+
+    if (!activeBrandId) {
+      setError("Select an active brand before composing list-mode edits.");
+      return null;
+    }
+
+    if (hasFreshComposedPrompt) {
+      return composedPrompt.trim();
+    }
+
+    setIsComposingPrompt(true);
+    setError(null);
+    setStatus("Composing list changes into a single AI edit prompt...");
+
+    try {
+      const composed = await composeImageEditPrompt(sessionToken, {
+        brandId: activeBrandId,
+        changes: normalizedListPromptItems
+      });
+      const nextPrompt = composed.prompt.trim();
+
+      setComposedPrompt(nextPrompt);
+      setComposedPromptKey(listPromptKey);
+      setStatus(
+        composed.strategy === "gemini"
+          ? `Prompt composed with ${composed.model ?? "Gemini"}.`
+          : "Prompt composed using fallback strategy."
+      );
+      return nextPrompt;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to compose list-mode prompt.");
+      setStatus(null);
+      return null;
+    } finally {
+      setIsComposingPrompt(false);
+    }
+  }
+
+  async function handleComposePromptFromList() {
+    if (promptMode !== "list") {
+      return;
+    }
+
+    await resolveActivePrompt();
+  }
+
   async function handleAnalyzeEdit() {
     if (!sessionToken) {
       setError("Your session is missing. Refresh the page and try again.");
@@ -620,8 +727,8 @@ export default function StudioAiEditPage() {
       return;
     }
 
-    if (!promptTrimmed) {
-      setError("Describe the edit before analyzing it.");
+    if (!hasPromptInput) {
+      setError(promptMode === "normal" ? "Describe the edit before analyzing it." : "Add at least one list item before analyzing.");
       return;
     }
 
@@ -630,9 +737,14 @@ export default function StudioAiEditPage() {
     setStatus("Analyzing the edit request...");
 
     try {
+      const resolvedPrompt = await resolveActivePrompt();
+      if (!resolvedPrompt) {
+        return;
+      }
+
       const result = await planImageEdit(sessionToken, {
         brandId: activeBrandId,
-        prompt: promptTrimmed,
+        prompt: resolvedPrompt,
         width: currentImage.width,
         height: currentImage.height,
         image: currentImage.file,
@@ -640,7 +752,7 @@ export default function StudioAiEditPage() {
       });
 
       setEditPlan(result);
-      setPlannedPrompt(promptTrimmed);
+      setPlannedPrompt(currentPromptSignature);
       setTargetPoint(null);
       setToolMode("target");
       if (maskCanvasRef.current) clearMaskCanvas(maskCanvasRef.current);
@@ -865,11 +977,94 @@ export default function StudioAiEditPage() {
       setSelectedLayerId(nextLayer.id);
       setToolMode("select");
       setActiveEditorPane("layers");
-      setStatus(`${asset.kind === "rera_qr" ? "QR" : "Logo"} asset added.`);
+      setStatus(`${asset.kind === "rera_qr" ? "RERA QR" : "Logo"} asset added.`);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to add brand asset.");
     }
+  }
+
+  async function handleAddGeneratedOutputLayer(output: BootstrapResponse["recentOutputs"][number]) {
+    if (!currentImage) {
+      setError("Upload a source image or choose a template before adding generated posts.");
+      return;
+    }
+
+    if (!output.previewUrl) {
+      setError("This generated post is missing a preview URL.");
+      return;
+    }
+
+    try {
+      const dimensions = await loadImageSourceDimensions(output.previewUrl);
+      const width = 0.36;
+      const height = Math.min(0.5, width * (dimensions.height / dimensions.width) * (currentImage.width / currentImage.height));
+      const nextLayer: CanvasImageLayer = {
+        id: createLayerId("generated-post"),
+        type: "image",
+        name: `Generated post #${output.outputIndex + 1}`,
+        src: output.previewUrl,
+        x: 0.06,
+        y: 0.06,
+        width,
+        height: Math.max(0.08, height),
+        rotation: 0,
+        filter: "none",
+        opacity: 1
+      };
+
+      pushToLayersHistory(canvasLayers);
+      setCanvasLayers((layers) => [...layers, nextLayer]);
+      setSelectedLayerId(nextLayer.id);
+      setToolMode("select");
+      setActiveEditorPane("layers");
+      setStatus("Generated post added as an image layer.");
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to add generated post.");
+    }
+  }
+
+  function handleAddReraNumberLayer() {
+    if (!currentImage) {
+      setError("Upload a source image before adding RERA text.");
+      return;
+    }
+
+    const value = reraNumberText.trim();
+    if (!value) {
+      setError("Enter a RERA number first.");
+      return;
+    }
+
+    const textValue = /^rera\b/i.test(value) ? value : `RERA: ${value}`;
+    const nextLayer: CanvasTextLayer = {
+      id: createLayerId("rera-text"),
+      type: "text",
+      text: textValue,
+      x: 0.06,
+      y: 0.9,
+      width: 0.52,
+      rotation: 0,
+      fontFamily: TEXT_FONT_OPTIONS[1]?.value ?? "'Helvetica Neue', Arial, sans-serif",
+      fontSize: Math.max(16, Math.round(currentImage.width * 0.02)),
+      fontWeight: "600",
+      color: "#ffffff",
+      backgroundColor: "rgba(17,24,39,0.82)",
+      align: "left",
+      letterSpacing: 0,
+      lineHeight: 1.2,
+      shadow: false,
+      opacity: 1
+    };
+
+    pushToLayersHistory(canvasLayers);
+    setCanvasLayers((layers) => [...layers, nextLayer]);
+    setSelectedLayerId(nextLayer.id);
+    setToolMode("select");
+    setActiveEditorPane("layers");
+    setStatus("RERA number text added.");
+    setError(null);
   }
 
   async function handleApplyTemplate(templateId: (typeof TEMPLATE_PRESETS)[number]["id"]) {
@@ -957,6 +1152,7 @@ export default function StudioAiEditPage() {
   ) {
     if (!selectedLayerId) return;
 
+    pushToLayersHistory(canvasLayers);
     setCanvasLayers((layers) =>
       layers.map((layer) => (layer.id === selectedLayerId ? ({ ...layer, ...patch } as CanvasLayer) : layer))
     );
@@ -1017,7 +1213,15 @@ export default function StudioAiEditPage() {
   }
 
   function pushToLayersHistory(layers: CanvasLayer[]) {
-    setLayersHistory((prev) => [...prev.slice(-19), layers]);
+    const snapshot = cloneCanvasLayers(layers);
+    setLayersHistory((prev) => {
+      const previousSnapshot = prev[prev.length - 1];
+      if (previousSnapshot && areCanvasLayersEqual(previousSnapshot, snapshot)) {
+        return prev;
+      }
+
+      return [...prev.slice(-19), snapshot];
+    });
     setLayersFuture([]);
   }
 
@@ -1026,9 +1230,9 @@ export default function StudioAiEditPage() {
 
     const previous = layersHistory[layersHistory.length - 1];
     if (!previous) return;
-    setLayersFuture((prev) => [canvasLayers, ...prev]);
+    setLayersFuture((prev) => [cloneCanvasLayers(canvasLayers), ...prev]);
     setLayersHistory((prev) => prev.slice(0, -1));
-    setCanvasLayers(previous);
+    setCanvasLayers(cloneCanvasLayers(previous));
     setSelectedLayerId(null);
     setStatus("Undone.");
   }
@@ -1038,9 +1242,9 @@ export default function StudioAiEditPage() {
 
     const next = layersFuture[0];
     if (!next) return;
-    setLayersHistory((prev) => [...prev, canvasLayers]);
+    setLayersHistory((prev) => [...prev, cloneCanvasLayers(canvasLayers)]);
     setLayersFuture((prev) => prev.slice(1));
-    setCanvasLayers(next);
+    setCanvasLayers(cloneCanvasLayers(next));
     setSelectedLayerId(null);
     setStatus("Redone.");
   }
@@ -1059,6 +1263,7 @@ export default function StudioAiEditPage() {
     layerDragRef.current = {
       id: layer.id,
       mode,
+      pushedHistory: false,
       startClientX: event.clientX,
       startClientY: event.clientY,
       startX: layer.x,
@@ -1094,6 +1299,15 @@ export default function StudioAiEditPage() {
 
     const deltaX = (event.clientX - drag.startClientX) / rect.width;
     const deltaY = (event.clientY - drag.startClientY) / rect.height;
+    const movedEnough = Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001;
+    if (movedEnough && !drag.pushedHistory) {
+      pushToLayersHistory(canvasLayers);
+      drag.pushedHistory = true;
+    }
+
+    if (!drag.pushedHistory) {
+      return;
+    }
 
     setCanvasLayers((layers) =>
       layers.map((layer) => {
@@ -1280,8 +1494,8 @@ export default function StudioAiEditPage() {
           ...(editPlan.targetObject ? { objectLabel: editPlan.targetObject } : {})
         });
       } else {
-        if (!promptTrimmed) {
-          setError("Describe the edit before applying it.");
+        const resolvedPrompt = await resolveActivePrompt();
+        if (!resolvedPrompt) {
           return;
         }
 
@@ -1289,7 +1503,7 @@ export default function StudioAiEditPage() {
 
         result = await applyMaskedImageEdit(sessionToken, {
           brandId: activeBrandId,
-          prompt: promptTrimmed,
+          prompt: resolvedPrompt,
           width: currentImage.width,
           height: currentImage.height,
           image: sourceFile,
@@ -1406,7 +1620,7 @@ export default function StudioAiEditPage() {
                   <p className="panel-label">Brand assets</p>
                   <h2>Assets</h2>
                 </div>
-                <p className="ai-editor-pane-copy">Add approved logo or RERA QR assets to the current canvas.</p>
+                <p className="ai-editor-pane-copy">Add approved logo, RERA QR, RERA text, or generated posts to the current canvas.</p>
                 <div className="ai-editor-asset-list">
                   {brandPlacementAssets.length ? (
                     brandPlacementAssets.map((asset) => (
@@ -1429,6 +1643,44 @@ export default function StudioAiEditPage() {
                   ) : (
                     <div className="create-empty-state create-empty-state-compact">
                       <p>No logo or QR assets uploaded for this brand yet.</p>
+                    </div>
+                  )}
+                </div>
+                <label className="create-field-label">
+                  RERA number text
+                  <input
+                    className="input"
+                    onChange={(event) => setReraNumberText(event.target.value)}
+                    placeholder="Example: P52100012345"
+                    value={reraNumberText}
+                  />
+                </label>
+                <button className="button button-ghost ai-editor-full-button" disabled={!currentImage} onClick={handleAddReraNumberLayer} type="button">
+                  Add RERA number text
+                </button>
+                <h3 className="ai-editor-pane-subtitle">Generated posts</h3>
+                <div className="ai-editor-asset-list">
+                  {generatedOutputAssets.length ? (
+                    generatedOutputAssets.map((output) => (
+                      <button
+                        className="ai-editor-asset-card"
+                        disabled={!currentImage || !output.previewUrl}
+                        key={output.id}
+                        onClick={() => void handleAddGeneratedOutputLayer(output)}
+                        type="button"
+                      >
+                        <span className="ai-editor-asset-preview">
+                          {output.previewUrl ? <img alt={`Generated post ${output.outputIndex + 1}`} src={output.previewUrl} /> : <span>Post</span>}
+                        </span>
+                        <span className="ai-editor-asset-copy">
+                          <strong>{`Generated post #${output.outputIndex + 1}`}</strong>
+                          <small>{output.createdBy ? `Creator ID: ${output.createdBy}` : "Generated output"}</small>
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="create-empty-state create-empty-state-compact">
+                      <p>No generated posts available yet for this brand.</p>
                     </div>
                   )}
                 </div>
@@ -1708,10 +1960,69 @@ export default function StudioAiEditPage() {
                   <p className="panel-label">Generative edit</p>
                   <h2>AI Edit</h2>
                 </div>
-                <label className="create-field-label create-field-label-prominent">
-                  Edit prompt
-                  <textarea className="create-prompt-textarea" onChange={(event) => setPrompt(event.target.value)} placeholder="Example: remove the worker, replace the signboard with blank stone, or change the sofa color to beige" rows={5} value={prompt} />
-                </label>
+                <div className="create-mode-switch" role="tablist" aria-label="Prompt mode">
+                  <button className={`create-mode-option ${promptMode === "normal" ? "is-active" : ""}`} onClick={() => setPromptMode("normal")} role="tab" type="button">
+                    Normal prompt
+                  </button>
+                  <button className={`create-mode-option ${promptMode === "list" ? "is-active" : ""}`} onClick={() => setPromptMode("list")} role="tab" type="button">
+                    List mode
+                  </button>
+                </div>
+                {promptMode === "normal" ? (
+                  <label className="create-field-label create-field-label-prominent">
+                    Edit prompt
+                    <textarea
+                      className="create-prompt-textarea"
+                      onChange={(event) => setPrompt(event.target.value)}
+                      placeholder="Example: remove the worker, replace the signboard with blank stone, or change the sofa color to beige"
+                      rows={5}
+                      value={prompt}
+                    />
+                  </label>
+                ) : (
+                  <>
+                    <p className="ai-editor-pane-copy">Add each requested change as a separate item. We’ll combine them into one AI prompt.</p>
+                    {listPromptItems.map((item, index) => (
+                      <div className="create-picker-summary-actions" key={`change-item-${index + 1}`}>
+                        <input
+                          className="input"
+                          onChange={(event) => handleListPromptItemChange(index, event.target.value)}
+                          placeholder={`Change ${index + 1}`}
+                          value={item}
+                        />
+                        <button
+                          className="create-inline-action"
+                          disabled={listPromptItems.length <= 1}
+                          onClick={() => handleRemoveListPromptItem(index)}
+                          type="button"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                    <div className="create-picker-summary-actions">
+                      <button className="create-inline-action" onClick={handleAddListPromptItem} type="button">
+                        Add change
+                      </button>
+                      <button
+                        className="create-inline-action"
+                        disabled={normalizedListPromptItems.length === 0 || isComposingPrompt}
+                        onClick={() => void handleComposePromptFromList()}
+                        type="button"
+                      >
+                        {isComposingPrompt ? "Composing..." : "Compose prompt"}
+                      </button>
+                    </div>
+                    {hasFreshComposedPrompt ? (
+                      <div className="create-picker-summary">
+                        <div>
+                          <p className="create-picker-summary-label">Composed prompt</p>
+                          <p className="ai-edit-plan-copy">{composedPrompt}</p>
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                )}
                 {isMaskFlow ? (
                   <>
                     <div className="create-mode-switch" role="tablist" aria-label="Tool mode">
@@ -2564,6 +2875,14 @@ function fillTextWithLetterSpacing(
 
 function createLayerId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function cloneCanvasLayers(layers: CanvasLayer[]) {
+  return layers.map((layer) => ({ ...layer, ...(layer.type === "draw" ? { points: layer.points.map((point) => ({ ...point })) } : {}) }));
+}
+
+function areCanvasLayersEqual(left: CanvasLayer[], right: CanvasLayer[]) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function getLayerLabel(layer: CanvasLayer) {

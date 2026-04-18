@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const WorkspaceRoleSchema = z.enum(["owner", "admin", "editor", "viewer"]);
+export const WorkspaceMemberUiRoleSchema = z.enum(["admin", "team"]);
 export const AssetKindSchema = z.enum(["reference", "logo", "product", "inspiration", "rera_qr"]);
 export const AssetSubjectTypeSchema = z.enum([
   "project_exterior",
@@ -91,6 +92,9 @@ export const JobStatusSchema = z.enum([
 export const JobTypeSchema = z.enum(["style_seed", "final"]);
 export const OutputVerdictSchema = z.enum(["approved", "close", "off-brand", "wrong-layout", "wrong-text"]);
 export const OutputReviewStateSchema = z.enum(["pending_review", "approved", "needs_revision", "closed"]);
+export const CreditLedgerDirectionSchema = z.enum(["credit", "debit"]);
+export const CreditLedgerEntryKindSchema = z.enum(["grant", "adjustment", "usage_reserve", "usage_release"]);
+export const CreditReservationStatusSchema = z.enum(["reserved", "settled", "released"]);
 export const CreateModeSchema = z.enum(["post", "series_episode", "campaign_asset", "adaptation"]);
 const JsonRecordSchema = z.record(z.string(), z.unknown());
 
@@ -792,6 +796,17 @@ export const AiImageEditResponseSchema = z.object({
   height: z.number().int().positive().optional()
 });
 
+export const ImageEditPromptComposerRequestSchema = z.object({
+  brandId: z.string().uuid(),
+  changes: z.array(z.string().trim().min(2).max(500)).min(1).max(20)
+});
+
+export const ImageEditPromptComposerResponseSchema = z.object({
+  prompt: z.string().trim().min(3).max(2000),
+  strategy: z.enum(["gemini", "fallback"]),
+  model: z.string().nullable().default(null)
+});
+
 export const WorkspaceSchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
@@ -1335,6 +1350,7 @@ export const CreativeOutputSchema = z.object({
   reviewState: OutputReviewStateSchema,
   latestVerdict: OutputVerdictSchema.nullable().default(null),
   reviewedAt: z.string().nullable().default(null),
+  createdBy: z.string().uuid().nullable().default(null),
   previewUrl: z.string().url().optional()
 });
 
@@ -1435,6 +1451,242 @@ export const WorkspaceMemberSchema = z.object({
   role: WorkspaceRoleSchema
 });
 
+export const CreateWorkspaceMemberSchema = z.object({
+  email: z.string().email(),
+  role: WorkspaceMemberUiRoleSchema.default("team")
+});
+
+export const UpdateWorkspaceMemberRoleSchema = z.object({
+  role: WorkspaceMemberUiRoleSchema
+});
+
+export const WorkspaceMemberUpsertResponseSchema = z.object({
+  status: z.enum(["added", "invited", "exists"]),
+  member: WorkspaceMemberSchema
+});
+
+export const WorkspaceMemberRoleUpdateResponseSchema = z.object({
+  status: z.literal("updated"),
+  member: WorkspaceMemberSchema
+});
+
+export const WorkspaceMemberDeleteResponseSchema = z.object({
+  status: z.literal("removed"),
+  removedUserId: z.string().uuid()
+});
+
+export const SetWorkspaceMemberPasswordSchema = z.object({
+  newPassword: z.string().min(8).max(128)
+});
+
+export const WorkspaceMemberPasswordSetResponseSchema = z.object({
+  status: z.literal("password_updated"),
+  userId: z.string().uuid()
+});
+
+export const WorkspaceCreditWalletSchema = z.object({
+  workspaceId: z.string().uuid(),
+  balance: z.number().int().nonnegative(),
+  lifetimeCredited: z.number().int().nonnegative(),
+  lifetimeDebited: z.number().int().nonnegative(),
+  updatedAt: z.string()
+});
+
+export const WorkspaceCreditLedgerEntrySchema = z.object({
+  id: z.string().uuid(),
+  workspaceId: z.string().uuid(),
+  direction: CreditLedgerDirectionSchema,
+  entryKind: CreditLedgerEntryKindSchema,
+  amount: z.number().int().positive(),
+  balanceAfter: z.number().int().nonnegative(),
+  actorUserId: z.string().uuid().nullable().default(null),
+  reservationId: z.string().uuid().nullable().default(null),
+  source: z.string().nullable().default(null),
+  sourceRef: z.string().nullable().default(null),
+  note: z.string().nullable().default(null),
+  metadataJson: JsonRecordSchema.default({}),
+  createdAt: z.string()
+});
+
+export const WorkspaceCreditLedgerResponseSchema = z.object({
+  items: z.array(WorkspaceCreditLedgerEntrySchema),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative()
+});
+
+export const AdminCreditGrantRequestSchema = z.object({
+  workspaceId: z.string().uuid(),
+  amount: z.number().int().positive().max(1_000_000_000),
+  note: z.string().trim().max(400).optional(),
+  sourceRef: z.string().trim().max(120).optional()
+});
+
+export const AdminCreditAdjustRequestSchema = z.object({
+  workspaceId: z.string().uuid(),
+  delta: z.number().int().min(-1_000_000_000).max(1_000_000_000).refine((value) => value !== 0, {
+    message: "Delta cannot be zero"
+  }),
+  note: z.string().trim().max(400).optional(),
+  sourceRef: z.string().trim().max(120).optional()
+});
+
+export const AdminCreditMutationResponseSchema = z.object({
+  status: z.literal("ok"),
+  wallet: WorkspaceCreditWalletSchema,
+  entry: WorkspaceCreditLedgerEntrySchema
+});
+
+export const AdminCreditWorkspaceSummarySchema = z.object({
+  workspaceId: z.string().uuid(),
+  name: z.string(),
+  slug: z.string(),
+  balance: z.number().int().nonnegative(),
+  updatedAt: z.string().nullable().default(null)
+});
+
+export const AdminCreditWorkspaceListResponseSchema = z.object({
+  items: z.array(AdminCreditWorkspaceSummarySchema)
+});
+
+export const AdminFailedJobSchema = z.object({
+  id: z.string().uuid(),
+  workspaceId: z.string().uuid(),
+  brandId: z.string().uuid().nullable().default(null),
+  jobType: JobTypeSchema,
+  status: JobStatusSchema,
+  errorMessage: z.string().nullable().default(null),
+  createdAt: z.string()
+});
+
+export const AdminOverviewSchema = z.object({
+  totals: z.object({
+    workspaceCount: z.number().int().nonnegative(),
+    memberCount: z.number().int().nonnegative(),
+    superAdminCount: z.number().int().nonnegative(),
+    totalCreditBalance: z.number().int().nonnegative(),
+    pendingReviewOutputs: z.number().int().nonnegative(),
+    failedJobsLast24h: z.number().int().nonnegative()
+  }),
+  topWorkspaces: z.array(AdminCreditWorkspaceSummarySchema),
+  recentCreditEntries: z.array(WorkspaceCreditLedgerEntrySchema),
+  recentFailedJobs: z.array(AdminFailedJobSchema)
+});
+
+export const AdminOrgSummarySchema = z.object({
+  workspaceId: z.string().uuid(),
+  name: z.string(),
+  slug: z.string(),
+  createdAt: z.string(),
+  balance: z.number().int().nonnegative(),
+  memberCount: z.number().int().nonnegative(),
+  adminCount: z.number().int().nonnegative(),
+  ownerUserId: z.string().uuid().nullable().default(null),
+  ownerEmail: z.string().email().nullable().default(null)
+});
+
+export const AdminOrgListResponseSchema = z.object({
+  items: z.array(AdminOrgSummarySchema),
+  total: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative()
+});
+
+export const AdminOrgMemberSchema = z.object({
+  userId: z.string().uuid(),
+  email: z.string().email(),
+  displayName: z.string().nullable().default(null),
+  role: WorkspaceRoleSchema,
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+
+export const AdminOrgDetailSchema = z.object({
+  workspace: AdminOrgSummarySchema.extend({
+    createdByUserId: z.string().uuid().nullable().default(null)
+  }),
+  wallet: WorkspaceCreditWalletSchema,
+  members: z.array(AdminOrgMemberSchema),
+  recentCreditEntries: z.array(WorkspaceCreditLedgerEntrySchema),
+  recentFailedJobs: z.array(AdminFailedJobSchema)
+});
+
+export const AdminPlatformAdminSchema = z.object({
+  userId: z.string().uuid(),
+  email: z.string().email(),
+  displayName: z.string().nullable().default(null),
+  role: z.literal("super_admin"),
+  active: z.boolean(),
+  createdByUserId: z.string().uuid().nullable().default(null),
+  createdByEmail: z.string().email().nullable().default(null),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+
+export const AdminPlatformAdminListResponseSchema = z.object({
+  items: z.array(AdminPlatformAdminSchema)
+});
+
+export const AdminPlatformAdminUpsertRequestSchema = z.object({
+  email: z.string().email(),
+  active: z.boolean().optional()
+});
+
+export const AdminPlatformAdminUpdateRequestSchema = z.object({
+  active: z.boolean()
+});
+
+export const AdminPlatformAdminMutationResponseSchema = z.object({
+  status: z.literal("ok"),
+  item: AdminPlatformAdminSchema
+});
+
+export const AdminOpsJobItemSchema = z.object({
+  id: z.string().uuid(),
+  workspaceId: z.string().uuid(),
+  brandId: z.string().uuid().nullable().default(null),
+  jobType: JobTypeSchema,
+  status: JobStatusSchema,
+  ageMinutes: z.number().int().nonnegative(),
+  errorMessage: z.string().nullable().default(null),
+  createdAt: z.string()
+});
+
+export const AdminOpsSummarySchema = z.object({
+  metrics: z.object({
+    queuedJobs: z.number().int().nonnegative(),
+    processingJobs: z.number().int().nonnegative(),
+    failedJobsLast24h: z.number().int().nonnegative(),
+    completedJobsLast24h: z.number().int().nonnegative(),
+    pendingReviewOutputs: z.number().int().nonnegative(),
+    reservedCreditTransactions: z.number().int().nonnegative()
+  }),
+  recentFailedJobs: z.array(AdminOpsJobItemSchema),
+  stuckJobs: z.array(AdminOpsJobItemSchema)
+});
+
+export const AdminAuditKindSchema = z.enum(["credit", "platform_admin", "workspace_member", "job_failure"]);
+
+export const AdminAuditEntrySchema = z.object({
+  id: z.string(),
+  kind: AdminAuditKindSchema,
+  action: z.string(),
+  workspaceId: z.string().uuid().nullable().default(null),
+  workspaceName: z.string().nullable().default(null),
+  actorUserId: z.string().uuid().nullable().default(null),
+  actorLabel: z.string().nullable().default(null),
+  targetUserId: z.string().uuid().nullable().default(null),
+  targetLabel: z.string().nullable().default(null),
+  description: z.string(),
+  metadataJson: JsonRecordSchema.default({}),
+  createdAt: z.string()
+});
+
+export const AdminAuditResponseSchema = z.object({
+  items: z.array(AdminAuditEntrySchema),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative()
+});
+
 export const QueueEntrySchema = z.object({
   deliverable: DeliverableSchema,
   assignee: WorkspaceMemberSchema.nullable(),
@@ -1483,7 +1735,8 @@ export const AiEditConfigSchema = z.object({
 export const BootstrapResponseSchema = z.object({
   viewer: z.object({
     id: z.string().uuid(),
-    email: z.string().email().optional()
+    email: z.string().email().optional(),
+    isPlatformAdmin: z.boolean().default(false)
   }),
   aiEdit: AiEditConfigSchema,
   workspace: WorkspaceSchema.nullable(),
@@ -1521,6 +1774,9 @@ export type CreativeChannel = z.infer<typeof CreativeChannelSchema>;
 export type CreativeFormat = z.infer<typeof CreativeFormatSchema>;
 export type OutputVerdict = z.infer<typeof OutputVerdictSchema>;
 export type OutputReviewState = z.infer<typeof OutputReviewStateSchema>;
+export type CreditLedgerDirection = z.infer<typeof CreditLedgerDirectionSchema>;
+export type CreditLedgerEntryKind = z.infer<typeof CreditLedgerEntryKindSchema>;
+export type CreditReservationStatus = z.infer<typeof CreditReservationStatusSchema>;
 export type BrandProfile = z.infer<typeof BrandProfileSchema>;
 export type CreateBrandInput = z.infer<typeof CreateBrandSchema>;
 export type UpdateBrandInput = z.infer<typeof UpdateBrandSchema>;
@@ -1555,6 +1811,38 @@ export type CreatePostVersionInput = z.infer<typeof CreatePostVersionSchema>;
 export type ApprovalDecisionInput = z.infer<typeof ApprovalDecisionSchema>;
 export type CreatePublicationInput = z.infer<typeof CreatePublicationSchema>;
 export type UpdatePublicationInput = z.infer<typeof UpdatePublicationSchema>;
+export type WorkspaceMemberUiRole = z.infer<typeof WorkspaceMemberUiRoleSchema>;
+export type CreateWorkspaceMemberInput = z.infer<typeof CreateWorkspaceMemberSchema>;
+export type UpdateWorkspaceMemberRoleInput = z.infer<typeof UpdateWorkspaceMemberRoleSchema>;
+export type WorkspaceMemberUpsertResponse = z.infer<typeof WorkspaceMemberUpsertResponseSchema>;
+export type WorkspaceMemberRoleUpdateResponse = z.infer<typeof WorkspaceMemberRoleUpdateResponseSchema>;
+export type WorkspaceMemberDeleteResponse = z.infer<typeof WorkspaceMemberDeleteResponseSchema>;
+export type SetWorkspaceMemberPasswordInput = z.infer<typeof SetWorkspaceMemberPasswordSchema>;
+export type WorkspaceMemberPasswordSetResponse = z.infer<typeof WorkspaceMemberPasswordSetResponseSchema>;
+export type WorkspaceCreditWallet = z.infer<typeof WorkspaceCreditWalletSchema>;
+export type WorkspaceCreditLedgerEntry = z.infer<typeof WorkspaceCreditLedgerEntrySchema>;
+export type WorkspaceCreditLedgerResponse = z.infer<typeof WorkspaceCreditLedgerResponseSchema>;
+export type AdminCreditGrantRequest = z.infer<typeof AdminCreditGrantRequestSchema>;
+export type AdminCreditAdjustRequest = z.infer<typeof AdminCreditAdjustRequestSchema>;
+export type AdminCreditMutationResponse = z.infer<typeof AdminCreditMutationResponseSchema>;
+export type AdminCreditWorkspaceSummary = z.infer<typeof AdminCreditWorkspaceSummarySchema>;
+export type AdminCreditWorkspaceListResponse = z.infer<typeof AdminCreditWorkspaceListResponseSchema>;
+export type AdminFailedJob = z.infer<typeof AdminFailedJobSchema>;
+export type AdminOverview = z.infer<typeof AdminOverviewSchema>;
+export type AdminOrgSummary = z.infer<typeof AdminOrgSummarySchema>;
+export type AdminOrgListResponse = z.infer<typeof AdminOrgListResponseSchema>;
+export type AdminOrgMember = z.infer<typeof AdminOrgMemberSchema>;
+export type AdminOrgDetail = z.infer<typeof AdminOrgDetailSchema>;
+export type AdminPlatformAdmin = z.infer<typeof AdminPlatformAdminSchema>;
+export type AdminPlatformAdminListResponse = z.infer<typeof AdminPlatformAdminListResponseSchema>;
+export type AdminPlatformAdminUpsertRequest = z.infer<typeof AdminPlatformAdminUpsertRequestSchema>;
+export type AdminPlatformAdminUpdateRequest = z.infer<typeof AdminPlatformAdminUpdateRequestSchema>;
+export type AdminPlatformAdminMutationResponse = z.infer<typeof AdminPlatformAdminMutationResponseSchema>;
+export type AdminOpsJobItem = z.infer<typeof AdminOpsJobItemSchema>;
+export type AdminOpsSummary = z.infer<typeof AdminOpsSummarySchema>;
+export type AdminAuditKind = z.infer<typeof AdminAuditKindSchema>;
+export type AdminAuditEntry = z.infer<typeof AdminAuditEntrySchema>;
+export type AdminAuditResponse = z.infer<typeof AdminAuditResponseSchema>;
 export type CreateMode = z.infer<typeof CreateModeSchema>;
 export type SeriesOutputKind = z.infer<typeof SeriesOutputKindSchema>;
 export type CreativeBrief = z.infer<typeof CreativeBriefSchema>;
@@ -1569,6 +1857,8 @@ export type ImageEditIntent = z.infer<typeof ImageEditIntentSchema>;
 export type ImageEditPlanResponse = z.infer<typeof ImageEditPlanResponseSchema>;
 export type AiSegmentationResponse = z.infer<typeof AiSegmentationResponseSchema>;
 export type AiImageEditResponse = z.infer<typeof AiImageEditResponseSchema>;
+export type ImageEditPromptComposerRequest = z.infer<typeof ImageEditPromptComposerRequestSchema>;
+export type ImageEditPromptComposerResponse = z.infer<typeof ImageEditPromptComposerResponseSchema>;
 export type WorkspaceSummary = z.infer<typeof WorkspaceSchema>;
 export type BrandRecord = z.infer<typeof BrandSchema>;
 export type BrandProfileVersionRecord = z.infer<typeof BrandProfileVersionSchema>;
