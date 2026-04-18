@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { BootstrapResponse, ImageEditPlanResponse } from "@image-lab/contracts";
-import { useSearchParams } from "next/navigation";
-import { applyMaskedImageEdit, composeImageEditPrompt, generateAutoMask, getCreativeOutput, planImageEdit } from "../../../lib/api";
+import { useRouter, useSearchParams } from "next/navigation";
+import { applyMaskedImageEdit, composeImageEditPrompt, generateAutoMask, getCreativeOutput, planImageEdit, saveEditedCreativeOutput } from "../../../lib/api";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions, useRegisterTopbarControls, useRegisterTopbarMeta } from "../topbar-actions-context";
 
@@ -84,10 +84,23 @@ type CanvasDrawLayer = {
 
 type CanvasLayer = CanvasTextLayer | CanvasImageLayer | CanvasShapeLayer | CanvasDrawLayer;
 
+type EditorSnapshot = {
+  originalImage: EditableImage | null;
+  currentImage: EditableImage | null;
+  canvasLayers: CanvasLayer[];
+  maskDataUrl: string | null;
+  hasMaskPreview: boolean;
+  editPlan: ImageEditPlanResponse | null;
+  plannedPrompt: string;
+  targetPoint: { x: number; y: number } | null;
+  toolMode: ToolMode;
+};
+
 type LayerDragState = {
   id: string;
   mode: "move" | "resize";
   pushedHistory: boolean;
+  snapshot: EditorSnapshot;
   startClientX: number;
   startClientY: number;
   startX: number;
@@ -142,6 +155,7 @@ const VISUAL_MASK_FILL = `rgba(${VISUAL_MASK_COLOR.red}, ${VISUAL_MASK_COLOR.gre
 
 export default function StudioAiEditPage() {
   const { sessionToken, activeBrand, activeBrandId, activeAssets, bootstrap, recentOutputs } = useStudio();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const aiEditFlow = bootstrap?.aiEdit?.flow ?? "mask";
   const isMaskFlow = aiEditFlow === "mask";
@@ -168,13 +182,19 @@ export default function StudioAiEditPage() {
   const [currentImage, setCurrentImage] = useState<EditableImage | null>(null);
   const [canvasLayers, setCanvasLayers] = useState<CanvasLayer[]>([]);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
-  const [layersHistory, setLayersHistory] = useState<CanvasLayer[][]>([]);
-  const [layersFuture, setLayersFuture] = useState<CanvasLayer[][]>([]);
+  const [editorHistory, setEditorHistory] = useState<EditorSnapshot[]>([]);
+  const [editorFuture, setEditorFuture] = useState<EditorSnapshot[]>([]);
+  const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
   const [hasMaskPreview, setHasMaskPreview] = useState(false);
   const [activeEditorPane, setActiveEditorPane] = useState<EditorPane>("uploads");
   const [drawMode, setDrawMode] = useState<DrawMode>("select");
   const [drawColor, setDrawColor] = useState(DRAW_COLORS[0] ?? "#111111");
   const [drawSize, setDrawSize] = useState(5);
+  const [currentSourceOutputId, setCurrentSourceOutputId] = useState<string | null>(outputId);
+  const [currentSourceReviewState, setCurrentSourceReviewState] = useState<"pending_review" | "approved" | "needs_revision" | "closed" | null>(null);
+  const [isSaveDrawerOpen, setIsSaveDrawerOpen] = useState(false);
+  const [saveMode, setSaveMode] = useState<"new" | "version" | "replace">("new");
+  const [isSavingOutput, setIsSavingOutput] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const layerImageInputRef = useRef<HTMLInputElement>(null);
@@ -214,12 +234,13 @@ export default function StudioAiEditPage() {
     [activeAssets]
   );
   const generatedOutputAssets = useMemo(
-    () => recentOutputs.filter((output) => output.previewUrl && output.id !== outputId).slice(0, 18),
+    () => recentOutputs.filter((output) => (output.thumbnailUrl ?? output.previewUrl) && output.id !== outputId).slice(0, 18),
     [recentOutputs, outputId]
   );
   const hasCanvasLayers = canvasLayers.length > 0;
-  const canUndo = useMemo(() => layersHistory.length > 0, [layersHistory]);
-  const canRedo = useMemo(() => layersFuture.length > 0, [layersFuture]);
+  const canUndo = useMemo(() => editorHistory.length > 0, [editorHistory]);
+  const canRedo = useMemo(() => editorFuture.length > 0, [editorFuture]);
+  const canReplaceCurrentSource = currentSourceReviewState === "pending_review" || currentSourceReviewState === "needs_revision";
   const stageScale = currentImage && stageWidth ? stageWidth / currentImage.width : 1;
   const promptTrimmed = prompt.trim();
   const normalizedListPromptItems = useMemo(
@@ -295,6 +316,14 @@ export default function StudioAiEditPage() {
             >
               {isSharing ? "Sharing..." : "Share"}
             </button>
+            <button
+              className="button button-ghost"
+              disabled={isSavingOutput || isApplying || isSegmenting}
+              onClick={openSaveDrawer}
+              type="button"
+            >
+              {isSavingOutput ? "Saving..." : "Save"}
+            </button>
             <button className="button button-primary" onClick={() => void handleDownloadComposition()} type="button">
               Download current
             </button>
@@ -306,7 +335,7 @@ export default function StudioAiEditPage() {
         )}
       </>
     ),
-    [canvasLayers, currentImage, isApplying, isSegmenting, isSharing, canUndo, canRedo]
+    [currentImage, isSavingOutput, isApplying, isSegmenting, isSharing, canUndo, canRedo]
   );
 
   const topbarMeta = useMemo(
@@ -377,12 +406,13 @@ export default function StudioAiEditPage() {
 
       try {
         const output = await getCreativeOutput(token, nextOutputId);
-        if (!output.previewUrl) {
+        const sourceUrl = output.originalUrl ?? output.previewUrl;
+        if (!sourceUrl) {
           throw new Error("This output does not have an editable preview image.");
         }
 
         const file = await sourceToFile(
-          output.previewUrl,
+          sourceUrl,
           `output-${output.outputIndex + 1}.png`,
           "image/png"
         );
@@ -395,10 +425,13 @@ export default function StudioAiEditPage() {
         loadedOutputIdRef.current = nextOutputId;
         setOriginalImage(image);
         setCurrentImage(image);
+        setCurrentSourceOutputId(output.id);
+        setCurrentSourceReviewState(output.reviewState);
         setCanvasLayers([]);
         setSelectedLayerId(null);
-        setLayersHistory([]);
-        setLayersFuture([]);
+        setEditorHistory([]);
+        setEditorFuture([]);
+        setMaskDataUrl(null);
         setEditPlan(null);
         setPlannedPrompt("");
         setTargetPoint(null);
@@ -430,9 +463,22 @@ export default function StudioAiEditPage() {
 
     canvas.width = currentImage.width;
     canvas.height = currentImage.height;
-    clearMaskCanvas(canvas);
-    setHasMaskPreview(false);
-  }, [currentImage]);
+    if (!maskDataUrl) {
+      clearMaskCanvas(canvas);
+      return;
+    }
+
+    let cancelled = false;
+    void drawCanvasImage(maskDataUrl, canvas).catch(() => {
+      if (!cancelled) {
+        clearMaskCanvas(canvas);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentImage, maskDataUrl]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -476,16 +522,19 @@ export default function StudioAiEditPage() {
 
     try {
       const image = await createEditableImage(file);
+      pushToEditorHistory();
       setOriginalImage(image);
       setCurrentImage(image);
+      setCurrentSourceOutputId(null);
+      setCurrentSourceReviewState(null);
       setEditPlan(null);
       setPlannedPrompt("");
       setTargetPoint(null);
       setToolMode("select");
       setCanvasLayers([]);
       setSelectedLayerId(null);
-      setLayersHistory([]);
-      setLayersFuture([]);
+      setMaskDataUrl(null);
+      setHasMaskPreview(false);
       setStatus(
         isMaskFlow
           ? "Source image loaded. Describe the change, then analyze the edit."
@@ -513,6 +562,7 @@ export default function StudioAiEditPage() {
       return;
     }
 
+    pushToEditorHistory();
     drawingRef.current = true;
     lastPointRef.current = getCanvasPoint(event);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -548,6 +598,7 @@ export default function StudioAiEditPage() {
 
     drawingRef.current = false;
     lastPointRef.current = null;
+    setMaskDataUrl(captureCanvasDataUrl(event.currentTarget));
   }
 
   function drawPoint(x: number, y: number) {
@@ -598,12 +649,15 @@ export default function StudioAiEditPage() {
 
   function handleClearMask() {
     if (!maskCanvasRef.current) return;
+    if (!maskDataUrl && !hasMaskPreview) return;
 
+    pushToEditorHistory();
     clearMaskCanvas(maskCanvasRef.current);
     setTargetPoint(null);
     if (editPlan && !analysisIsStale) {
       setToolMode("target");
     }
+    setMaskDataUrl(null);
     setHasMaskPreview(false);
     setStatus("Mask cleared.");
     setError(null);
@@ -612,7 +666,7 @@ export default function StudioAiEditPage() {
   function handleResetImage() {
     if (!originalImage) return;
 
-    pushToLayersHistory(canvasLayers);
+    pushToEditorHistory();
     setCurrentImage(originalImage);
     setEditPlan(null);
     setPlannedPrompt("");
@@ -620,6 +674,8 @@ export default function StudioAiEditPage() {
     setToolMode("select");
     setCanvasLayers([]);
     setSelectedLayerId(null);
+    setMaskDataUrl(null);
+    setHasMaskPreview(false);
     setStatus(
       isMaskFlow
         ? "Reset to original image. Analyze the next edit before applying it."
@@ -794,6 +850,7 @@ export default function StudioAiEditPage() {
       if (!canvas) throw new Error("Mask canvas is not available.");
 
       await applySegmentationMaskToCanvas(result.maskDataUrl ?? result.maskUrl, canvas);
+      setMaskDataUrl(captureCanvasDataUrl(canvas));
       setToolMode("brush");
       setTargetPoint(nextTargetPoint ?? null);
       setHasMaskPreview(true);
@@ -852,7 +909,7 @@ export default function StudioAiEditPage() {
       opacity: 1
     };
 
-    pushToLayersHistory(canvasLayers);
+    pushToEditorHistory();
     setCanvasLayers((layers) => [...layers, nextLayer]);
     setSelectedLayerId(nextLayer.id);
     setToolMode("select");
@@ -887,7 +944,7 @@ export default function StudioAiEditPage() {
       opacity: 0.9
     };
 
-    pushToLayersHistory(canvasLayers);
+    pushToEditorHistory();
     setCanvasLayers((layers) => [...layers, nextLayer]);
     setSelectedLayerId(nextLayer.id);
     setToolMode("select");
@@ -928,7 +985,7 @@ export default function StudioAiEditPage() {
         opacity: 1
       };
 
-      pushToLayersHistory(canvasLayers);
+      pushToEditorHistory();
       setCanvasLayers((layers) => [...layers, nextLayer]);
       setSelectedLayerId(nextLayer.id);
       setToolMode("select");
@@ -945,13 +1002,14 @@ export default function StudioAiEditPage() {
       return;
     }
 
-    if (!asset.previewUrl) {
+    const sourceUrl = asset.originalUrl ?? asset.previewUrl;
+    if (!sourceUrl) {
       setError(`${asset.label} does not have a preview URL yet.`);
       return;
     }
 
     try {
-      const dimensions = await loadImageSourceDimensions(asset.previewUrl);
+      const dimensions = await loadImageSourceDimensions(sourceUrl);
       const isQr = asset.kind === "rera_qr";
       const width = isQr ? 0.16 : 0.22;
       const height = Math.min(
@@ -962,7 +1020,7 @@ export default function StudioAiEditPage() {
         id: createLayerId(asset.kind),
         type: "image",
         name: asset.label,
-        src: asset.previewUrl,
+        src: sourceUrl,
         x: isQr ? 0.78 : 0.08,
         y: isQr ? 0.78 : 0.08,
         width,
@@ -972,7 +1030,7 @@ export default function StudioAiEditPage() {
         opacity: 1
       };
 
-      pushToLayersHistory(canvasLayers);
+      pushToEditorHistory();
       setCanvasLayers((layers) => [...layers, nextLayer]);
       setSelectedLayerId(nextLayer.id);
       setToolMode("select");
@@ -985,25 +1043,48 @@ export default function StudioAiEditPage() {
   }
 
   async function handleAddGeneratedOutputLayer(output: BootstrapResponse["recentOutputs"][number]) {
-    if (!currentImage) {
-      setError("Upload a source image or choose a template before adding generated posts.");
-      return;
-    }
-
-    if (!output.previewUrl) {
+    const sourceUrl = output.originalUrl ?? output.previewUrl;
+    if (!sourceUrl) {
       setError("This generated post is missing a preview URL.");
       return;
     }
 
     try {
-      const dimensions = await loadImageSourceDimensions(output.previewUrl);
+      if (!currentImage) {
+        const file = await sourceToFile(
+          sourceUrl,
+          `generated-post-${output.outputIndex + 1}.png`,
+          "image/png"
+        );
+        const image = await createEditableImage(file);
+
+      setOriginalImage(image);
+      setCurrentImage(image);
+      setCurrentSourceOutputId(output.id);
+      setCurrentSourceReviewState(output.reviewState);
+      setCanvasLayers([]);
+        setSelectedLayerId(null);
+        setMaskDataUrl(null);
+        setHasMaskPreview(false);
+        setEditPlan(null);
+        setPlannedPrompt("");
+        setTargetPoint(null);
+        setToolMode("select");
+        setActiveEditorPane("uploads");
+        if (maskCanvasRef.current) clearMaskCanvas(maskCanvasRef.current);
+        setStatus("Generated post loaded as the base image.");
+        setError(null);
+        return;
+      }
+
+      const dimensions = await loadImageSourceDimensions(sourceUrl);
       const width = 0.36;
       const height = Math.min(0.5, width * (dimensions.height / dimensions.width) * (currentImage.width / currentImage.height));
       const nextLayer: CanvasImageLayer = {
         id: createLayerId("generated-post"),
         type: "image",
         name: `Generated post #${output.outputIndex + 1}`,
-        src: output.previewUrl,
+        src: sourceUrl,
         x: 0.06,
         y: 0.06,
         width,
@@ -1013,7 +1094,7 @@ export default function StudioAiEditPage() {
         opacity: 1
       };
 
-      pushToLayersHistory(canvasLayers);
+      pushToEditorHistory();
       setCanvasLayers((layers) => [...layers, nextLayer]);
       setSelectedLayerId(nextLayer.id);
       setToolMode("select");
@@ -1058,7 +1139,7 @@ export default function StudioAiEditPage() {
       opacity: 1
     };
 
-    pushToLayersHistory(canvasLayers);
+    pushToEditorHistory();
     setCanvasLayers((layers) => [...layers, nextLayer]);
     setSelectedLayerId(nextLayer.id);
     setToolMode("select");
@@ -1072,11 +1153,15 @@ export default function StudioAiEditPage() {
       const templateImage = await createTemplateBaseImage(templateId);
       const templateLayers = buildTemplateLayers(templateId, templateImage.width, templateImage.height);
 
-      pushToLayersHistory(canvasLayers);
+      pushToEditorHistory();
       setOriginalImage(templateImage);
       setCurrentImage(templateImage);
+      setCurrentSourceOutputId(null);
+      setCurrentSourceReviewState(null);
       setCanvasLayers(templateLayers);
       setSelectedLayerId(templateLayers[0]?.id ?? null);
+      setMaskDataUrl(null);
+      setHasMaskPreview(false);
       setEditPlan(null);
       setPlannedPrompt("");
       setTargetPoint(null);
@@ -1124,7 +1209,7 @@ export default function StudioAiEditPage() {
         opacity: drawMode === "highlighter" ? 0.42 : 1
       };
 
-      pushToLayersHistory(canvasLayers);
+      pushToEditorHistory();
       drawPathRef.current = nextLayer;
       setCanvasLayers((layers) => [...layers, nextLayer]);
       setSelectedLayerId(nextLayer.id);
@@ -1152,7 +1237,7 @@ export default function StudioAiEditPage() {
   ) {
     if (!selectedLayerId) return;
 
-    pushToLayersHistory(canvasLayers);
+    pushToEditorHistory();
     setCanvasLayers((layers) =>
       layers.map((layer) => (layer.id === selectedLayerId ? ({ ...layer, ...patch } as CanvasLayer) : layer))
     );
@@ -1168,7 +1253,7 @@ export default function StudioAiEditPage() {
       y: clamp(selectedLayer.y + 0.04, 0, 0.96)
     } as CanvasLayer;
 
-    pushToLayersHistory(canvasLayers);
+    pushToEditorHistory();
     setCanvasLayers((layers) => [...layers, nextLayer]);
     setSelectedLayerId(nextLayer.id);
     setStatus("Layer duplicated.");
@@ -1177,7 +1262,7 @@ export default function StudioAiEditPage() {
   function moveSelectedLayer(direction: "forward" | "backward") {
     if (!selectedLayerId) return;
 
-    pushToLayersHistory(canvasLayers);
+    pushToEditorHistory();
     setCanvasLayers((layers) => {
       const index = layers.findIndex((layer) => layer.id === selectedLayerId);
       if (index < 0) return layers;
@@ -1206,46 +1291,74 @@ export default function StudioAiEditPage() {
   function handleDeleteSelectedLayer() {
     if (!selectedLayerId) return;
 
-    pushToLayersHistory(canvasLayers);
+    pushToEditorHistory();
     setCanvasLayers((layers) => layers.filter((layer) => layer.id !== selectedLayerId));
     setSelectedLayerId(null);
     setStatus("Layer removed.");
   }
 
-  function pushToLayersHistory(layers: CanvasLayer[]) {
-    const snapshot = cloneCanvasLayers(layers);
-    setLayersHistory((prev) => {
+  function createEditorSnapshot(): EditorSnapshot {
+    return {
+      originalImage: cloneEditableImage(originalImage),
+      currentImage: cloneEditableImage(currentImage),
+      canvasLayers: cloneCanvasLayers(canvasLayers),
+      maskDataUrl,
+      hasMaskPreview,
+      editPlan: editPlan ? structuredClone(editPlan) : null,
+      plannedPrompt,
+      targetPoint: targetPoint ? { ...targetPoint } : null,
+      toolMode
+    };
+  }
+
+  function pushToEditorHistory() {
+    pushSpecificEditorSnapshot(createEditorSnapshot());
+  }
+
+  function pushSpecificEditorSnapshot(snapshot: EditorSnapshot) {
+    setEditorHistory((prev) => {
       const previousSnapshot = prev[prev.length - 1];
-      if (previousSnapshot && areCanvasLayersEqual(previousSnapshot, snapshot)) {
+      if (previousSnapshot && areEditorSnapshotsEqual(previousSnapshot, snapshot)) {
         return prev;
       }
 
       return [...prev.slice(-19), snapshot];
     });
-    setLayersFuture([]);
+    setEditorFuture([]);
+  }
+
+  function restoreEditorSnapshot(snapshot: EditorSnapshot) {
+    setOriginalImage(cloneEditableImage(snapshot.originalImage));
+    setCurrentImage(cloneEditableImage(snapshot.currentImage));
+    setCanvasLayers(cloneCanvasLayers(snapshot.canvasLayers));
+    setMaskDataUrl(snapshot.maskDataUrl);
+    setHasMaskPreview(snapshot.hasMaskPreview);
+    setEditPlan(snapshot.editPlan ? structuredClone(snapshot.editPlan) : null);
+    setPlannedPrompt(snapshot.plannedPrompt);
+    setTargetPoint(snapshot.targetPoint ? { ...snapshot.targetPoint } : null);
+    setToolMode(snapshot.toolMode);
+    setSelectedLayerId(null);
   }
 
   function handleUndo() {
-    if (layersHistory.length === 0) return;
+    if (editorHistory.length === 0) return;
 
-    const previous = layersHistory[layersHistory.length - 1];
+    const previous = editorHistory[editorHistory.length - 1];
     if (!previous) return;
-    setLayersFuture((prev) => [cloneCanvasLayers(canvasLayers), ...prev]);
-    setLayersHistory((prev) => prev.slice(0, -1));
-    setCanvasLayers(cloneCanvasLayers(previous));
-    setSelectedLayerId(null);
+    setEditorFuture((prev) => [createEditorSnapshot(), ...prev]);
+    setEditorHistory((prev) => prev.slice(0, -1));
+    restoreEditorSnapshot(previous);
     setStatus("Undone.");
   }
 
   function handleRedo() {
-    if (layersFuture.length === 0) return;
+    if (editorFuture.length === 0) return;
 
-    const next = layersFuture[0];
+    const next = editorFuture[0];
     if (!next) return;
-    setLayersHistory((prev) => [...prev, cloneCanvasLayers(canvasLayers)]);
-    setLayersFuture((prev) => prev.slice(1));
-    setCanvasLayers(cloneCanvasLayers(next));
-    setSelectedLayerId(null);
+    setEditorHistory((prev) => [...prev, createEditorSnapshot()]);
+    setEditorFuture((prev) => prev.slice(1));
+    restoreEditorSnapshot(next);
     setStatus("Redone.");
   }
 
@@ -1264,6 +1377,7 @@ export default function StudioAiEditPage() {
       id: layer.id,
       mode,
       pushedHistory: false,
+      snapshot: createEditorSnapshot(),
       startClientX: event.clientX,
       startClientY: event.clientY,
       startX: layer.x,
@@ -1301,7 +1415,7 @@ export default function StudioAiEditPage() {
     const deltaY = (event.clientY - drag.startClientY) / rect.height;
     const movedEnough = Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001;
     if (movedEnough && !drag.pushedHistory) {
-      pushToLayersHistory(canvasLayers);
+      pushSpecificEditorSnapshot(drag.snapshot);
       drag.pushedHistory = true;
     }
 
@@ -1427,6 +1541,63 @@ export default function StudioAiEditPage() {
     }
   }
 
+  function openSaveDrawer() {
+    if (!currentImage) {
+      return;
+    }
+
+    setSaveMode(currentSourceOutputId ? "version" : "new");
+    setIsSaveDrawerOpen(true);
+  }
+
+  async function handleSaveOutput() {
+    if (!sessionToken) {
+      setError("Your session is missing. Refresh the page and try again.");
+      return;
+    }
+
+    if (!activeBrandId) {
+      setError("Select an active brand before saving.");
+      return;
+    }
+
+    if (!currentImage) {
+      setError("Upload a source image first.");
+      return;
+    }
+
+    setIsSavingOutput(true);
+    setError(null);
+
+    try {
+      const file = await getComposedImageFile(buildComposedFileName(currentImage.file.name));
+      const response = await saveEditedCreativeOutput(sessionToken, {
+        brandId: activeBrandId,
+        saveMode,
+        sourceOutputId: currentSourceOutputId,
+        image: file,
+        imageFileName: file.name
+      });
+
+      setCurrentSourceOutputId(response.output.id);
+      setCurrentSourceReviewState(response.output.reviewState);
+      loadedOutputIdRef.current = response.output.id;
+      setIsSaveDrawerOpen(false);
+      setStatus(
+        response.resolvedMode === "replace"
+          ? "Current draft replaced and saved."
+          : response.resolvedMode === "version"
+            ? `New version saved to Gallery (v${response.output.versionNumber}).`
+            : "Output saved to Gallery."
+      );
+      router.replace(`/studio/ai-edit?outputId=${response.output.id}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to save the current output.");
+    } finally {
+      setIsSavingOutput(false);
+    }
+  }
+
   async function handleApplyEdit() {
     if (!sessionToken) {
       setError("Your session is missing. Refresh the page and try again.");
@@ -1518,9 +1689,11 @@ export default function StudioAiEditPage() {
       );
       const nextImage = await createEditableImage(nextFile);
 
+      pushToEditorHistory();
       setCurrentImage(nextImage);
       setCanvasLayers([]);
       setSelectedLayerId(null);
+      setMaskDataUrl(null);
       setEditPlan(null);
       setPlannedPrompt("");
       setTargetPoint(null);
@@ -1620,19 +1793,23 @@ export default function StudioAiEditPage() {
                   <p className="panel-label">Brand assets</p>
                   <h2>Assets</h2>
                 </div>
-                <p className="ai-editor-pane-copy">Add approved logo, RERA QR, RERA text, or generated posts to the current canvas.</p>
+                <p className="ai-editor-pane-copy">Add approved logo, RERA QR, or RERA text to the current canvas.</p>
                 <div className="ai-editor-asset-list">
                   {brandPlacementAssets.length ? (
                     brandPlacementAssets.map((asset) => (
                       <button
                         className="ai-editor-asset-card"
-                        disabled={!currentImage || !asset.previewUrl}
+                        disabled={!currentImage || !(asset.originalUrl ?? asset.previewUrl)}
                         key={asset.id}
                         onClick={() => void handleAddBrandAssetLayer(asset)}
                         type="button"
                       >
                         <span className="ai-editor-asset-preview">
-                          {asset.previewUrl ? <img alt={asset.label} src={asset.previewUrl} /> : <span>{asset.kind === "rera_qr" ? "QR" : "Logo"}</span>}
+                          {asset.thumbnailUrl ?? asset.previewUrl ? (
+                            <img alt={asset.label} src={asset.thumbnailUrl ?? asset.previewUrl} />
+                          ) : (
+                            <span>{asset.kind === "rera_qr" ? "QR" : "Logo"}</span>
+                          )}
                         </span>
                         <span className="ai-editor-asset-copy">
                           <strong>{asset.label}</strong>
@@ -1658,32 +1835,6 @@ export default function StudioAiEditPage() {
                 <button className="button button-ghost ai-editor-full-button" disabled={!currentImage} onClick={handleAddReraNumberLayer} type="button">
                   Add RERA number text
                 </button>
-                <h3 className="ai-editor-pane-subtitle">Generated posts</h3>
-                <div className="ai-editor-asset-list">
-                  {generatedOutputAssets.length ? (
-                    generatedOutputAssets.map((output) => (
-                      <button
-                        className="ai-editor-asset-card"
-                        disabled={!currentImage || !output.previewUrl}
-                        key={output.id}
-                        onClick={() => void handleAddGeneratedOutputLayer(output)}
-                        type="button"
-                      >
-                        <span className="ai-editor-asset-preview">
-                          {output.previewUrl ? <img alt={`Generated post ${output.outputIndex + 1}`} src={output.previewUrl} /> : <span>Post</span>}
-                        </span>
-                        <span className="ai-editor-asset-copy">
-                          <strong>{`Generated post #${output.outputIndex + 1}`}</strong>
-                          <small>{output.createdBy ? `Creator ID: ${output.createdBy}` : "Generated output"}</small>
-                        </span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="create-empty-state create-empty-state-compact">
-                      <p>No generated posts available yet for this brand.</p>
-                    </div>
-                  )}
-                </div>
                 {!currentImage ? <p className="create-hint">Upload an image or choose a template before placing assets.</p> : null}
               </div>
             ) : null}
@@ -1757,6 +1908,40 @@ export default function StudioAiEditPage() {
                 <button className="button button-ghost ai-editor-full-button" disabled={!currentImage} onClick={() => layerImageInputRef.current?.click()} type="button">
                   Add image layer
                 </button>
+                <h3 className="ai-editor-pane-subtitle">Generated posts</h3>
+                <p className="ai-editor-pane-copy">Use recently generated posts as full image sources for the current composition.</p>
+                <div className="ai-editor-upload-source-list">
+                  {generatedOutputAssets.length ? (
+                    generatedOutputAssets.map((output) => (
+                      <button
+                        className="ai-editor-upload-source-card"
+                        disabled={!(output.originalUrl ?? output.previewUrl)}
+                        key={output.id}
+                        onClick={() => void handleAddGeneratedOutputLayer(output)}
+                        type="button"
+                      >
+                        <span className="ai-editor-upload-source-preview">
+                          {output.originalUrl ?? output.previewUrl ? (
+                            <img
+                              alt={`Generated post ${output.outputIndex + 1}`}
+                              src={output.originalUrl ?? output.previewUrl}
+                            />
+                          ) : (
+                            <span>Post</span>
+                          )}
+                        </span>
+                        <span className="ai-editor-upload-source-copy">
+                          <strong>{`Generated post #${output.outputIndex + 1}`}</strong>
+                          <small>{output.createdBy ? `Created by ${output.createdBy}` : "Generated output"}</small>
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="create-empty-state create-empty-state-compact">
+                      <p>No generated posts available yet for this brand.</p>
+                    </div>
+                  )}
+                </div>
                 <div className="create-picker-summary">
                   <div>
                     <p className="create-picker-summary-label">Current canvas</p>
@@ -2230,6 +2415,87 @@ export default function StudioAiEditPage() {
           </div>
         </section>
       </main>
+
+      {isSaveDrawerOpen ? (
+        <div className="drawer-overlay" onClick={() => setIsSaveDrawerOpen(false)}>
+          <div className="drawer-content" onClick={(event) => event.stopPropagation()}>
+            <div className="drawer-header">
+              <div>
+                <p className="panel-label">Editor save</p>
+                <h2>Save changes</h2>
+              </div>
+              <button className="drawer-close" onClick={() => setIsSaveDrawerOpen(false)} type="button">
+                ×
+              </button>
+            </div>
+            <div className="drawer-body">
+              <div className="drawer-form">
+                <p className="ai-editor-pane-copy">
+                  {currentSourceOutputId
+                    ? "Choose whether this save should preserve the current output as a previous version or overwrite the current draft."
+                    : "Save the current editor composition as a new output in Gallery."}
+                </p>
+
+                {currentSourceOutputId ? (
+                  <div className="ai-editor-save-mode-list">
+                    <label className={`ai-editor-save-mode-card ${saveMode === "version" ? "is-active" : ""}`}>
+                      <input
+                        checked={saveMode === "version"}
+                        name="editor-save-mode"
+                        onChange={() => setSaveMode("version")}
+                        type="radio"
+                      />
+                      <div>
+                        <strong>Create new version</strong>
+                        <p>Keeps the current design and saves this edit as the next version in Gallery.</p>
+                      </div>
+                    </label>
+                    <label className={`ai-editor-save-mode-card ${saveMode === "replace" ? "is-active" : ""} ${!canReplaceCurrentSource ? "is-disabled" : ""}`}>
+                      <input
+                        checked={saveMode === "replace"}
+                        disabled={!canReplaceCurrentSource}
+                        name="editor-save-mode"
+                        onChange={() => setSaveMode("replace")}
+                        type="radio"
+                      />
+                      <div>
+                        <strong>Replace current draft</strong>
+                        <p>
+                          {canReplaceCurrentSource
+                            ? "Updates the current draft in place instead of creating a new output."
+                            : "Only draft-like outputs can be replaced. Approved or closed outputs must be saved as a new version."}
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+                ) : (
+                  <div className="create-picker-summary">
+                    <div>
+                      <p className="create-picker-summary-label">Save target</p>
+                      <strong>New Gallery output</strong>
+                    </div>
+                  </div>
+                )}
+
+                <div className="drawer-footer">
+                  <button className="button button-ghost" onClick={() => setIsSaveDrawerOpen(false)} type="button">
+                    Cancel
+                  </button>
+                  <button className="button button-primary" disabled={isSavingOutput} onClick={() => void handleSaveOutput()} type="button">
+                    {isSavingOutput
+                      ? "Saving..."
+                      : currentSourceOutputId
+                        ? saveMode === "replace"
+                          ? "Replace draft"
+                          : "Save as version"
+                        : "Save to Gallery"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2395,6 +2661,17 @@ async function loadImageDimensions(file: File) {
 async function loadImageSourceDimensions(source: string) {
   const image = await loadImage(source);
   return { width: image.naturalWidth || image.width, height: image.naturalHeight || image.height };
+}
+
+async function drawCanvasImage(source: string, canvas: HTMLCanvasElement) {
+  const image = await loadImage(source);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Unable to draw on the canvas.");
+  }
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 }
 
 function clearMaskCanvas(canvas: HTMLCanvasElement) {
@@ -2877,12 +3154,48 @@ function createLayerId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function cloneEditableImage(image: EditableImage | null): EditableImage | null {
+  return image ? { ...image } : null;
+}
+
 function cloneCanvasLayers(layers: CanvasLayer[]) {
   return layers.map((layer) => ({ ...layer, ...(layer.type === "draw" ? { points: layer.points.map((point) => ({ ...point })) } : {}) }));
 }
 
 function areCanvasLayersEqual(left: CanvasLayer[], right: CanvasLayer[]) {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function areEditorSnapshotsEqual(left: EditorSnapshot, right: EditorSnapshot) {
+  return (
+    areEditableImagesEqual(left.originalImage, right.originalImage) &&
+    areEditableImagesEqual(left.currentImage, right.currentImage) &&
+    areCanvasLayersEqual(left.canvasLayers, right.canvasLayers) &&
+    left.maskDataUrl === right.maskDataUrl &&
+    left.hasMaskPreview === right.hasMaskPreview &&
+    JSON.stringify(left.editPlan) === JSON.stringify(right.editPlan) &&
+    left.plannedPrompt === right.plannedPrompt &&
+    JSON.stringify(left.targetPoint) === JSON.stringify(right.targetPoint) &&
+    left.toolMode === right.toolMode
+  );
+}
+
+function areEditableImagesEqual(left: EditableImage | null, right: EditableImage | null) {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+
+  return (
+    left.width === right.width &&
+    left.height === right.height &&
+    left.file.name === right.file.name &&
+    left.file.size === right.file.size &&
+    left.file.lastModified === right.file.lastModified &&
+    left.file.type === right.file.type
+  );
+}
+
+function captureCanvasDataUrl(canvas: HTMLCanvasElement) {
+  return canvas.toDataURL("image/png");
 }
 
 function getLayerLabel(layer: CanvasLayer) {

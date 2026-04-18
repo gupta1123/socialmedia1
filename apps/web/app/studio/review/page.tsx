@@ -26,6 +26,7 @@ const VIEW_MODES = [
 ] as const;
 
 type ReviewVerdict = "approved" | "close" | "off-brand";
+const REVIEW_PAGE_SIZE = 24;
 
 export default function ReviewPage() {
   const searchParams = useSearchParams();
@@ -48,6 +49,8 @@ export default function ReviewPage() {
     (searchParams.get("scope") as (typeof REVIEW_SCOPES)[number]["id"] | null) ?? "team";
   const [scope, setScope] = useState<(typeof REVIEW_SCOPES)[number]["id"]>(initialScope);
   const [viewMode, setViewMode] = useState<(typeof VIEW_MODES)[number]["id"]>("cards");
+  const [page, setPage] = useState(1);
+  const [hasNextPage, setHasNextPage] = useState(false);
 
   const activeBrand = useMemo(
     () => bootstrap?.brands.find((brand) => brand.id === activeBrandId) ?? null,
@@ -107,8 +110,13 @@ export default function ReviewPage() {
   useRegisterTopbarControls(topbarControls);
 
   useEffect(() => {
+    setPage(1);
+  }, [activeBrandId, focusedDeliverableId, scope]);
+
+  useEffect(() => {
     if (!sessionToken) {
       setQueue([]);
+      setHasNextPage(false);
       setLoading(false);
       return;
     }
@@ -122,6 +130,8 @@ export default function ReviewPage() {
         const [entries, members] = await Promise.all([
           getReviewQueue(token, {
             scope,
+            limit: REVIEW_PAGE_SIZE + 1,
+            offset: (page - 1) * REVIEW_PAGE_SIZE,
             ...(activeBrandId ? { brandId: activeBrandId } : {}),
             ...(focusedDeliverableId ? { deliverableId: focusedDeliverableId } : {})
           }),
@@ -129,7 +139,8 @@ export default function ReviewPage() {
         ]);
 
         if (!cancelled) {
-          setQueue(entries);
+          setHasNextPage(entries.length > REVIEW_PAGE_SIZE);
+          setQueue(entries.slice(0, REVIEW_PAGE_SIZE));
           setWorkspaceMembers(members);
           setError(null);
         }
@@ -149,7 +160,10 @@ export default function ReviewPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeBrandId, focusedDeliverableId, scope, sessionToken]);
+  }, [activeBrandId, focusedDeliverableId, page, scope, sessionToken]);
+
+  const pageStart = queue.length === 0 ? 0 : (page - 1) * REVIEW_PAGE_SIZE + 1;
+  const pageEnd = queue.length === 0 ? 0 : pageStart + queue.length - 1;
 
   const tableColumns = useMemo(
     () => [
@@ -184,11 +198,14 @@ export default function ReviewPage() {
                 ]
               }
             ]}
-            src={entry.previewOutput?.previewUrl}
+            src={entry.previewOutput?.originalUrl ?? entry.previewOutput?.previewUrl}
             title={entry.deliverable.title}
           >
-            {entry.previewOutput?.previewUrl ? (
-              <img alt={`Preview for ${entry.deliverable.title}`} src={entry.previewOutput.previewUrl} />
+            {entry.previewOutput?.thumbnailUrl ?? entry.previewOutput?.previewUrl ? (
+              <img
+                alt={`Preview for ${entry.deliverable.title}`}
+                src={entry.previewOutput?.thumbnailUrl ?? entry.previewOutput?.previewUrl}
+              />
             ) : (
               <div className="table-thumbnail-fallback" />
             )}
@@ -365,20 +382,7 @@ export default function ReviewPage() {
       ) : null}
 
       <section className="page-grid">
-        <article className="panel page-span-12">
-          <div className="panel-header">
-            <div>
-              <h3>
-                {focusedDeliverableId
-                  ? "Focused review"
-                  : activeBrand
-                    ? `${activeBrand.name} ${scope === "my" ? "my review" : scope === "unassigned" ? "unassigned review" : "review queue"}`
-                    : "Ready for review"}
-              </h3>
-            </div>
-            <span className="panel-count">{queue.length} items</span>
-          </div>
-
+        <div className="page-span-12">
           {viewMode === "cards" ? (
             <ReviewCardGallery
               entries={queue}
@@ -430,7 +434,9 @@ export default function ReviewPage() {
                   getValue: (entry) => entry.deliverable.priority
                 }
               ]}
+              initialPageSize={queue.length || REVIEW_PAGE_SIZE}
               loading={loading}
+              pageSizeOptions={[queue.length || REVIEW_PAGE_SIZE]}
               rowHref={(entry) => `/studio/deliverables/${entry.deliverable.id}`}
               rowKey={(entry) => entry.postVersion.id}
               rows={queue}
@@ -448,7 +454,35 @@ export default function ReviewPage() {
               }}
             />
           )}
-        </article>
+          {!loading && queue.length > 0 ? (
+            <div className="data-table-footer">
+              <p className="data-table-summary">
+                Showing {pageStart}-{pageEnd}
+              </p>
+              <div className="data-table-footer-controls">
+                <div className="data-table-pagination">
+                  <button
+                    className="button button-ghost table-action-button"
+                    disabled={page <= 1}
+                    onClick={() => setPage((value) => Math.max(1, value - 1))}
+                    type="button"
+                  >
+                    Prev
+                  </button>
+                  <span>Page {page}</span>
+                  <button
+                    className="button button-ghost table-action-button"
+                    disabled={!hasNextPage}
+                    onClick={() => setPage((value) => value + 1)}
+                    type="button"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
       </section>
     </div>
   );
@@ -528,6 +562,26 @@ function ReviewCardGallery({
         return (
           <article className="work-gallery-card review-option-card" key={entry.postVersion.id}>
             <div className="work-gallery-media review-option-media">
+              <div className="review-card-media-actions">
+                {previewId ? (
+                  <FloatingTooltip content="Edit image">
+                    <Link className="review-card-media-action" href={`/studio/ai-edit?outputId=${previewId}`} aria-label="Edit image">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z" />
+                      </svg>
+                    </Link>
+                  </FloatingTooltip>
+                ) : null}
+                <FloatingTooltip content="Open post task">
+                  <Link className="review-card-media-action" href={`/studio/deliverables/${entry.deliverable.id}`} aria-label="Open post task">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M7 7h10v10" />
+                      <path d="M7 17 17 7" />
+                    </svg>
+                  </Link>
+                </FloatingTooltip>
+              </div>
               <ImagePreviewTrigger
                 alt={`Preview for ${entry.deliverable.title}`}
                 actions={
@@ -540,15 +594,17 @@ function ReviewCardGallery({
                 ]}
                 details={[
                   { label: "Placement", value: format },
-                  { label: "Reviewer", value: reviewerLabelFor(entry.deliverable.reviewerUserId) },
                   { label: "Created by", value: createdByLabelFor(entry.previewOutput?.createdBy ?? null) }
                 ]}
-                src={entry.previewOutput?.previewUrl}
+                src={entry.previewOutput?.originalUrl ?? entry.previewOutput?.previewUrl}
                 subtitle={entry.deliverable.briefText ?? "Ready for review"}
                 title={entry.deliverable.title}
               >
-                {entry.previewOutput?.previewUrl ? (
-                  <img alt={`Preview for ${entry.deliverable.title}`} src={entry.previewOutput.previewUrl} />
+                {entry.previewOutput?.thumbnailUrl ?? entry.previewOutput?.previewUrl ? (
+                  <img
+                    alt={`Preview for ${entry.deliverable.title}`}
+                    src={entry.previewOutput?.thumbnailUrl ?? entry.previewOutput?.previewUrl}
+                  />
                 ) : (
                   <div className="work-gallery-fallback" />
                 )}
@@ -558,33 +614,10 @@ function ReviewCardGallery({
             <div className="work-gallery-body">
               <div className="work-gallery-copy">
                 <Link href={`/studio/deliverables/${entry.deliverable.id}`}>{entry.deliverable.title}</Link>
-                <p>Reviewer: {reviewerLabelFor(entry.deliverable.reviewerUserId)}</p>
                 <p>Created by: {createdByLabelFor(entry.previewOutput?.createdBy ?? null)}</p>
               </div>
               <div className="work-gallery-footer">
                 <PlacementIcons channel={entry.deliverable.placementCode} compact format={format} interactive={false} />
-                <div className="review-utility-actions">
-                  {previewId ? (
-                    <FloatingTooltip content="Open in Editor">
-                      <Link className="utility-button" href={`/studio/ai-edit?outputId=${previewId}`} aria-label="Open in Editor">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                          <path d="m16 5 3 3" />
-                          <path d="M8 16l8.5-8.5a2.12 2.12 0 1 1 3 3L11 19l-4 1 1-4Z" />
-                        </svg>
-                      </Link>
-                    </FloatingTooltip>
-                  ) : null}
-                  <FloatingTooltip content="Open task">
-                    <Link className="utility-button" href={`/studio/deliverables/${entry.deliverable.id}`} aria-label="Open task">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                        <polyline points="15 3 21 3 21 9" />
-                        <line x1="10" y1="14" x2="21" y2="3" />
-                      </svg>
-                    </Link>
-                  </FloatingTooltip>
-                </div>
               </div>
                 <div className="review-decision-group">
                   <FloatingTooltip content="Approve">

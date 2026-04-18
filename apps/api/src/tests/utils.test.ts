@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildStoragePath, deriveAspectRatio } from "../lib/utils.js";
+import { buildStoragePath, buildThumbnailStoragePath, deriveAspectRatio } from "../lib/utils.js";
 
 describe("storage paths", () => {
   it("namespaces objects under workspace and brand", () => {
@@ -13,6 +13,12 @@ describe("storage paths", () => {
 
     expect(path).toBe("workspace-1/brand-1/references/asset-1/hero-image.png");
   });
+
+  it("stores thumbnails beside the original in a thumb folder", () => {
+    expect(
+      buildThumbnailStoragePath("workspace-1/brand-1/outputs/output-1/hero-image.png")
+    ).toBe("workspace-1/brand-1/outputs/output-1/thumb/hero-image.webp");
+  });
 });
 
 describe("deriveAspectRatio", () => {
@@ -20,4 +26,3 @@ describe("deriveAspectRatio", () => {
     expect(deriveAspectRatio("story")).toBe("9:16");
   });
 });
-

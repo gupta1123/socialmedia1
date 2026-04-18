@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
 import type {
   AssetKind,
+  BrandAssetRecord,
   BootstrapResponse,
   BrandProfile,
   CreativeBrief,
@@ -152,7 +153,7 @@ type StudioContextValue = {
   refresh: (preferredBrandId?: string) => Promise<void>;
   createBrandRecord: () => Promise<boolean>;
   uploadReference: (file: File, label: string) => Promise<boolean>;
-  uploadBrandAssetFile: (file: File, label: string, kind: AssetKind) => Promise<boolean>;
+  uploadBrandAssetFile: (file: File, label: string, kind: AssetKind, projectId?: string | null) => Promise<boolean>;
   compilePromptPackage: (options?: { silentSuccess?: boolean }) => Promise<PromptPackage | null>;
   generateSeeds: () => Promise<void>;
   generateSeedsForPackage: (promptPackageId: string, promptPackageOverride?: PromptPackage) => Promise<boolean>;
@@ -489,7 +490,7 @@ export function StudioProvider({
         activeAssets.some((asset) => asset.id === assetId)
       );
       const hasBrandLogo = activeAssets.some((asset) => asset.kind === "logo");
-      const hasReraQr = activeAssets.some((asset) => asset.kind === "rera_qr");
+      const hasReraQr = hasApplicableReraQr(activeAssets, state.projectId);
 
       if (activeAssets.length === 0) {
         return {
@@ -658,7 +659,7 @@ export function StudioProvider({
     return uploadBrandAssetFile(file, label, "reference");
   }
 
-  async function uploadBrandAssetFile(file: File, label: string, kind: AssetKind) {
+  async function uploadBrandAssetFile(file: File, label: string, kind: AssetKind, projectId?: string | null) {
     if (!sessionToken || !activeBrandId) {
       return false;
     }
@@ -670,7 +671,8 @@ export function StudioProvider({
       await uploadBrandAsset(sessionToken, activeBrandId, {
         file,
         kind,
-        label
+        label,
+        ...(projectId !== undefined ? { projectId } : {})
       });
       await refresh(activeBrandId);
       setMessage("Asset uploaded.");
@@ -937,6 +939,20 @@ export function StudioProvider({
       {children}
     </StudioContext.Provider>
   );
+}
+
+function hasApplicableReraQr(assets: BrandAssetRecord[], projectId?: string | null) {
+  return assets.some((asset) => {
+    if (asset.kind !== "rera_qr") {
+      return false;
+    }
+
+    if (projectId) {
+      return asset.projectId === projectId || asset.projectId == null;
+    }
+
+    return asset.projectId == null;
+  });
 }
 
 export function useStudio() {

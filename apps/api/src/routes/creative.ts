@@ -36,7 +36,7 @@ import {
   getCampaignDeliverablePlan,
   getSeries
 } from "../lib/deliverables-repository.js";
-import { createSignedUrl } from "../lib/storage.js";
+import { createSignedImageUrls } from "../lib/storage.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { randomId } from "../lib/utils.js";
 import { getFinalProviderModel, getStyleSeedProviderModel, resolveImageGenerationProvider, submitFinalGeneration, submitStyleSeedGeneration } from "../lib/image-provider.js";
@@ -92,6 +92,28 @@ type RoleAwareReferencePlan = {
   complianceQr: { role: "rera_qr"; label: string; storagePath: string } | null;
   references: Array<{ role: "reference"; label: string; storagePath: string }>;
 };
+
+function selectReraQrAssetForProject(
+  assets: BrandAssetRecord[],
+  projectId?: string | null,
+  explicitAssetId?: string | null
+) {
+  const matchesScope = (asset: BrandAssetRecord) =>
+    asset.kind === "rera_qr" && (projectId ? asset.projectId === projectId : asset.projectId == null);
+  const matchesGlobal = (asset: BrandAssetRecord) => asset.kind === "rera_qr" && asset.projectId == null;
+
+  if (explicitAssetId) {
+    const exactScoped = assets.find((asset) => asset.id === explicitAssetId && matchesScope(asset));
+    if (exactScoped) return exactScoped;
+    const exactGlobal = assets.find((asset) => asset.id === explicitAssetId && matchesGlobal(asset));
+    if (exactGlobal) return exactGlobal;
+  }
+
+  const scoped = assets.find((asset) => matchesScope(asset));
+  if (scoped) return scoped;
+
+  return assets.find((asset) => matchesGlobal(asset)) ?? null;
+}
 
 function scoreProjectAnchorAsset(asset: BrandAssetRecord) {
   const metadata = asset.metadataJson ?? {};
@@ -316,7 +338,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
     const [seedPreviewUrls, finalPreviewUrls] = await Promise.all([
       Promise.all(detail.seedTemplates.map((template) => getSignedPreview(template.storagePath))),
-      Promise.all(detail.finalOutputs.map((output) => getSignedPreview(output.storagePath)))
+      Promise.all(detail.finalOutputs.map((output) => createSignedImageUrls(output.storagePath, output.thumbnailStoragePath)))
     ]);
 
     return CreativeRunDetailSchema.parse({
@@ -327,7 +349,9 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       })),
       finalOutputs: detail.finalOutputs.map((output, index) => ({
         ...output,
-        previewUrl: finalPreviewUrls[index] ?? undefined
+        previewUrl: finalPreviewUrls[index]?.originalUrl,
+        thumbnailUrl: finalPreviewUrls[index]?.thumbnailUrl,
+        originalUrl: finalPreviewUrls[index]?.originalUrl
       }))
     });
   });
@@ -593,7 +617,9 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const selectedBrandLogoAsset = brief.includeBrandLogo
       ? explicitLogoAsset ?? allAssets.find((asset) => asset.kind === "logo") ?? null
       : null;
-    const selectedReraQrAsset = brief.includeReraQr ? allAssets.find((asset) => asset.kind === "rera_qr") ?? null : null;
+    const selectedReraQrAsset = brief.includeReraQr
+      ? selectReraQrAssetForProject(allAssets, project?.id ?? null)
+      : null;
     const requestedVariationCount = brief.variationCount ?? env.CREATIVE_STYLE_VARIATION_COUNT;
     const sourceBriefSnapshot = {
       ...brief,
@@ -2243,7 +2269,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const { data: outputs, error: outputsError } = await supabaseAdmin
       .from("creative_outputs")
       .select(
-        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at, created_by"
+        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by"
       )
       .eq("job_id", jobId)
       .order("output_index", { ascending: true });
@@ -2254,8 +2280,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
     const signedUrls = await Promise.all(
       (outputs ?? []).map(async (output) => {
-        const outputRow = output as { storage_path: string };
-        return createSignedUrl(outputRow.storage_path).catch(() => null);
+        const outputRow = output as { storage_path: string; thumbnail_storage_path?: string | null };
+        return createSignedImageUrls(outputRow.storage_path, outputRow.thumbnail_storage_path);
       })
     );
 
@@ -2290,13 +2316,21 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         postVersionId: output.post_version_id,
         kind: output.kind,
         storagePath: output.storage_path,
+        thumbnailStoragePath: output.thumbnail_storage_path,
         providerUrl: output.provider_url,
         outputIndex: output.output_index,
+        parentOutputId: output.parent_output_id,
+        rootOutputId: output.root_output_id,
+        editedFromOutputId: output.edited_from_output_id,
+        versionNumber: output.version_number,
+        isLatestVersion: output.is_latest_version,
         reviewState: output.review_state,
         latestVerdict: output.latest_feedback_verdict,
         reviewedAt: output.reviewed_at,
         createdBy: output.created_by,
-        previewUrl: signedUrls[index] ?? undefined
+        previewUrl: signedUrls[index]?.originalUrl,
+        thumbnailUrl: signedUrls[index]?.thumbnailUrl,
+        originalUrl: signedUrls[index]?.originalUrl
       })),
       error: job.error_json
     };
@@ -2438,7 +2472,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     let query = supabaseAdmin
       .from("creative_outputs")
       .select(
-        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at, created_by"
+        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by"
       )
       .eq("workspace_id", workspace.id);
 
@@ -2467,8 +2501,14 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           post_version_id: string | null;
           kind: "style_seed" | "final";
           storage_path: string;
+          thumbnail_storage_path: string | null;
           provider_url: string | null;
           output_index: number;
+          parent_output_id: string | null;
+          root_output_id: string | null;
+          edited_from_output_id: string | null;
+          version_number: number;
+          is_latest_version: boolean;
           review_state: CreativeOutputRecord["reviewState"];
           latest_feedback_verdict: CreativeOutputRecord["latestVerdict"];
           reviewed_at: string | null;
@@ -2481,7 +2521,9 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     }
 
     const rows = data ?? [];
-    const previewUrls = await Promise.all(rows.map((row) => getSignedPreview(row.storage_path)));
+    const signedUrls = await Promise.all(
+      rows.map((row) => createSignedImageUrls(row.storage_path, row.thumbnail_storage_path))
+    );
 
     return rows.map((output, index) => ({
       id: output.id,
@@ -2496,13 +2538,21 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       postVersionId: output.post_version_id,
       kind: output.kind,
       storagePath: output.storage_path,
+      thumbnailStoragePath: output.thumbnail_storage_path,
       providerUrl: output.provider_url,
       outputIndex: output.output_index,
+      parentOutputId: output.parent_output_id,
+      rootOutputId: output.root_output_id,
+      editedFromOutputId: output.edited_from_output_id,
+      versionNumber: output.version_number,
+      isLatestVersion: output.is_latest_version,
       reviewState: output.review_state,
       latestVerdict: output.latest_feedback_verdict,
       reviewedAt: output.reviewed_at,
       createdBy: output.created_by,
-      previewUrl: previewUrls[index] ?? undefined
+      previewUrl: signedUrls[index]?.originalUrl,
+      thumbnailUrl: signedUrls[index]?.thumbnailUrl,
+      originalUrl: signedUrls[index]?.originalUrl
     }));
   });
 
@@ -2516,7 +2566,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const { data, error } = await supabaseAdmin
       .from("creative_outputs")
       .select(
-        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at, created_by"
+        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by"
       )
       .eq("id", outputId)
       .maybeSingle();
@@ -2535,8 +2585,14 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           post_version_id: string | null;
           kind: "style_seed" | "final";
           storage_path: string;
+          thumbnail_storage_path: string | null;
           provider_url: string | null;
           output_index: number;
+          parent_output_id: string | null;
+          root_output_id: string | null;
+          edited_from_output_id: string | null;
+          version_number: number;
+          is_latest_version: boolean;
           review_state: "pending_review" | "approved" | "needs_revision" | "closed";
           latest_feedback_verdict: "approved" | "close" | "off-brand" | "wrong-layout" | "wrong-text" | null;
           reviewed_at: string | null;
@@ -2554,7 +2610,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
     await assertWorkspaceRole(viewer, output.workspace_id, ["owner", "admin", "editor", "viewer"], request.log);
 
-    const previewUrl = await getSignedPreview(output.storage_path);
+    const signedUrls = await createSignedImageUrls(output.storage_path, output.thumbnail_storage_path);
 
     return {
       id: output.id,
@@ -2569,13 +2625,21 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       postVersionId: output.post_version_id,
       kind: output.kind,
       storagePath: output.storage_path,
+      thumbnailStoragePath: output.thumbnail_storage_path,
       providerUrl: output.provider_url,
       outputIndex: output.output_index,
+      parentOutputId: output.parent_output_id,
+      rootOutputId: output.root_output_id,
+      editedFromOutputId: output.edited_from_output_id,
+      versionNumber: output.version_number,
+      isLatestVersion: output.is_latest_version,
       reviewState: output.review_state,
       latestVerdict: output.latest_feedback_verdict,
       reviewedAt: output.reviewed_at,
       createdBy: output.created_by,
-      previewUrl: previewUrl ?? undefined
+      previewUrl: signedUrls.originalUrl,
+      thumbnailUrl: signedUrls.thumbnailUrl,
+      originalUrl: signedUrls.originalUrl
     };
   });
 }
@@ -3344,11 +3408,11 @@ async function buildAsyncV2PromptPackage(params: {
       : null;
   const selectedReraQrAsset =
     sourceBrief.includeReraQr === true
-      ? (asOptionalString(exactAssetContract.reraQrAssetId)
-          ? allAssets.find((asset) => asset.id === exactAssetContract.reraQrAssetId && asset.kind === "rera_qr") ??
-            allAssets.find((asset) => asset.kind === "rera_qr") ??
-            null
-          : allAssets.find((asset) => asset.kind === "rera_qr") ?? null)
+      ? selectReraQrAssetForProject(
+          allAssets,
+          sourceBrief.projectId ?? null,
+          asOptionalString(exactAssetContract.reraQrAssetId)
+        )
       : null;
 
   const referenceStrategy = normalizeAsyncReferenceStrategy(rawCompiled.referenceStrategy, referenceAssetIds);

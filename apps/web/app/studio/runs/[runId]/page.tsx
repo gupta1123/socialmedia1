@@ -251,7 +251,7 @@ export default function RunDetailPage() {
                     </div>
 
                     <div className="creative-preview-frame final-frame run-final-frame">
-                      {output.previewUrl ? (
+                      {output.thumbnailUrl ?? output.previewUrl ? (
                         <ImagePreviewTrigger
                           alt={`Final candidate ${output.outputIndex + 1}`}
                           actions={[{ href: `/studio/ai-edit?outputId=${output.id}`, label: "Open in Editor", tone: "primary" }]}
@@ -261,7 +261,7 @@ export default function RunDetailPage() {
                             { label: "State", value: formatReviewState(output.reviewState) },
                             { label: "Created by", value: outputCreator }
                           ]}
-                          src={output.previewUrl}
+                          src={output.originalUrl ?? output.previewUrl}
                           subtitle={describeRunOutputSource(
                             output.jobId,
                             detail.jobs,
@@ -271,7 +271,10 @@ export default function RunDetailPage() {
                           title={`Final candidate ${output.outputIndex + 1}`}
                           meta={detail.run.promptSummary}
                         >
-                          <img alt={`Final output ${output.id}`} src={output.previewUrl} />
+                          <img
+                            alt={`Final output ${output.id}`}
+                            src={output.thumbnailUrl ?? output.previewUrl}
+                          />
                         </ImagePreviewTrigger>
                       ) : (
                         <div className="thumb-fallback" />

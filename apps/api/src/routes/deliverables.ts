@@ -26,7 +26,6 @@ import {
   compileDeliverablePromptPackage,
   ensurePostVersionForOutput
 } from "../lib/deliverable-flow.js";
-import { getSignedPreview } from "../lib/job-sync.js";
 import {
   getBrandPersona,
   getChannelAccount,
@@ -42,8 +41,9 @@ import {
 } from "../lib/deliverables-repository.js";
 import { getCreativeTemplate, getPostType, getProject } from "../lib/planning-repository.js";
 import { invalidateRuntimeCache } from "../lib/runtime-cache.js";
-import { removeStorageObjects, uploadBufferToStorage } from "../lib/storage.js";
+import { createSignedImageUrls, removeStorageObjects, uploadBufferToStorage } from "../lib/storage.js";
 import { supabaseAdmin } from "../lib/supabase.js";
+import { createThumbnailFromBuffer } from "../lib/thumbnails.js";
 import { buildStoragePath, deriveAspectRatio, randomId } from "../lib/utils.js";
 
 export async function registerDeliverableRoutes(app: FastifyInstance) {
@@ -330,9 +330,18 @@ export async function registerDeliverableRoutes(app: FastifyInstance) {
       originalFileName: filePart.filename,
       mimeType: filePart.mimetype
     };
+    let thumbnail:
+      | {
+          thumbnailStoragePath: string;
+          thumbnailWidth: number;
+          thumbnailHeight: number;
+          thumbnailBytes: number;
+        }
+      | null = null;
 
     try {
       await uploadBufferToStorage(storagePath, filePart.buffer, filePart.mimetype);
+      thumbnail = await createThumbnailFromBuffer(storagePath, filePart.buffer).catch(() => null);
 
       const { error: deliverableError } = await supabaseAdmin.from("deliverables").insert({
       id: deliverableId,
@@ -464,6 +473,10 @@ export async function registerDeliverableRoutes(app: FastifyInstance) {
       job_id: jobId,
       kind: "final",
       storage_path: storagePath,
+      thumbnail_storage_path: thumbnail?.thumbnailStoragePath ?? null,
+      thumbnail_width: thumbnail?.thumbnailWidth ?? null,
+      thumbnail_height: thumbnail?.thumbnailHeight ?? null,
+      thumbnail_bytes: thumbnail?.thumbnailBytes ?? null,
       provider_url: null,
       output_index: 0,
       review_state: outputReviewState,
@@ -532,7 +545,7 @@ export async function registerDeliverableRoutes(app: FastifyInstance) {
       invalidateRuntimeCache(`plan-overview:${workspace.id}:`);
       invalidateRuntimeCache(`queue:${workspace.id}:`);
 
-      const previewUrl = (await getSignedPreview(storagePath)) ?? undefined;
+      const signedUrls = await createSignedImageUrls(storagePath, thumbnail?.thumbnailStoragePath);
       postVersion = await getPostVersion(postVersion.id);
       const deliverable = await getDeliverable(deliverableId);
 
@@ -552,18 +565,22 @@ export async function registerDeliverableRoutes(app: FastifyInstance) {
           postVersionId: postVersion.id,
           kind: "final",
           storagePath,
+          thumbnailStoragePath: thumbnail?.thumbnailStoragePath ?? null,
           providerUrl: null,
           outputIndex: 0,
           reviewState: outputReviewState,
           latestVerdict: null,
           reviewedAt: reviewMode === "review" ? null : now,
           createdBy: viewer.userId,
-          previewUrl
+          previewUrl: signedUrls.originalUrl,
+          thumbnailUrl: signedUrls.thumbnailUrl,
+          originalUrl: signedUrls.originalUrl
         })
       });
     } catch (error) {
       await cleanupExternalUploadArtifacts({
         storagePath,
+        thumbnailStoragePath: thumbnail?.thumbnailStoragePath ?? null,
         deliverableId,
         creativeRequestId,
         promptPackageId,
@@ -806,22 +823,46 @@ export async function registerDeliverableRoutes(app: FastifyInstance) {
     }
 
     await assertWorkspaceRole(viewer, workspace.id, ["owner", "admin", "editor", "viewer"], request.log);
-    const query = request.query as { brandId?: string; deliverableId?: string; scope?: string };
+    const query = request.query as {
+      brandId?: string;
+      deliverableId?: string;
+      scope?: string;
+      limit?: string;
+      offset?: string;
+    };
     const scope = query.scope === "my" || query.scope === "team" || query.scope === "unassigned" ? query.scope : "team";
+    const parsedLimit = Number.parseInt(query.limit ?? "", 10);
+    const parsedOffset = Number.parseInt(query.offset ?? "", 10);
     const items = await listReviewQueue(workspace.id, query.brandId, query.deliverableId, {
       scope,
-      reviewerUserId: viewer.userId
+      reviewerUserId: viewer.userId,
+      ...(Number.isFinite(parsedLimit) ? { limit: parsedLimit } : {}),
+      ...(Number.isFinite(parsedOffset) ? { offset: parsedOffset } : {})
     });
     const signedItems = await Promise.all(
-      items.map(async (item) => ({
-        ...item,
-        previewOutput: item.previewOutput
-          ? {
-              ...item.previewOutput,
-              previewUrl: (await getSignedPreview(item.previewOutput.storagePath)) ?? undefined
-            }
-          : null
-      }))
+      items.map(async (item) => {
+        if (!item.previewOutput) {
+          return {
+            ...item,
+            previewOutput: null
+          };
+        }
+
+        const urls = await createSignedImageUrls(
+          item.previewOutput.storagePath,
+          item.previewOutput.thumbnailStoragePath
+        );
+
+        return {
+          ...item,
+          previewOutput: {
+            ...item.previewOutput,
+            previewUrl: urls.originalUrl,
+            thumbnailUrl: urls.thumbnailUrl,
+            originalUrl: urls.originalUrl
+          }
+        };
+      })
     );
     return signedItems.map((item) => ReviewQueueEntrySchema.parse(item));
   });
@@ -1062,6 +1103,7 @@ async function ensureScheduledPublication(params: {
 
 async function cleanupExternalUploadArtifacts(params: {
   storagePath: string;
+  thumbnailStoragePath?: string | null;
   deliverableId: string;
   creativeRequestId: string;
   promptPackageId: string;
@@ -1074,7 +1116,7 @@ async function cleanupExternalUploadArtifacts(params: {
     supabaseAdmin.from("prompt_packages").delete().eq("id", params.promptPackageId),
     supabaseAdmin.from("creative_requests").delete().eq("id", params.creativeRequestId),
     supabaseAdmin.from("deliverables").delete().eq("id", params.deliverableId),
-    removeStorageObjects([params.storagePath])
+    removeStorageObjects([params.storagePath, params.thumbnailStoragePath ?? ""])
   ]);
 }
 

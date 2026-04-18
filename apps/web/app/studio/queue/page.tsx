@@ -24,6 +24,7 @@ const VIEW_MODES = [
   { id: "cards", label: "Cards" },
   { id: "table", label: "Table" }
 ] as const;
+const QUEUE_PAGE_SIZE = 24;
 
 export default function QueuePage() {
   const searchParams = useSearchParams();
@@ -34,6 +35,8 @@ export default function QueuePage() {
   const [rows, setRows] = useState<QueueEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [hasNextPage, setHasNextPage] = useState(false);
   const statusGroup = searchParams.get("statusGroup") as "todo" | "in_progress" | "ready_to_ship" | "done" | "blocked" | null;
   const planningMode = searchParams.get("planningMode") as "campaign" | "series" | "one_off" | "always_on" | "ad_hoc" | null;
   const dueWindow = searchParams.get("dueWindow") as "today" | "week" | "overdue" | null;
@@ -89,7 +92,16 @@ export default function QueuePage() {
   useRegisterTopbarControls(topbarControls);
 
   useEffect(() => {
-    if (!sessionToken) return;
+    setPage(1);
+  }, [activeBrandId, dueWindow, planningMode, scope, statusGroup]);
+
+  useEffect(() => {
+    if (!sessionToken) {
+      setRows([]);
+      setHasNextPage(false);
+      setLoading(false);
+      return;
+    }
 
     let cancelled = false;
     setLoading(true);
@@ -100,17 +112,21 @@ export default function QueuePage() {
       ...(statusGroup ? { statusGroup } : {}),
       ...(planningMode ? { planningMode } : {}),
       ...(dueWindow ? { dueWindow } : {}),
-      ...(activeBrandId ? { brandId: activeBrandId } : {})
+      ...(activeBrandId ? { brandId: activeBrandId } : {}),
+      limit: QUEUE_PAGE_SIZE + 1,
+      offset: (page - 1) * QUEUE_PAGE_SIZE
     })
       .then((data) => {
         if (!cancelled) {
-          setRows(data);
+          setHasNextPage(data.length > QUEUE_PAGE_SIZE);
+          setRows(data.slice(0, QUEUE_PAGE_SIZE));
         }
       })
       .catch((cause) => {
         if (!cancelled) {
           setError(cause instanceof Error ? cause.message : "Unable to load queue");
           setRows([]);
+          setHasNextPage(false);
         }
       })
       .finally(() => {
@@ -122,7 +138,7 @@ export default function QueuePage() {
     return () => {
       cancelled = true;
     };
-  }, [activeBrandId, dueWindow, planningMode, scope, sessionToken, statusGroup]);
+  }, [activeBrandId, dueWindow, page, planningMode, scope, sessionToken, statusGroup]);
 
   const columns = useMemo(
     () => [
@@ -194,71 +210,74 @@ export default function QueuePage() {
         </div>
       ) : null}
 
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <p className="panel-label">Queue</p>
-            <h3>{scope === "my" ? "Assigned to you" : scope === "team" ? "Team queue" : "Unassigned work"}</h3>
-          </div>
-          <span className="panel-count">{rows.length} items</span>
-        </div>
+      {viewMode === "cards" ? (
+        <QueueCardGallery rows={rows} loading={loading} />
+      ) : (
+        <DataTable
+          columns={columns}
+          emptyAction={<Link className="button button-ghost" href="/studio/plan">Open plan</Link>}
+          emptyBody="When post tasks are planned, approved, or scheduled, they will show up here."
+          emptyTitle="Queue is clear"
+          filters={[
+            {
+              id: "statusGroup",
+              label: "Status",
+              options: [
+                { label: "To do", value: "todo" },
+                { label: "In progress", value: "in_progress" },
+                { label: "Ready to schedule", value: "ready_to_ship" },
+                { label: "Blocked", value: "blocked" }
+              ],
+              getValue: (row) => row.statusGroup
+            },
+            {
+              id: "planningMode",
+              label: "Mode",
+              options: [
+                { label: "Campaign", value: "campaign" },
+                { label: "Series", value: "series" },
+                { label: "One-off", value: "one_off" },
+                { label: "Always-on", value: "always_on" },
+                { label: "Ad hoc", value: "ad_hoc" }
+              ],
+              getValue: (row) => row.deliverable.planningMode
+            }
+          ]}
+          initialPageSize={rows.length || QUEUE_PAGE_SIZE}
+          pageSizeOptions={[rows.length || QUEUE_PAGE_SIZE]}
+          loading={loading}
+          resultLabel={(showing, total) => `${showing} of ${total} post tasks`}
+          rowHref={(row) => `/studio/deliverables/${row.deliverable.id}`}
+          rowKey={(row) => row.deliverable.id}
+          rows={rows}
+          search={{
+            placeholder: "Search post tasks, projects, assignees",
+            getText: (row) =>
+              [
+                row.deliverable.title,
+                row.projectName,
+                row.assignee?.displayName,
+                row.assignee?.email,
+                row.campaign?.name,
+                row.series?.name
+              ]
+                .filter(Boolean)
+                .join(" ")
+          }}
+        />
+      )}
 
-        {viewMode === "cards" ? (
-          <QueueCardGallery rows={rows} loading={loading} />
-        ) : (
-          <DataTable
-            columns={columns}
-            emptyAction={<Link className="button button-ghost" href="/studio/plan">Open plan</Link>}
-            emptyBody="When post tasks are planned, approved, or scheduled, they will show up here."
-            emptyTitle="Queue is clear"
-            filters={[
-              {
-                id: "statusGroup",
-                label: "Status",
-                options: [
-                  { label: "To do", value: "todo" },
-                  { label: "In progress", value: "in_progress" },
-                  { label: "Ready to schedule", value: "ready_to_ship" },
-                  { label: "Blocked", value: "blocked" }
-                ],
-                getValue: (row) => row.statusGroup
-              },
-              {
-                id: "planningMode",
-                label: "Mode",
-                options: [
-                  { label: "Campaign", value: "campaign" },
-                  { label: "Series", value: "series" },
-                  { label: "One-off", value: "one_off" },
-                  { label: "Always-on", value: "always_on" },
-                  { label: "Ad hoc", value: "ad_hoc" }
-                ],
-                getValue: (row) => row.deliverable.planningMode
-              }
-            ]}
-            initialPageSize={12}
-            loading={loading}
-            resultLabel={(showing, total) => `${showing} of ${total} post tasks`}
-            rowHref={(row) => `/studio/deliverables/${row.deliverable.id}`}
-            rowKey={(row) => row.deliverable.id}
-            rows={rows}
-            search={{
-              placeholder: "Search post tasks, projects, assignees",
-              getText: (row) =>
-                [
-                  row.deliverable.title,
-                  row.projectName,
-                  row.assignee?.displayName,
-                  row.assignee?.email,
-                  row.campaign?.name,
-                  row.series?.name
-                ]
-                  .filter(Boolean)
-                  .join(" ")
-            }}
-          />
-        )}
-      </section>
+      {!loading && rows.length > 0 ? (
+        <div className="review-pagination">
+          <button className="button button-ghost" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} type="button">
+            Prev
+          </button>
+          <span>Page {page}</span>
+          <button className="button button-ghost" disabled={!hasNextPage} onClick={() => setPage((value) => value + 1)} type="button">
+            Next
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

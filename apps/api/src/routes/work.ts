@@ -364,7 +364,11 @@ export async function registerWorkRoutes(app: FastifyInstance) {
       statusGroup?: string;
       planningMode?: string;
       dueWindow?: string;
+      limit?: string;
+      offset?: string;
     };
+    const parsedLimit = Number.parseInt(query.limit ?? "", 10);
+    const parsedOffset = Number.parseInt(query.offset ?? "", 10);
 
     const entries = await listQueueEntries(workspace.id, viewer.userId, {
       ...(query.scope ? { scope: query.scope as "my" | "team" | "unassigned" } : {}),
@@ -372,7 +376,9 @@ export async function registerWorkRoutes(app: FastifyInstance) {
       ...(query.projectId ? { projectId: query.projectId } : {}),
       ...(query.statusGroup ? { statusGroup: query.statusGroup as QueueStatusGroup } : {}),
       ...(query.planningMode ? { planningMode: query.planningMode as DeliverableRecord["planningMode"] } : {}),
-      ...(query.dueWindow ? { dueWindow: query.dueWindow as "today" | "week" | "overdue" } : {})
+      ...(query.dueWindow ? { dueWindow: query.dueWindow as "today" | "week" | "overdue" } : {}),
+      ...(Number.isFinite(parsedLimit) ? { limit: parsedLimit } : {}),
+      ...(Number.isFinite(parsedOffset) ? { offset: parsedOffset } : {})
     });
 
     return entries.map((entry) => QueueEntrySchema.parse(entry));

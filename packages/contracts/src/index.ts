@@ -939,8 +939,11 @@ export const BrandAssetSchema = z.object({
   fileName: z.string(),
   mimeType: z.string(),
   storagePath: z.string(),
+  thumbnailStoragePath: z.string().nullable().default(null),
   metadataJson: JsonRecordSchema.default({}),
-  previewUrl: z.string().url().optional()
+  previewUrl: z.string().url().optional(),
+  thumbnailUrl: z.string().url().optional(),
+  originalUrl: z.string().url().optional()
 });
 
 export const CandidateAssetEligibilitySchema = z.object({
@@ -1345,13 +1348,29 @@ export const CreativeOutputSchema = z.object({
   postVersionId: z.string().uuid().nullable().default(null),
   kind: JobTypeSchema,
   storagePath: z.string(),
+  thumbnailStoragePath: z.string().nullable().default(null),
   providerUrl: z.string().url().nullable(),
   outputIndex: z.number().int(),
+  parentOutputId: z.string().uuid().nullable().default(null),
+  rootOutputId: z.string().uuid().nullable().default(null),
+  editedFromOutputId: z.string().uuid().nullable().default(null),
+  versionNumber: z.number().int().min(1).default(1),
+  isLatestVersion: z.boolean().default(true),
   reviewState: OutputReviewStateSchema,
   latestVerdict: OutputVerdictSchema.nullable().default(null),
   reviewedAt: z.string().nullable().default(null),
   createdBy: z.string().uuid().nullable().default(null),
-  previewUrl: z.string().url().optional()
+  previewUrl: z.string().url().optional(),
+  thumbnailUrl: z.string().url().optional(),
+  originalUrl: z.string().url().optional()
+});
+
+export const EditorSaveModeSchema = z.enum(["new", "version", "replace"]);
+
+export const EditorSaveOutputResponseSchema = z.object({
+  output: CreativeOutputSchema,
+  resolvedMode: EditorSaveModeSchema,
+  canReplaceSource: z.boolean().default(false)
 });
 
 export const ExternalPostUploadResponseSchema = z.object({
@@ -1859,6 +1878,8 @@ export type AiSegmentationResponse = z.infer<typeof AiSegmentationResponseSchema
 export type AiImageEditResponse = z.infer<typeof AiImageEditResponseSchema>;
 export type ImageEditPromptComposerRequest = z.infer<typeof ImageEditPromptComposerRequestSchema>;
 export type ImageEditPromptComposerResponse = z.infer<typeof ImageEditPromptComposerResponseSchema>;
+export type EditorSaveMode = z.infer<typeof EditorSaveModeSchema>;
+export type EditorSaveOutputResponse = z.infer<typeof EditorSaveOutputResponseSchema>;
 export type WorkspaceSummary = z.infer<typeof WorkspaceSchema>;
 export type BrandRecord = z.infer<typeof BrandSchema>;
 export type BrandProfileVersionRecord = z.infer<typeof BrandProfileVersionSchema>;

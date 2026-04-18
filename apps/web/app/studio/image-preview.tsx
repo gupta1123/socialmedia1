@@ -83,6 +83,15 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                 aria-modal="true"
                 aria-label={preview.title ?? preview.alt}
               >
+                {(() => {
+                  const summary = getPreviewSummary(preview);
+                  const caption = getPreviewCaption(preview, summary);
+                  const details = getPreviewDetails(preview, summary, caption);
+                  const sections = getPreviewSections(preview, summary, caption);
+                  const primaryActions = preview.actions?.filter((action) => action.tone === "primary") ?? [];
+                  const secondaryActions = preview.actions?.filter((action) => action.tone !== "primary") ?? [];
+
+                  return (
                 <div className="image-preview-shell">
                   <button
                     aria-label="Close image preview"
@@ -114,15 +123,14 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                             ))}
                           </div>
                         ) : null}
+                        {caption ? <span className="image-preview-kicker">{caption}</span> : null}
                         {preview.title ? <strong>{preview.title}</strong> : null}
-                        {preview.subtitle || preview.meta ? (
-                          <p>{preview.subtitle ?? preview.meta}</p>
-                        ) : null}
+                        {summary ? <p>{summary}</p> : null}
                       </div>
 
-                      {preview.details && preview.details.length > 0 ? (
+                      {details.length > 0 ? (
                         <div className="image-preview-details">
-                          {preview.details.map((detail) => (
+                          {details.map((detail) => (
                             <div className="image-preview-detail-row" key={`${detail.label}-${detail.value}`}>
                               <span>{detail.label}</span>
                               <strong>{detail.value}</strong>
@@ -131,7 +139,7 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                         </div>
                       ) : null}
 
-                      {preview.sections?.map((section) => (
+                      {sections.map((section) => (
                         <section className="image-preview-section" key={section.title}>
                           <div className="image-preview-section-title">{section.title}</div>
                           <div className="image-preview-section-body">
@@ -146,13 +154,7 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                       ))}
 
                       <div className="image-preview-actions">
-                        <a className="button button-ghost" href={preview.src} rel="noreferrer" target="_blank">
-                          Open original
-                        </a>
-                        <a className="button button-ghost" download href={preview.src}>
-                          Download
-                        </a>
-                        {preview.actions?.map((action) => (
+                        {primaryActions.map((action) => (
                           <a
                             className={`button ${action.tone === "primary" ? "button-primary" : "button-ghost"}`}
                             href={action.href}
@@ -163,15 +165,35 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                             {action.label}
                           </a>
                         ))}
+                        <a className="button button-ghost" download href={preview.src}>
+                          Download asset
+                        </a>
+                        {secondaryActions.map((action) => (
+                          <a
+                            className="button button-ghost"
+                            href={action.href}
+                            key={`${action.label}-${action.href}`}
+                            rel={action.external ? "noreferrer" : undefined}
+                            target={action.external ? "_blank" : undefined}
+                          >
+                            {action.label}
+                          </a>
+                        ))}
+                        <a className="image-preview-link" href={preview.src} rel="noreferrer" target="_blank">
+                          Open original
+                        </a>
                       </div>
                     </aside>
-                  ) : preview.title || preview.meta ? (
+                  ) : preview.title || summary || caption ? (
                     <div className="image-preview-caption">
+                      {caption ? <span className="image-preview-kicker">{caption}</span> : null}
                       {preview.title ? <strong>{preview.title}</strong> : null}
-                      {preview.meta ? <p>{preview.meta}</p> : null}
+                      {summary ? <p>{summary}</p> : null}
                     </div>
                   ) : null}
                 </div>
+                  );
+                })()}
               </div>
             </div>,
             document.body
@@ -260,11 +282,84 @@ export function useImagePreview() {
 }
 
 function hasInspectorContent(preview: ImagePreviewPayload) {
+  const summary = getPreviewSummary(preview);
+  const caption = getPreviewCaption(preview, summary);
+  const details = getPreviewDetails(preview, summary, caption);
+  const sections = getPreviewSections(preview, summary, caption);
+
   return Boolean(
-    preview.subtitle ||
+    summary ||
+      caption ||
       (preview.badges && preview.badges.length > 0) ||
-      (preview.details && preview.details.length > 0) ||
-      (preview.sections && preview.sections.length > 0) ||
+      details.length > 0 ||
+      sections.length > 0 ||
       (preview.actions && preview.actions.length > 0)
   );
+}
+
+function normalizeText(value?: string | null) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function getPreviewSummary(preview: ImagePreviewPayload) {
+  return preview.subtitle?.trim() || preview.meta?.trim() || null;
+}
+
+function getPreviewCaption(preview: ImagePreviewPayload, summary: string | null) {
+  const meta = preview.meta?.trim() ?? "";
+  if (!meta) {
+    return null;
+  }
+
+  return normalizeText(meta) === normalizeText(summary) ? null : meta;
+}
+
+function getPreviewDetails(preview: ImagePreviewPayload, summary: string | null, caption: string | null) {
+  const duplicateValues = new Set(
+    [preview.title, summary, caption]
+      .map((value) => normalizeText(value))
+      .filter((value) => value.length > 0)
+  );
+
+  return (preview.details ?? []).filter((detail) => {
+    const normalizedValue = normalizeText(detail.value);
+    if (!normalizedValue) {
+      return false;
+    }
+
+    if ((detail.label === "Prompt" || detail.label === "Run") && duplicateValues.has(normalizedValue)) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function getPreviewSections(preview: ImagePreviewPayload, summary: string | null, caption: string | null) {
+  const duplicateValues = new Set(
+    [preview.title, summary, caption]
+      .map((value) => normalizeText(value))
+      .filter((value) => value.length > 0)
+  );
+
+  return (preview.sections ?? [])
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => {
+        const normalizedValue = normalizeText(item.value);
+        if (!normalizedValue) {
+          return false;
+        }
+
+        if (
+          (section.title === "Prompt" || item.label === "Prompt" || item.label === "Run") &&
+          duplicateValues.has(normalizedValue)
+        ) {
+          return false;
+        }
+
+        return true;
+      })
+    }))
+    .filter((section) => section.items.length > 0);
 }

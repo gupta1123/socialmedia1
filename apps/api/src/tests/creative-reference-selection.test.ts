@@ -27,6 +27,7 @@ function buildAsset(input: {
     fileName: `${input.label.toLowerCase().replace(/[^a-z0-9]+/g, "_")}.png`,
     mimeType: "image/png",
     storagePath: `brand-assets/${crypto.randomUUID()}.png`,
+    thumbnailStoragePath: null,
     metadataJson: input.metadataJson ?? {},
   };
 }

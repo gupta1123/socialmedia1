@@ -8,8 +8,10 @@ import {
   getBrandProfileVersion,
   listBrandAssets
 } from "../lib/repository.js";
+import { getProject } from "../lib/planning-repository.js";
 import { supabaseAdmin } from "../lib/supabase.js";
-import { createSignedUrl, uploadBufferToStorage } from "../lib/storage.js";
+import { createSignedImageUrls, removeStorageObjects, uploadBufferToStorage } from "../lib/storage.js";
+import { createThumbnailFromBuffer } from "../lib/thumbnails.js";
 import { buildStoragePath, randomId, slugify } from "../lib/utils.js";
 import { invalidateRuntimeCache } from "../lib/runtime-cache.js";
 
@@ -47,12 +49,16 @@ export async function registerBrandRoutes(app: FastifyInstance) {
     await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
 
     const assets = await listBrandAssets(brand.id);
-    const assetUrls = await Promise.all(assets.map((asset) => createSignedUrl(asset.storagePath).catch(() => null)));
+    const assetUrls = await Promise.all(
+      assets.map((asset) => createSignedImageUrls(asset.storagePath, asset.thumbnailStoragePath))
+    );
 
     return BrandAssetSchema.array().parse(
       assets.map((asset, index) => ({
         ...asset,
-        previewUrl: assetUrls[index] ?? undefined
+        previewUrl: assetUrls[index]?.originalUrl,
+        thumbnailUrl: assetUrls[index]?.thumbnailUrl,
+        originalUrl: assetUrls[index]?.originalUrl
       }))
     );
   });
@@ -196,6 +202,7 @@ export async function registerBrandRoutes(app: FastifyInstance) {
       | null = null;
     let labelValue: string | null = null;
     let kindValue: string | null = null;
+    let projectIdValue: string | null = null;
     let metadataJsonValue: Record<string, unknown> = {};
 
     for await (const part of request.parts()) {
@@ -220,6 +227,10 @@ export async function registerBrandRoutes(app: FastifyInstance) {
         labelValue = typeof part.value === "string" ? part.value : String(part.value ?? "");
       }
 
+      if (part.fieldname === "projectId") {
+        projectIdValue = typeof part.value === "string" ? part.value : String(part.value ?? "");
+      }
+
       if (part.fieldname === "metadataJson") {
         const raw = typeof part.value === "string" ? part.value : String(part.value ?? "");
         if (raw.trim()) {
@@ -239,8 +250,17 @@ export async function registerBrandRoutes(app: FastifyInstance) {
 
     const kind = AssetKindSchema.parse(kindValue?.trim() || "reference");
     const label = labelValue?.trim() || filePart.filename;
+    const projectId = projectIdValue?.trim() || null;
     const buffer = filePart.buffer;
     const assetId = randomId();
+
+    if (projectId) {
+      const project = await getProject(projectId);
+      if (project.workspaceId !== brand.workspaceId || project.brandId !== brand.id) {
+        return reply.badRequest("Project does not belong to the target brand/workspace");
+      }
+    }
+
     const storagePath = buildStoragePath({
       workspaceId: brand.workspaceId,
       brandId: brand.id,
@@ -259,16 +279,22 @@ export async function registerBrandRoutes(app: FastifyInstance) {
     });
 
     await uploadBufferToStorage(storagePath, buffer, filePart.mimetype);
+    const thumbnail = await createThumbnailFromBuffer(storagePath, buffer).catch(() => null);
 
     const { error } = await supabaseAdmin.from("brand_assets").insert({
       id: assetId,
       workspace_id: brand.workspaceId,
       brand_id: brand.id,
+      project_id: projectId,
       kind,
       label,
       file_name: filePart.filename,
       mime_type: filePart.mimetype,
       storage_path: storagePath,
+      thumbnail_storage_path: thumbnail?.thumbnailStoragePath ?? null,
+      thumbnail_width: thumbnail?.thumbnailWidth ?? null,
+      thumbnail_height: thumbnail?.thumbnailHeight ?? null,
+      thumbnail_bytes: thumbnail?.thumbnailBytes ?? null,
       metadata_json: metadataJsonValue,
       created_by: viewer.userId
     });
@@ -292,6 +318,17 @@ export async function registerBrandRoutes(app: FastifyInstance) {
     const brand = await getBrand(brandId);
     await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
 
+    const { data: asset, error: assetError } = await supabaseAdmin
+      .from("brand_assets")
+      .select("storage_path, thumbnail_storage_path")
+      .eq("id", assetId)
+      .eq("brand_id", brandId)
+      .maybeSingle();
+
+    if (assetError) {
+      throw assetError;
+    }
+
     const { error } = await supabaseAdmin
       .from("brand_assets")
       .delete()
@@ -301,6 +338,11 @@ export async function registerBrandRoutes(app: FastifyInstance) {
     if (error) {
       throw error;
     }
+
+    await removeStorageObjects([
+      (asset as { storage_path?: string | null; thumbnail_storage_path?: string | null } | null)?.storage_path ?? "",
+      (asset as { storage_path?: string | null; thumbnail_storage_path?: string | null } | null)?.thumbnail_storage_path ?? ""
+    ]);
 
     invalidateRuntimeCache(`brand-asset-counts:${brand.id}`);
 

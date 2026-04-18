@@ -95,6 +95,17 @@ function isFestivalGreetingInput(input: Pick<CreativeDirectorInput, "festival" |
 const ALLOWED_REFERENCE_STRATEGIES = ["generated-template", "uploaded-references", "hybrid"] as const;
 const ALLOWED_TEMPLATE_TYPES = ["hero", "product-focus", "testimonial", "announcement", "quote", "offer"] as const;
 
+function selectReraQrAssetForProject(
+  assets: BrandAssetRecord[],
+  projectId?: string | null
+) {
+  return (
+    assets.find((asset) => asset.kind === "rera_qr" && asset.projectId === (projectId ?? null)) ??
+    assets.find((asset) => asset.kind === "rera_qr" && asset.projectId == null) ??
+    null
+  );
+}
+
 type CompilerResult = {
   promptSummary: string;
   seedPrompt: string;
@@ -1633,7 +1644,7 @@ function buildV2CandidateAssets(input: Input) {
     ? input.brandAssets?.find((asset) => asset.kind === "logo")?.id ?? null
     : null;
   const reraQrId = input.brief.includeReraQr
-    ? input.brandAssets?.find((asset) => asset.kind === "rera_qr")?.id ?? null
+    ? selectReraQrAssetForProject(input.brandAssets ?? [], input.projectId)?.id ?? null
     : null;
   const inferredReferenceSelection = buildInferredReferenceSelection({
     postTypeCode: input.postType?.code ?? null,

@@ -32,6 +32,17 @@ import {
 import { supabaseAdmin } from "./supabase.js";
 import { randomId } from "./utils.js";
 
+function selectReraQrAssetForProject(
+  assets: BrandAssetRecord[],
+  projectId?: string | null
+) {
+  return (
+    assets.find((asset) => asset.kind === "rera_qr" && asset.projectId === (projectId ?? null)) ??
+    assets.find((asset) => asset.kind === "rera_qr" && asset.projectId == null) ??
+    null
+  );
+}
+
 export async function compileDeliverablePromptPackage(params: {
   deliverableId: string;
   viewerUserId: string | null;
@@ -61,7 +72,7 @@ export async function compileDeliverablePromptPackage(params: {
       : null;
   const selectedReraQrAsset =
     params.briefOverride?.includeReraQr
-      ? allAssets.find((asset) => asset.kind === "rera_qr") ?? null
+      ? selectReraQrAssetForProject(allAssets, project?.id ?? null)
       : null;
   const brief = buildCreativeBrief({
     brandId: deliverable.brandId,

@@ -11,7 +11,7 @@ import {
 } from "../lib/repository.js";
 import { env } from "../lib/config.js";
 import { isPlatformAdminUser } from "../lib/credits.js";
-import { createSignedUrl } from "../lib/storage.js";
+import { createSignedImageUrls, createSignedUrl } from "../lib/storage.js";
 import { toViewerResponse } from "../lib/viewer.js";
 
 export async function registerSessionRoutes(app: FastifyInstance) {
@@ -81,11 +81,11 @@ export async function registerSessionRoutes(app: FastifyInstance) {
     ]);
 
     const [assetUrls, templateUrls, outputUrls] = await Promise.all([
-      Promise.all(brandAssets.map((asset) => createSignedUrl(asset.storagePath).catch(() => null))),
+      Promise.all(brandAssets.map((asset) => createSignedImageUrls(asset.storagePath, asset.thumbnailStoragePath))),
       Promise.all(styleTemplates.map((template) => createSignedUrl(template.storagePath).catch(() => null))),
       isCreateView
         ? Promise.resolve([])
-        : Promise.all(recentOutputs.map((output) => createSignedUrl(output.storagePath).catch(() => null)))
+        : Promise.all(recentOutputs.map((output) => createSignedImageUrls(output.storagePath, output.thumbnailStoragePath)))
     ]);
 
     const response = BootstrapResponseSchema.parse({
@@ -97,7 +97,9 @@ export async function registerSessionRoutes(app: FastifyInstance) {
       brands,
       brandAssets: brandAssets.map((asset, index) => ({
         ...asset,
-        previewUrl: assetUrls[index] ?? undefined
+        previewUrl: assetUrls[index]?.originalUrl,
+        thumbnailUrl: assetUrls[index]?.thumbnailUrl,
+        originalUrl: assetUrls[index]?.originalUrl
       })),
       styleTemplates: styleTemplates.map((template, index) => ({
         ...template,
@@ -106,7 +108,9 @@ export async function registerSessionRoutes(app: FastifyInstance) {
       recentJobs,
       recentOutputs: recentOutputs.map((output, index) => ({
         ...output,
-        previewUrl: outputUrls[index] ?? undefined
+        previewUrl: outputUrls[index]?.originalUrl,
+        thumbnailUrl: outputUrls[index]?.thumbnailUrl,
+        originalUrl: outputUrls[index]?.originalUrl
       }))
     });
 

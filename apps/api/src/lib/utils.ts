@@ -43,6 +43,18 @@ export function buildStoragePath(input: {
   return `${input.workspaceId}/${input.brandId}/${input.section}/${input.id}/${sanitizeFileName(input.fileName)}`;
 }
 
+export function buildThumbnailStoragePath(storagePath: string) {
+  const segments = storagePath.split("/").filter(Boolean);
+  const fileName = segments.pop();
+
+  if (!fileName) {
+    throw new Error("Cannot build thumbnail path for empty storage path");
+  }
+
+  const baseName = fileName.replace(/\.[^.]+$/, "");
+  return [...segments, "thumb", `${sanitizeFileName(baseName)}.webp`].join("/");
+}
+
 export function dedupeStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }

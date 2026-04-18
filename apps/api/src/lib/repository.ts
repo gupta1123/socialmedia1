@@ -57,6 +57,10 @@ type AssetRow = {
   file_name: string;
   mime_type: string;
   storage_path: string;
+  thumbnail_storage_path: string | null;
+  thumbnail_width: number | null;
+  thumbnail_height: number | null;
+  thumbnail_bytes: number | null;
   metadata_json: Record<string, unknown> | null;
 };
 
@@ -108,8 +112,17 @@ type OutputRow = {
   post_version_id: string | null;
   kind: CreativeOutputRecord["kind"];
   storage_path: string;
+  thumbnail_storage_path: string | null;
+  thumbnail_width: number | null;
+  thumbnail_height: number | null;
+  thumbnail_bytes: number | null;
   provider_url: string | null;
   output_index: number;
+  parent_output_id: string | null;
+  root_output_id: string | null;
+  edited_from_output_id: string | null;
+  version_number: number;
+  is_latest_version: boolean;
   review_state: CreativeOutputRecord["reviewState"];
   latest_feedback_verdict: CreativeOutputRecord["latestVerdict"];
   reviewed_at: string | null;
@@ -269,7 +282,7 @@ export async function getBrandProfileVersion(profileVersionId: string) {
 export async function listBrandAssets(brandId: string): Promise<BrandAssetRecord[]> {
   const { data, error } = await supabaseAdmin
     .from("brand_assets")
-    .select("id, workspace_id, brand_id, project_id, kind, label, file_name, mime_type, storage_path, metadata_json")
+    .select("id, workspace_id, brand_id, project_id, kind, label, file_name, mime_type, storage_path, thumbnail_storage_path, thumbnail_width, thumbnail_height, thumbnail_bytes, metadata_json")
     .eq("brand_id", brandId)
     .order("created_at", { ascending: false })
     .returns<AssetRow[]>();
@@ -288,6 +301,7 @@ export async function listBrandAssets(brandId: string): Promise<BrandAssetRecord
     fileName: asset.file_name,
     mimeType: asset.mime_type,
     storagePath: asset.storage_path,
+    thumbnailStoragePath: asset.thumbnail_storage_path,
     metadataJson: asset.metadata_json ?? {}
   }));
 }
@@ -341,7 +355,7 @@ export async function getBrandAssetCounts(brandId: string) {
 export async function listWorkspaceAssets(workspaceId: string, brandId?: string): Promise<BrandAssetRecord[]> {
   let query = supabaseAdmin
     .from("brand_assets")
-    .select("id, workspace_id, brand_id, project_id, kind, label, file_name, mime_type, storage_path, metadata_json")
+    .select("id, workspace_id, brand_id, project_id, kind, label, file_name, mime_type, storage_path, thumbnail_storage_path, thumbnail_width, thumbnail_height, thumbnail_bytes, metadata_json")
     .eq("workspace_id", workspaceId);
 
   if (brandId) {
@@ -364,6 +378,7 @@ export async function listWorkspaceAssets(workspaceId: string, brandId?: string)
     fileName: asset.file_name,
     mimeType: asset.mime_type,
     storagePath: asset.storage_path,
+    thumbnailStoragePath: asset.thumbnail_storage_path,
     metadataJson: asset.metadata_json ?? {}
   }));
 }
@@ -450,6 +465,7 @@ export async function listWorkspaceOutputs(workspaceId: string, brandId?: string
     .from("creative_outputs")
     .select(
       "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at, created_by"
+      + ", thumbnail_storage_path, thumbnail_width, thumbnail_height, thumbnail_bytes, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version"
     )
     .eq("workspace_id", workspaceId);
 
@@ -479,8 +495,14 @@ export async function listWorkspaceOutputs(workspaceId: string, brandId?: string
     postVersionId: output.post_version_id,
     kind: output.kind,
     storagePath: output.storage_path,
+    thumbnailStoragePath: output.thumbnail_storage_path,
     providerUrl: output.provider_url,
     outputIndex: output.output_index,
+    parentOutputId: output.parent_output_id,
+    rootOutputId: output.root_output_id,
+    editedFromOutputId: output.edited_from_output_id,
+    versionNumber: output.version_number,
+    isLatestVersion: output.is_latest_version,
     reviewState: output.review_state,
     latestVerdict: output.latest_feedback_verdict,
     reviewedAt: output.reviewed_at,

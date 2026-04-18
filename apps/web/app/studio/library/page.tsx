@@ -21,7 +21,7 @@ import {
 import { formatLocalTimeLabel, formatWeekdayLabel } from "../../../lib/posting-windows";
 import { ImagePreviewTrigger } from "../image-preview";
 import { useStudio } from "../studio-context";
-import { useRegisterTopbarActions } from "../topbar-actions-context";
+import { useRegisterTopbarActions, useRegisterTopbarControls } from "../topbar-actions-context";
 import { Skeleton } from "../skeleton";
 
 const LIBRARY_TABS = [
@@ -63,6 +63,7 @@ export default function LibraryPage() {
   const [label, setLabel] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [assetKind, setAssetKind] = useState<AssetKind>("reference");
+  const [selectedProjectId, setSelectedProjectId] = useState("");
   const [replacingAssetId, setReplacingAssetId] = useState<string | null>(null);
 
   const topbarActions = useMemo(
@@ -73,6 +74,7 @@ export default function LibraryPage() {
         onClick={() => {
           setTab("assets");
           setAssetKind("reference");
+          setSelectedProjectId("");
           setIsDrawerOpen(true);
         }}
         title={!activeBrand ? "Set an active brand first" : ""}
@@ -84,7 +86,28 @@ export default function LibraryPage() {
     [activeBrand, pendingAction]
   );
 
+  const topbarControls = useMemo(
+    () => (
+      <div className="queue-scope-switch" role="tablist" aria-label="Library sections">
+        {LIBRARY_TABS.map((item) => (
+          <button
+            key={item.id}
+            aria-selected={tab === item.id}
+            className={`filter-chip ${tab === item.id ? "is-active" : ""}`}
+            onClick={() => setTab(item.id)}
+            role="tab"
+            type="button"
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+    ),
+    [tab]
+  );
+
   useRegisterTopbarActions(topbarActions);
+  useRegisterTopbarControls(topbarControls);
 
   useEffect(() => {
     setAssets([]);
@@ -94,6 +117,42 @@ export default function LibraryPage() {
     setPostingWindows([]);
     setLoadedTabs(DEFAULT_LOADED_TABS);
   }, [activeBrandId]);
+
+  useEffect(() => {
+    if (!sessionToken || !activeBrandId || loadedTabs.system || (!isDrawerOpen && tab !== "system")) {
+      return;
+    }
+
+    const token = sessionToken;
+    const brandId = activeBrandId;
+    let cancelled = false;
+
+    async function loadProjectContext() {
+      try {
+        const [projectRecords, postTypeRecords] = await Promise.all([
+          getProjects(token, { brandId }),
+          getPostTypes(token)
+        ]);
+
+        if (cancelled) return;
+
+        setProjects(projectRecords);
+        setPostTypes(postTypeRecords);
+        setLoadedTabs((current) => ({ ...current, system: true }));
+        setError(null);
+      } catch (cause) {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : "Unable to load project context");
+        }
+      }
+    }
+
+    void loadProjectContext();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBrandId, isDrawerOpen, loadedTabs.system, sessionToken, tab]);
 
   useEffect(() => {
     if (!sessionToken || !activeBrandId || loadedTabs.assets) {
@@ -232,17 +291,6 @@ export default function LibraryPage() {
   const mediaSections = useMemo(
     () => [
       {
-        key: "references",
-        title: "References",
-        description: "High-signal references that guide visual language and composition.",
-        emptyTitle: "No references yet",
-        emptyBody: "Upload high-signal references so templates and creation stay in the right visual language.",
-        emptyActionLabel: "Upload reference",
-        uploadKind: "reference" as AssetKind,
-        tagLabel: "Reference",
-        assets: referenceAssets
-      },
-      {
         key: "logos",
         title: "Logos",
         description: "Official brand marks that can be toggled into final creatives when needed.",
@@ -263,6 +311,17 @@ export default function LibraryPage() {
         uploadKind: "rera_qr" as AssetKind,
         tagLabel: "RERA QR",
         assets: reraQrAssets
+      },
+      {
+        key: "references",
+        title: "References",
+        description: "High-signal references that guide visual language and composition.",
+        emptyTitle: "No references yet",
+        emptyBody: "Upload high-signal references so templates and creation stay in the right visual language.",
+        emptyActionLabel: "Upload reference",
+        uploadKind: "reference" as AssetKind,
+        tagLabel: "Reference",
+        assets: referenceAssets
       },
       {
         key: "project-images",
@@ -300,7 +359,17 @@ export default function LibraryPage() {
       }
     }
 
-    const success = await uploadBrandAssetFile(file, label || file.name, assetKind);
+    if (assetKind === "rera_qr" && !selectedProjectId) {
+      setError("Choose the project this RERA QR belongs to.");
+      return;
+    }
+
+    const success = await uploadBrandAssetFile(
+      file,
+      label || file.name,
+      assetKind,
+      assetKind === "rera_qr" || assetKind === "product" ? selectedProjectId || null : null
+    );
     if (success) {
       if (sessionToken && activeBrandId) {
         const token = sessionToken;
@@ -313,10 +382,16 @@ export default function LibraryPage() {
       setLabel("");
       setFile(null);
       setAssetKind("reference");
+      setSelectedProjectId("");
       setIsDrawerOpen(false);
       setReplacingAssetId(null);
     }
   }
+
+  const projectNameById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project.name])),
+    [projects]
+  );
 
   return (
     <div className="page-stack">
@@ -329,21 +404,6 @@ export default function LibraryPage() {
       ) : null}
 
       <section className="library-tabs-panel">
-        <div className="library-tab-row" role="tablist" aria-label="Library sections" style={{ marginBottom: "40px" }}>
-          {LIBRARY_TABS.map((item) => (
-            <button
-              key={item.id}
-              className={`filter-chip ${tab === item.id ? "is-active" : ""}`}
-              onClick={() => setTab(item.id)}
-              type="button"
-              role="tab"
-              aria-selected={tab === item.id}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-
         {loading ? (
           <div className="library-section-stack">
             {tab === "assets" || tab === "templates" ? (
@@ -512,13 +572,16 @@ export default function LibraryPage() {
                         {section.assets.map((asset) => (
                           <article className="review-card" key={asset.id} style={{ padding: "12px" }}>
                             <div className="creative-preview-frame" style={{ minHeight: "200px", padding: "8px" }}>
-                              {asset.previewUrl ? (
+                              {asset.thumbnailUrl ?? asset.previewUrl ? (
                                 <ImagePreviewTrigger
                                   alt={asset.label}
                                   badges={[section.tagLabel]}
                                   details={[
                                     { label: "Kind", value: asset.kind },
-                                    { label: "Label", value: asset.label }
+                                    { label: "Label", value: asset.label },
+                                    ...(asset.projectId
+                                      ? [{ label: "Project", value: projectNameById.get(asset.projectId) ?? "Project-linked" }]
+                                      : [])
                                   ]}
                                   sections={[
                                     {
@@ -529,11 +592,11 @@ export default function LibraryPage() {
                                       ]
                                     }
                                   ]}
-                                  src={asset.previewUrl}
+                                  src={asset.originalUrl ?? asset.previewUrl}
                                   subtitle={section.description}
                                   title={asset.label}
                                 >
-                                  <img alt={asset.label} src={asset.previewUrl} />
+                                  <img alt={asset.label} src={asset.thumbnailUrl ?? asset.previewUrl} />
                                 </ImagePreviewTrigger>
                               ) : (
                                 <div className="thumb-fallback" />
@@ -541,6 +604,11 @@ export default function LibraryPage() {
                             </div>
                             <div className="library-asset-meta">
                               <strong>{asset.label}</strong>
+                              {asset.projectId ? (
+                                <p style={{ margin: "6px 0 0", color: "var(--muted)", fontSize: "12px" }}>
+                                  {projectNameById.get(asset.projectId) ?? "Project-linked"}
+                                </p>
+                              ) : null}
                               <div className="review-tag-row">
                                 <span className="review-tag">{section.tagLabel}</span>
                               </div>
@@ -553,6 +621,7 @@ export default function LibraryPage() {
                                       setReplacingAssetId(asset.id);
                                       setAssetKind(section.uploadKind);
                                       setLabel(asset.label);
+                                      setSelectedProjectId(asset.projectId ?? "");
                                       setIsDrawerOpen(true);
                                     }}
                                     type="button"
@@ -588,6 +657,7 @@ export default function LibraryPage() {
                             className="button button-ghost"
                             onClick={() => {
                               setAssetKind(section.uploadKind);
+                              setSelectedProjectId("");
                               setIsDrawerOpen(true);
                             }}
                             type="button"
@@ -615,9 +685,6 @@ export default function LibraryPage() {
                     These show up as quick time suggestions when scheduling approved posts.
                   </p>
                 </div>
-                <Link className="panel-link" href="/studio/settings" prefetch={false} style={{ fontSize: "12px" }}>
-                  Manage times →
-                </Link>
               </div>
               {postingWindows.length > 0 ? (
                 <div className="library-list">
@@ -640,11 +707,11 @@ export default function LibraryPage() {
       </section>
 
       {isDrawerOpen ? (
-        <div className="drawer-overlay" onClick={() => { setIsDrawerOpen(false); setReplacingAssetId(null); }}>
+        <div className="drawer-overlay" onClick={() => { setIsDrawerOpen(false); setReplacingAssetId(null); setSelectedProjectId(""); }}>
           <div className="drawer-content" onClick={(event) => event.stopPropagation()}>
             <div className="drawer-header">
               <h2>{replacingAssetId ? "Replace asset" : "Upload asset"}</h2>
-              <button className="drawer-close" onClick={() => { setIsDrawerOpen(false); setReplacingAssetId(null); }} type="button">
+              <button className="drawer-close" onClick={() => { setIsDrawerOpen(false); setReplacingAssetId(null); setSelectedProjectId(""); }} type="button">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
                 </svg>
@@ -657,7 +724,13 @@ export default function LibraryPage() {
                   <label className="field-label">
                     Asset type
                     <select
-                      onChange={(event) => setAssetKind(event.target.value as AssetKind)}
+                      onChange={(event) => {
+                        const nextKind = event.target.value as AssetKind;
+                        setAssetKind(nextKind);
+                        if (nextKind !== "rera_qr" && nextKind !== "product") {
+                          setSelectedProjectId("");
+                        }
+                      }}
                       value={assetKind}
                     >
                       <option value="reference">Reference</option>
@@ -682,6 +755,23 @@ export default function LibraryPage() {
                       value={label}
                     />
                   </label>
+
+                  {assetKind === "rera_qr" || assetKind === "product" ? (
+                    <label className="field-label">
+                      Project
+                      <select
+                        onChange={(event) => setSelectedProjectId(event.target.value)}
+                        value={selectedProjectId}
+                      >
+                        <option value="">{assetKind === "rera_qr" ? "Select project" : "Brand-level / no project"}</option>
+                        {projects.map((project) => (
+                          <option key={project.id} value={project.id}>
+                            {project.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
 
                 <label className="field-label">
                   Asset file

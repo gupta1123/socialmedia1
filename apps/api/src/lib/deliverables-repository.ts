@@ -22,7 +22,7 @@ import type {
   WorkspaceMemberRecord
 } from "@image-lab/contracts";
 import { supabaseAdmin } from "./supabase.js";
-import { createSignedUrl } from "./storage.js";
+import { createSignedImageUrls, createSignedPreviewUrl } from "./storage.js";
 import { deriveLegacyCreativeFormat, mapDeliverableStatusToCalendarStatus } from "./deliverable-utils.js";
 import { getOrPopulateRuntimeCache } from "./runtime-cache.js";
 
@@ -189,6 +189,7 @@ type PostVersionRow = {
 type PostVersionPreviewRow = {
   id: string;
   storage_path: string;
+  thumbnail_storage_path: string | null;
 };
 
 type PostVersionAssetRow = {
@@ -274,8 +275,14 @@ type ReviewPreviewOutputRow = {
   post_version_id: string | null;
   kind: "style_seed" | "final";
   storage_path: string;
+  thumbnail_storage_path: string | null;
   provider_url: string | null;
   output_index: number;
+  parent_output_id: string | null;
+  root_output_id: string | null;
+  edited_from_output_id: string | null;
+  version_number: number;
+  is_latest_version: boolean;
   review_state: "pending_review" | "approved" | "needs_revision" | "closed";
   latest_feedback_verdict: "approved" | "close" | "off-brand" | "wrong-layout" | "wrong-text" | null;
   reviewed_at: string | null;
@@ -570,6 +577,7 @@ type DeliverablePreviewVersionRow = {
 type DeliverablePreviewOutputRow = {
   id: string;
   storage_path: string;
+  thumbnail_storage_path: string | null;
 };
 
 export async function attachDeliverablePreviews(deliverables: DeliverableRecord[]) {
@@ -603,7 +611,7 @@ export async function attachDeliverablePreviews(deliverables: DeliverableRecord[
 
   const { data: outputRows, error: outputError } = await supabaseAdmin
     .from("creative_outputs")
-    .select("id, storage_path")
+    .select("id, storage_path, thumbnail_storage_path")
     .in("id", outputIds)
     .returns<DeliverablePreviewOutputRow[]>();
 
@@ -611,7 +619,7 @@ export async function attachDeliverablePreviews(deliverables: DeliverableRecord[
 
   const previewEntries = await Promise.all(
     (outputRows ?? []).map(async (row) => {
-      const previewUrl = await createSignedUrl(row.storage_path).catch(() => null);
+      const previewUrl = await createSignedPreviewUrl(row.storage_path, row.thumbnail_storage_path).catch(() => null);
       return [row.id, previewUrl] as const;
     })
   );
@@ -742,7 +750,7 @@ export async function listReviewQueue(
   workspaceId: string,
   brandId?: string,
   deliverableId?: string,
-  filters?: { scope?: "my" | "team" | "unassigned"; reviewerUserId?: string }
+  filters?: { scope?: "my" | "team" | "unassigned"; reviewerUserId?: string; limit?: number; offset?: number }
 ): Promise<ReviewQueueEntry[]> {
   let query = supabaseAdmin
     .from("post_versions")
@@ -807,6 +815,11 @@ export async function listReviewQueue(
   if (filters?.scope === "unassigned") {
     query = query.is("deliverable.reviewer_user_id", null);
   }
+  if (typeof filters?.offset === "number" && typeof filters?.limit === "number") {
+    query = query.range(filters.offset, filters.offset + filters.limit - 1);
+  } else if (typeof filters?.limit === "number") {
+    query = query.limit(filters.limit);
+  }
 
   const { data, error } = await query.returns<ReviewQueueRow[]>();
   if (error) throw error;
@@ -832,8 +845,14 @@ export async function listReviewQueue(
         post_version_id,
         kind,
         storage_path,
+        thumbnail_storage_path,
         provider_url,
         output_index,
+        parent_output_id,
+        root_output_id,
+        edited_from_output_id,
+        version_number,
+        is_latest_version,
         review_state,
         latest_feedback_verdict,
         reviewed_at,
@@ -1027,6 +1046,8 @@ export async function listQueueEntries(
     statusGroup?: QueueStatusGroup;
     planningMode?: DeliverableRecord["planningMode"];
     dueWindow?: "today" | "week" | "overdue";
+    limit?: number;
+    offset?: number;
   }
 ): Promise<QueueEntry[]> {
   return getOrPopulateRuntimeCache(
@@ -1081,13 +1102,19 @@ export async function listQueueEntries(
       ]);
 
       const memberMap = new Map(members.map((member) => [member.id, member]));
+      const sortedDeliverables = deliverables.sort((left, right) => {
+        const leftDate = new Date(left.dueAt ?? left.scheduledFor).getTime();
+        const rightDate = new Date(right.dueAt ?? right.scheduledFor).getTime();
+        return leftDate - rightDate;
+      });
+      const pagedDeliverables =
+        typeof filters?.offset === "number" && typeof filters?.limit === "number"
+          ? sortedDeliverables.slice(filters.offset, filters.offset + filters.limit)
+          : typeof filters?.limit === "number"
+            ? sortedDeliverables.slice(0, filters.limit)
+            : sortedDeliverables;
 
-      return deliverables
-        .sort((left, right) => {
-          const leftDate = new Date(left.dueAt ?? left.scheduledFor).getTime();
-          const rightDate = new Date(right.dueAt ?? right.scheduledFor).getTime();
-          return leftDate - rightDate;
-        })
+      return pagedDeliverables
         .map((deliverable) => ({
           deliverable,
           assignee: deliverable.ownerUserId ? memberMap.get(deliverable.ownerUserId) ?? null : null,
@@ -1366,7 +1393,7 @@ async function attachPostVersionPreviews(postVersions: PostVersionRecord[]) {
 
   const { data, error } = await supabaseAdmin
     .from("creative_outputs")
-    .select("id, storage_path")
+    .select("id, storage_path, thumbnail_storage_path")
     .in("id", outputIds)
     .returns<PostVersionPreviewRow[]>();
 
@@ -1374,7 +1401,7 @@ async function attachPostVersionPreviews(postVersions: PostVersionRecord[]) {
 
   const previewEntries = await Promise.all(
     (data ?? []).map(async (row) => {
-      const previewUrl = await createSignedUrl(row.storage_path).catch(() => null);
+      const previewUrl = await createSignedPreviewUrl(row.storage_path, row.thumbnail_storage_path).catch(() => null);
       return [row.id, previewUrl] as const;
     })
   );
@@ -1447,8 +1474,14 @@ function mapReviewOutputRow(row: ReviewPreviewOutputRow | null) {
     postVersionId: row.post_version_id,
     kind: row.kind,
     storagePath: row.storage_path,
+    thumbnailStoragePath: row.thumbnail_storage_path,
     providerUrl: row.provider_url,
     outputIndex: row.output_index,
+    parentOutputId: row.parent_output_id,
+    rootOutputId: row.root_output_id,
+    editedFromOutputId: row.edited_from_output_id,
+    versionNumber: row.version_number,
+    isLatestVersion: row.is_latest_version,
     reviewState: row.review_state,
     latestVerdict: row.latest_feedback_verdict,
     reviewedAt: row.reviewed_at,
@@ -1591,6 +1624,8 @@ function serializeQueueFilters(
         statusGroup?: QueueStatusGroup;
         planningMode?: DeliverableRecord["planningMode"];
         dueWindow?: "today" | "week" | "overdue";
+        limit?: number;
+        offset?: number;
       }
     | undefined
 ) {
@@ -1604,6 +1639,8 @@ function serializeQueueFilters(
     filters.projectId ?? "all-projects",
     filters.statusGroup ?? "all-statuses",
     filters.planningMode ?? "all-modes",
-    filters.dueWindow ?? "all-dates"
+    filters.dueWindow ?? "all-dates",
+    String(filters.limit ?? "all-limits"),
+    String(filters.offset ?? 0)
   ].join(":");
 }

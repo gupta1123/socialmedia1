@@ -18,6 +18,7 @@ const REVIEW_FILTERS = [
 ] as const;
 
 type ReviewFilter = (typeof REVIEW_FILTERS)[number]["id"];
+const GALLERY_PAGE_SIZE = 24;
 
 export default function GalleryPage() {
   const { sessionToken, activeBrandId, activeBrand } = useStudio();
@@ -26,6 +27,8 @@ export default function GalleryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
+  const [page, setPage] = useState(1);
+  const [hasNextPage, setHasNextPage] = useState(false);
 
   const topbarActions = useMemo(
     () => (
@@ -44,9 +47,14 @@ export default function GalleryPage() {
   useRegisterTopbarActions(topbarActions);
 
   useEffect(() => {
+    setPage(1);
+  }, [activeBrandId, reviewFilter, sessionToken]);
+
+  useEffect(() => {
     if (!sessionToken) {
       setOutputs([]);
       setWorkspaceMembers([]);
+      setHasNextPage(false);
       setLoading(false);
       return;
     }
@@ -58,7 +66,8 @@ export default function GalleryPage() {
       try {
         setLoading(true);
         const outputFilters: Parameters<typeof getCreativeOutputs>[1] = {
-          limit: 200,
+          limit: GALLERY_PAGE_SIZE + 1,
+          offset: (page - 1) * GALLERY_PAGE_SIZE,
           ...(activeBrandId ? { brandId: activeBrandId } : {}),
           ...(reviewFilter === "all" ? {} : { reviewState: reviewFilter })
         };
@@ -72,7 +81,8 @@ export default function GalleryPage() {
           return;
         }
 
-        setOutputs(outputRecords);
+        setHasNextPage(outputRecords.length > GALLERY_PAGE_SIZE);
+        setOutputs(outputRecords.slice(0, GALLERY_PAGE_SIZE));
         setWorkspaceMembers(members);
         setError(null);
       } catch (cause) {
@@ -93,7 +103,10 @@ export default function GalleryPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeBrandId, reviewFilter, sessionToken]);
+  }, [activeBrandId, page, reviewFilter, sessionToken]);
+
+  const pageStart = outputs.length === 0 ? 0 : (page - 1) * GALLERY_PAGE_SIZE + 1;
+  const pageEnd = outputs.length === 0 ? 0 : pageStart + outputs.length - 1;
 
   if (error) {
     return (
@@ -110,13 +123,7 @@ export default function GalleryPage() {
   return (
     <div className="page-stack">
       <section className="page-grid">
-        <article className="panel page-span-12">
-          <div className="panel-header">
-            <div>
-              <h3>{activeBrand ? `${activeBrand.name} generated images` : "Generated images"}</h3>
-            </div>
-            <span className="panel-count">{outputs.length} images</span>
-          </div>
+        <div className="page-span-12">
           <div className="queue-scope-switch" role="tablist" aria-label="Gallery filter" style={{ marginBottom: "16px" }}>
             {REVIEW_FILTERS.map((item) => (
               <button
@@ -145,46 +152,83 @@ export default function GalleryPage() {
               ))}
             </div>
           ) : outputs.length > 0 ? (
-            <div className="work-gallery-grid">
-              {outputs.map((output) => {
-                const creator = createdByLabel(output.createdBy, workspaceMembers);
-                const statusLabel = output.reviewState.replaceAll("_", " ");
+            <>
+              <div className="work-gallery-grid">
+                {outputs.map((output) => {
+                  const creator = createdByLabel(output.createdBy, workspaceMembers);
+                  const statusLabel = output.reviewState.replaceAll("_", " ");
 
-                return (
-                  <article className="work-gallery-card" key={output.id}>
-                    <div className="work-gallery-media">
-                      <ImagePreviewTrigger
-                        alt={`Generated option ${output.outputIndex + 1}`}
-                        actions={[{ href: `/studio/ai-edit?outputId=${output.id}`, label: "Open in Editor", tone: "primary" }]}
-                        badges={[`#${output.outputIndex + 1}`, statusLabel]}
-                        details={[
-                          { label: "Created by", value: creator },
-                          { label: "Review state", value: statusLabel },
-                          { label: "Kind", value: output.kind }
-                        ]}
-                        src={output.previewUrl}
-                        subtitle={`Created by ${creator}`}
-                        title={`Output ${output.outputIndex + 1}`}
-                      >
-                        {output.previewUrl ? <img alt={`Generated option ${output.outputIndex + 1}`} src={output.previewUrl} /> : <div className="work-gallery-fallback" />}
-                      </ImagePreviewTrigger>
-                    </div>
-                    <div className="work-gallery-body">
-                      <div className="work-gallery-copy">
-                        <strong>{`Output #${output.outputIndex + 1}`}</strong>
-                        <p>{statusLabel}</p>
-                        <p>Created by {creator}</p>
+                  return (
+                    <article className="work-gallery-card" key={output.id}>
+                      <div className="work-gallery-media">
+                        <ImagePreviewTrigger
+                          alt={`Generated option ${output.outputIndex + 1}`}
+                          actions={[{ href: `/studio/ai-edit?outputId=${output.id}`, label: "Open in Editor", tone: "primary" }]}
+                          badges={[`#${output.outputIndex + 1}`, `v${output.versionNumber}`, statusLabel]}
+                          details={[
+                            { label: "Created by", value: creator },
+                            { label: "Version", value: `v${output.versionNumber}` },
+                            { label: "Review state", value: statusLabel },
+                            { label: "Kind", value: output.kind }
+                          ]}
+                          src={output.originalUrl ?? output.previewUrl}
+                          subtitle={`${output.kind.replaceAll("_", " ")} · ${statusLabel}`}
+                          title={`Output ${output.outputIndex + 1} · v${output.versionNumber}`}
+                          meta={`#${output.outputIndex + 1}`}
+                        >
+                          {output.thumbnailUrl ?? output.previewUrl ? (
+                            <img
+                              alt={`Generated option ${output.outputIndex + 1}`}
+                              src={output.thumbnailUrl ?? output.previewUrl}
+                            />
+                          ) : (
+                            <div className="work-gallery-fallback" />
+                          )}
+                        </ImagePreviewTrigger>
                       </div>
-                      <div className="work-gallery-footer">
-                        <Link className="button button-ghost button-sm" href={`/studio/ai-edit?outputId=${output.id}`}>
-                          Open in Editor
-                        </Link>
+                      <div className="work-gallery-body">
+                        <div className="work-gallery-copy">
+                          <strong>{`Output #${output.outputIndex + 1} · v${output.versionNumber}`}</strong>
+                          <p>{statusLabel}</p>
+                          <p>Created by {creator}</p>
+                        </div>
+                        <div className="work-gallery-footer">
+                          <Link className="button button-ghost button-sm" href={`/studio/ai-edit?outputId=${output.id}`}>
+                            Open in Editor
+                          </Link>
+                        </div>
                       </div>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+                    </article>
+                  );
+                })}
+              </div>
+              <div className="data-table-footer">
+                <p className="data-table-summary">
+                  Showing {pageStart}-{pageEnd}
+                </p>
+                <div className="data-table-footer-controls">
+                  <div className="data-table-pagination">
+                    <button
+                      className="button button-ghost table-action-button"
+                      disabled={page <= 1}
+                      onClick={() => setPage((value) => Math.max(1, value - 1))}
+                      type="button"
+                    >
+                      Prev
+                    </button>
+                    <span>Page {page}</span>
+                    <button
+                      className="button button-ghost table-action-button"
+                      disabled={!hasNextPage}
+                      onClick={() => setPage((value) => value + 1)}
+                      type="button"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>
           ) : (
             <div className="empty-state-card">
               <h3>No generated images yet</h3>
@@ -194,7 +238,7 @@ export default function GalleryPage() {
               </Link>
             </div>
           )}
-        </article>
+        </div>
       </section>
     </div>
   );

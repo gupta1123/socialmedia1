@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
+  CreativeOutputSchema,
+  EditorSaveOutputResponseSchema,
   ImageEditPromptComposerRequestSchema,
   ImageEditPromptComposerResponseSchema
 } from "@image-lab/contracts";
@@ -14,8 +16,11 @@ import {
   reserveWorkspaceCredits,
   settleWorkspaceCreditReservation
 } from "../lib/credits.js";
-import { assertWorkspaceRole, getBrand } from "../lib/repository.js";
-import { randomId } from "../lib/utils.js";
+import { assertWorkspaceRole, getActiveBrandProfile, getBrand, getPrimaryWorkspace } from "../lib/repository.js";
+import { createSignedImageUrls, uploadBufferToStorage } from "../lib/storage.js";
+import { supabaseAdmin } from "../lib/supabase.js";
+import { createThumbnailFromBuffer } from "../lib/thumbnails.js";
+import { buildStoragePath, deriveAspectRatio, randomId, slugify } from "../lib/utils.js";
 
 const ImageEditFieldsSchema = z.object({
   brandId: z.string().uuid(),
@@ -30,6 +35,12 @@ const ImageEditPlanFieldsSchema = z.object({
   prompt: z.string().trim().min(3).max(2000),
   width: z.coerce.number().int().positive().max(10000).optional(),
   height: z.coerce.number().int().positive().max(10000).optional()
+});
+
+const EditorSaveFieldsSchema = z.object({
+  brandId: z.string().uuid(),
+  saveMode: z.enum(["new", "version", "replace"]).default("new"),
+  sourceOutputId: z.string().uuid().optional()
 });
 
 const ImageSegmentFieldsSchema = z
@@ -56,6 +67,33 @@ type UploadedImagePart = {
   filename: string;
   mimetype: string;
   buffer: Buffer;
+};
+
+type EditorSourceOutputRow = {
+  id: string;
+  workspace_id: string;
+  brand_id: string;
+  deliverable_id: string | null;
+  project_id: string | null;
+  post_type_id: string | null;
+  creative_template_id: string | null;
+  calendar_item_id: string | null;
+  job_id: string;
+  post_version_id: string | null;
+  kind: "style_seed" | "final";
+  storage_path: string;
+  thumbnail_storage_path: string | null;
+  provider_url: string | null;
+  output_index: number;
+  parent_output_id: string | null;
+  root_output_id: string | null;
+  edited_from_output_id: string | null;
+  version_number: number;
+  is_latest_version: boolean;
+  review_state: "pending_review" | "approved" | "needs_revision" | "closed";
+  latest_feedback_verdict: "approved" | "close" | "off-brand" | "wrong-layout" | "wrong-text" | null;
+  reviewed_at: string | null;
+  created_by: string | null;
 };
 
 function multipartLimits(files: number) {
@@ -113,6 +151,140 @@ function insufficientCreditsMessage(error: unknown) {
   }
 
   return "Not enough credits for this image edit.";
+}
+
+function inferFormatFromDimensions(width?: number, height?: number) {
+  if (!width || !height) {
+    return "square" as const;
+  }
+
+  const ratio = width / height;
+  if (ratio <= 0.68) return "story" as const;
+  if (ratio <= 0.85) return "portrait" as const;
+  if (ratio >= 1.35) return "landscape" as const;
+  return "square" as const;
+}
+
+function canReplaceSourceOutput(reviewState: EditorSourceOutputRow["review_state"]) {
+  return reviewState === "pending_review" || reviewState === "needs_revision";
+}
+
+async function createEditorSaveArtifacts(params: {
+  workspaceId: string;
+  brandId: string;
+  deliverableId?: string | null;
+  projectId?: string | null;
+  postTypeId?: string | null;
+  creativeTemplateId?: string | null;
+  calendarItemId?: string | null;
+  sourceOutputId?: string | null;
+  width?: number;
+  height?: number;
+  createdBy: string;
+  fileName: string;
+  saveMode: "new" | "version" | "replace";
+}) {
+  const brandProfileVersion = await getActiveBrandProfile(params.brandId);
+  const creativeRequestId = randomId();
+  const promptPackageId = randomId();
+  const jobId = randomId();
+  const format = inferFormatFromDimensions(params.width, params.height);
+  const promptSummary = params.sourceOutputId
+    ? `Editor save from output ${params.sourceOutputId}`
+    : "Editor save";
+
+  await supabaseAdmin.from("creative_requests").insert({
+    id: creativeRequestId,
+    workspace_id: params.workspaceId,
+    brand_id: params.brandId,
+    deliverable_id: params.deliverableId ?? null,
+    project_id: params.projectId ?? null,
+    post_type_id: params.postTypeId ?? null,
+    creative_template_id: params.creativeTemplateId ?? null,
+    status: "compiled",
+    brief_json: {
+      brandId: params.brandId,
+      createMode: "post",
+      ...(params.deliverableId ? { deliverableId: params.deliverableId } : {}),
+      ...(params.projectId ? { projectId: params.projectId } : {}),
+      ...(params.postTypeId ? { postTypeId: params.postTypeId } : {}),
+      ...(params.creativeTemplateId ? { creativeTemplateId: params.creativeTemplateId } : {}),
+      ...(params.calendarItemId ? { calendarItemId: params.calendarItemId } : {}),
+      ...(params.sourceOutputId ? { sourceOutputId: params.sourceOutputId } : {}),
+      channel: "instagram-feed",
+      format,
+      goal: "Save edited output from editor",
+      prompt: "Persist the current editor composition as a saved output.",
+      copyMode: "manual",
+      referenceAssetIds: [],
+      includeBrandLogo: false,
+      includeReraQr: false,
+      logoAssetId: null
+    },
+    created_by: params.createdBy
+  });
+
+  await supabaseAdmin.from("prompt_packages").insert({
+    id: promptPackageId,
+    workspace_id: params.workspaceId,
+    brand_id: params.brandId,
+    deliverable_id: params.deliverableId ?? null,
+    project_id: params.projectId ?? null,
+    post_type_id: params.postTypeId ?? null,
+    creative_template_id: params.creativeTemplateId ?? null,
+    calendar_item_id: params.calendarItemId ?? null,
+    creative_request_id: creativeRequestId,
+    brand_profile_version_id: brandProfileVersion.id,
+    prompt_summary: promptSummary,
+    seed_prompt: promptSummary,
+    final_prompt: promptSummary,
+    aspect_ratio: deriveAspectRatio(format),
+    chosen_model: "editor-save",
+    template_type: null,
+    reference_strategy: "uploaded-references",
+    reference_asset_ids: [],
+    variations: [],
+    resolved_constraints: {
+      source: "editor-save",
+      saveMode: params.saveMode,
+      sourceOutputId: params.sourceOutputId ?? null
+    },
+    compiler_trace: {
+      pipeline: "editor-save",
+      createdByRoute: "/api/creative/editor-save"
+    },
+    created_by: params.createdBy
+  });
+
+  await supabaseAdmin.from("creative_jobs").insert({
+    id: jobId,
+    workspace_id: params.workspaceId,
+    brand_id: params.brandId,
+    deliverable_id: params.deliverableId ?? null,
+    project_id: params.projectId ?? null,
+    post_type_id: params.postTypeId ?? null,
+    creative_template_id: params.creativeTemplateId ?? null,
+    calendar_item_id: params.calendarItemId ?? null,
+    prompt_package_id: promptPackageId,
+    selected_template_id: null,
+    job_type: "final",
+    status: "completed",
+    provider: "editor-save",
+    provider_model: params.fileName,
+    provider_request_id: null,
+    requested_count: 1,
+    request_payload: {
+      source: "editor-save",
+      sourceOutputId: params.sourceOutputId ?? null,
+      saveMode: params.saveMode
+    },
+    webhook_payload: {},
+    submitted_at: new Date().toISOString(),
+    completed_at: new Date().toISOString(),
+    created_by: params.createdBy
+  });
+
+  return { creativeRequestId, promptPackageId, jobId };
 }
 
 type PromptComposerResult = {
@@ -271,6 +443,258 @@ function extractOpenRouterTextContent(payload: unknown): string | null {
 }
 
 export async function registerImageEditRoutes(app: FastifyInstance) {
+  app.post("/api/creative/editor-save", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    let brandIdValue: string | undefined;
+    let saveModeValue: string | undefined;
+    let sourceOutputIdValue: string | undefined;
+    let imagePart: UploadedImagePart | null = null;
+
+    for await (const part of request.parts({ limits: multipartLimits(1) })) {
+      if (part.type === "file") {
+        const uploadedPart: UploadedImagePart = {
+          filename: part.filename,
+          mimetype: part.mimetype,
+          buffer: await part.toBuffer()
+        };
+
+        if (part.fieldname === "image") {
+          imagePart = uploadedPart;
+        }
+
+        continue;
+      }
+
+      if (part.fieldname === "brandId") brandIdValue = readFieldValue(part.value);
+      if (part.fieldname === "saveMode") saveModeValue = readFieldValue(part.value);
+      if (part.fieldname === "sourceOutputId") sourceOutputIdValue = readFieldValue(part.value);
+    }
+
+    if (!imagePart) {
+      return reply.badRequest("Saved image is required");
+    }
+
+    if (!imagePart.mimetype.startsWith("image/")) {
+      return reply.badRequest("Saved upload must be an image");
+    }
+
+    const parsedFields = EditorSaveFieldsSchema.safeParse({
+      brandId: brandIdValue,
+      saveMode: saveModeValue,
+      sourceOutputId: sourceOutputIdValue
+    });
+
+    if (!parsedFields.success) {
+      return reply.badRequest(parsedFields.error.issues[0]?.message ?? "Invalid editor save request");
+    }
+
+    const workspace = await getPrimaryWorkspace(viewer);
+    if (!workspace) {
+      return reply.badRequest("Workspace not found");
+    }
+
+    const brand = await getBrand(parsedFields.data.brandId);
+    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
+
+    let sourceOutput: EditorSourceOutputRow | null = null;
+    if (parsedFields.data.sourceOutputId) {
+      const { data, error } = await supabaseAdmin
+        .from("creative_outputs")
+        .select(
+          "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by"
+        )
+        .eq("id", parsedFields.data.sourceOutputId)
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      sourceOutput = (data as EditorSourceOutputRow | null) ?? null;
+      if (sourceOutput && sourceOutput.workspace_id !== workspace.id) {
+        return reply.badRequest("Source output does not belong to this workspace");
+      }
+    }
+
+    let resolvedMode: "new" | "version" | "replace" = parsedFields.data.saveMode;
+    const replaceAllowed = sourceOutput ? canReplaceSourceOutput(sourceOutput.review_state) : false;
+    if (resolvedMode === "replace" && !replaceAllowed) {
+      resolvedMode = sourceOutput ? "version" : "new";
+    }
+    if (resolvedMode === "version" && !sourceOutput) {
+      resolvedMode = "new";
+    }
+
+    const outputId = resolvedMode === "replace" && sourceOutput ? sourceOutput.id : randomId();
+    const storagePath =
+      resolvedMode === "replace" && sourceOutput
+        ? sourceOutput.storage_path
+        : buildStoragePath({
+            workspaceId: workspace.id,
+            brandId: brand.id,
+            section: "outputs",
+            id: outputId,
+            fileName: imagePart.filename || `${slugify(outputId)}.png`
+          });
+
+    await uploadBufferToStorage(storagePath, imagePart.buffer, imagePart.mimetype, true);
+    const thumbnail = await createThumbnailFromBuffer(storagePath, imagePart.buffer).catch(() => null);
+
+    const now = new Date().toISOString();
+
+    if (resolvedMode === "replace" && sourceOutput) {
+      const { error } = await supabaseAdmin
+        .from("creative_outputs")
+        .update({
+          storage_path: storagePath,
+          thumbnail_storage_path: thumbnail?.thumbnailStoragePath ?? null,
+          thumbnail_width: thumbnail?.thumbnailWidth ?? null,
+          thumbnail_height: thumbnail?.thumbnailHeight ?? null,
+          thumbnail_bytes: thumbnail?.thumbnailBytes ?? null,
+          provider_url: null,
+          review_state: "pending_review",
+          latest_feedback_verdict: null,
+          reviewed_at: null,
+          created_by: viewer.userId,
+          edited_from_output_id: sourceOutput.id,
+          metadata_json: {
+            source: "editor-save",
+            saveMode: "replace"
+          }
+        })
+        .eq("id", sourceOutput.id);
+
+      if (error) {
+        throw error;
+      }
+    } else {
+      const jobArtifacts = await createEditorSaveArtifacts({
+        workspaceId: workspace.id,
+        brandId: brand.id,
+        deliverableId: sourceOutput?.deliverable_id ?? null,
+        projectId: sourceOutput?.project_id ?? null,
+        postTypeId: sourceOutput?.post_type_id ?? null,
+        creativeTemplateId: sourceOutput?.creative_template_id ?? null,
+        calendarItemId: sourceOutput?.calendar_item_id ?? null,
+        sourceOutputId: sourceOutput?.id ?? null,
+        createdBy: viewer.userId,
+        fileName: imagePart.filename,
+        saveMode: resolvedMode
+      });
+
+      const rootOutputId = resolvedMode === "version" && sourceOutput
+        ? sourceOutput.root_output_id ?? sourceOutput.id
+        : outputId;
+      const versionNumber = resolvedMode === "version" && sourceOutput
+        ? Math.max(1, sourceOutput.version_number + 1)
+        : 1;
+
+      if (resolvedMode === "version" && sourceOutput) {
+        const { error: latestVersionError } = await supabaseAdmin
+          .from("creative_outputs")
+          .update({ is_latest_version: false })
+          .or(`id.eq.${rootOutputId},root_output_id.eq.${rootOutputId}`);
+        if (latestVersionError) {
+          throw latestVersionError;
+        }
+      }
+
+      const { error } = await supabaseAdmin.from("creative_outputs").insert({
+        id: outputId,
+        workspace_id: workspace.id,
+        brand_id: brand.id,
+        deliverable_id: sourceOutput?.deliverable_id ?? null,
+        project_id: sourceOutput?.project_id ?? null,
+        post_type_id: sourceOutput?.post_type_id ?? null,
+        creative_template_id: sourceOutput?.creative_template_id ?? null,
+        calendar_item_id: sourceOutput?.calendar_item_id ?? null,
+        job_id: jobArtifacts.jobId,
+        post_version_id: null,
+        kind: "final",
+        storage_path: storagePath,
+        thumbnail_storage_path: thumbnail?.thumbnailStoragePath ?? null,
+        thumbnail_width: thumbnail?.thumbnailWidth ?? null,
+        thumbnail_height: thumbnail?.thumbnailHeight ?? null,
+        thumbnail_bytes: thumbnail?.thumbnailBytes ?? null,
+        provider_url: null,
+        output_index: sourceOutput?.output_index ?? 0,
+        parent_output_id: resolvedMode === "version" && sourceOutput ? sourceOutput.id : null,
+        root_output_id: rootOutputId,
+        edited_from_output_id: sourceOutput?.id ?? null,
+        version_number: versionNumber,
+        is_latest_version: true,
+        review_state: "pending_review",
+        latest_feedback_verdict: null,
+        reviewed_at: null,
+        metadata_json: {
+          source: "editor-save",
+          saveMode: resolvedMode
+        },
+        created_by: viewer.userId
+      });
+
+      if (error) {
+        throw error;
+      }
+    }
+
+    const { data: savedOutput, error: savedOutputError } = await supabaseAdmin
+      .from("creative_outputs")
+      .select(
+        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by"
+      )
+      .eq("id", outputId)
+      .maybeSingle();
+
+    if (savedOutputError) {
+      throw savedOutputError;
+    }
+
+    if (!savedOutput) {
+      return reply.notFound("Saved output not found");
+    }
+
+    const signedUrls = await createSignedImageUrls(savedOutput.storage_path, savedOutput.thumbnail_storage_path);
+
+    return EditorSaveOutputResponseSchema.parse({
+      output: CreativeOutputSchema.parse({
+        id: savedOutput.id,
+        workspaceId: savedOutput.workspace_id,
+        brandId: savedOutput.brand_id,
+        deliverableId: savedOutput.deliverable_id,
+        projectId: savedOutput.project_id,
+        postTypeId: savedOutput.post_type_id,
+        creativeTemplateId: savedOutput.creative_template_id,
+        calendarItemId: savedOutput.calendar_item_id,
+        jobId: savedOutput.job_id,
+        postVersionId: savedOutput.post_version_id,
+        kind: savedOutput.kind,
+        storagePath: savedOutput.storage_path,
+        thumbnailStoragePath: savedOutput.thumbnail_storage_path,
+        providerUrl: savedOutput.provider_url,
+        outputIndex: savedOutput.output_index,
+        parentOutputId: savedOutput.parent_output_id,
+        rootOutputId: savedOutput.root_output_id,
+        editedFromOutputId: savedOutput.edited_from_output_id,
+        versionNumber: savedOutput.version_number,
+        isLatestVersion: savedOutput.is_latest_version,
+        reviewState: savedOutput.review_state,
+        latestVerdict: savedOutput.latest_feedback_verdict,
+        reviewedAt: savedOutput.reviewed_at,
+        createdBy: savedOutput.created_by,
+        previewUrl: signedUrls.originalUrl,
+        thumbnailUrl: signedUrls.thumbnailUrl,
+        originalUrl: signedUrls.originalUrl
+      }),
+      resolvedMode,
+      canReplaceSource: replaceAllowed
+    });
+  });
+
   app.post("/api/creative/image-edit-compose-prompt", { preHandler: app.authenticate }, async (request, reply) => {
     const viewer = request.viewer;
     if (!viewer) {

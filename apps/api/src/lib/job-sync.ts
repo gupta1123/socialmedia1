@@ -1,9 +1,10 @@
-import { createSignedUrl, ingestRemoteImageToStorage } from "./storage.js";
+import { createSignedPreviewUrl, ingestRemoteImageToStorage } from "./storage.js";
 import { supabaseAdmin } from "./supabase.js";
 import { getFalResult, getFalStatus } from "./fal.js";
 import { buildStoragePath, randomId } from "./utils.js";
 import { ensurePostVersionForOutput } from "./deliverable-flow.js";
 import { env } from "./config.js";
+import { createThumbnailFromStorage } from "./thumbnails.js";
 import {
   isReservationAlreadySettledError,
   releaseWorkspaceCreditReservation,
@@ -297,6 +298,7 @@ export async function persistCompletedJobImages(row: PersistableJobRow, images: 
       });
 
       await ingestRemoteImageToStorage(storagePath, image.url);
+      const thumbnail = await createThumbnailFromStorage(storagePath).catch(() => null);
 
       return {
         id: outputId,
@@ -311,6 +313,10 @@ export async function persistCompletedJobImages(row: PersistableJobRow, images: 
         post_version_id: null,
         kind: row.job_type,
         storage_path: storagePath,
+        thumbnail_storage_path: thumbnail?.thumbnailStoragePath ?? null,
+        thumbnail_width: thumbnail?.thumbnailWidth ?? null,
+        thumbnail_height: thumbnail?.thumbnailHeight ?? null,
+        thumbnail_bytes: thumbnail?.thumbnailBytes ?? null,
         provider_url: image.url,
         output_index: index,
         created_by: row.created_by
@@ -367,8 +373,8 @@ export async function persistCompletedJobImages(row: PersistableJobRow, images: 
   }
 }
 
-export async function getSignedPreview(storagePath: string) {
-  return createSignedUrl(storagePath).catch(() => null);
+export async function getSignedPreview(storagePath: string, thumbnailStoragePath?: string | null) {
+  return createSignedPreviewUrl(storagePath, thumbnailStoragePath).catch(() => null);
 }
 
 function resolveFalEndpoint(jobType: "style_seed" | "final", providerModel: string) {

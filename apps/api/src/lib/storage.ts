@@ -67,6 +67,23 @@ export async function createSignedUrl(path: string, expiresIn = 3600) {
   return data.signedUrl;
 }
 
+export async function createSignedImageUrls(storagePath: string, thumbnailStoragePath?: string | null) {
+  const [originalUrl, thumbnailCandidate] = await Promise.all([
+    createSignedUrl(storagePath).catch(() => null),
+    thumbnailStoragePath ? createSignedUrl(thumbnailStoragePath).catch(() => null) : Promise.resolve(null)
+  ]);
+
+  return {
+    originalUrl: originalUrl ?? undefined,
+    thumbnailUrl: thumbnailCandidate ?? originalUrl ?? undefined
+  };
+}
+
+export async function createSignedPreviewUrl(storagePath: string, thumbnailStoragePath?: string | null) {
+  const urls = await createSignedImageUrls(storagePath, thumbnailStoragePath);
+  return urls.thumbnailUrl ?? null;
+}
+
 export async function ingestRemoteImageToStorage(path: string, sourceUrl: string) {
   if (sourceUrl.startsWith("data:")) {
     const { buffer, contentType } = parseDataUrl(sourceUrl);

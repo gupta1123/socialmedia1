@@ -114,11 +114,23 @@ const primaryNavigation = [
 
 const superAdminNavigationItem = {
   href: "/studio/admin",
-  label: "Admin",
+  label: "Platform Admin",
   icon: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 3l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V7l8-4z" />
       <path d="M9.5 12l2 2 3.5-4" />
+    </svg>
+  )
+};
+
+const workspaceAdminNavigationItem = {
+  href: "/studio/workspace-admin",
+  label: "Workspace Admin",
+  icon: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3 4 7v6c0 4.5 3.5 7 8 8 4.5-1 8-3.5 8-8V7l-8-4Z" />
+      <path d="M9 12h6" />
+      <path d="M12 9v6" />
     </svg>
   )
 };
@@ -235,6 +247,71 @@ const adminSidebarNavigation = [
   }
 ];
 
+const workspaceAdminSidebarNavigation = [
+  {
+    category: "Mode",
+    items: [
+      {
+        href: "/studio",
+        label: "Back to App",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m15 18-6-6 6-6" />
+            <path d="M9 12h12" />
+          </svg>
+        )
+      }
+    ]
+  },
+  {
+    category: "Workspace",
+    items: [
+      {
+        href: "/studio/workspace-admin",
+        label: "Overview",
+        matchPath: "/studio/workspace-admin",
+        excludeMatchPrefixes: ["/studio/workspace-admin/team", "/studio/workspace-admin/posting-windows"],
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 13h6V5H4z" />
+            <path d="M14 19h6V5h-6z" />
+            <path d="M4 19h6v-2H4z" />
+          </svg>
+        )
+      },
+      {
+        href: "/studio/workspace-admin/team",
+        label: "Team Access",
+        matchPath: "/studio/workspace-admin/team",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" />
+            <circle cx="9.5" cy="7" r="3.5" />
+            <path d="M20 8v6" />
+            <path d="M17 11h6" />
+          </svg>
+        )
+      },
+      {
+        href: "/studio/workspace-admin/posting-windows",
+        label: "Posting Windows",
+        matchPath: "/studio/workspace-admin/posting-windows",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <path d="M16 2v4" />
+            <path d="M8 2v4" />
+            <path d="M3 10h18" />
+            <path d="M8 14h.01" />
+            <path d="M12 14h.01" />
+            <path d="M16 14h.01" />
+          </svg>
+        )
+      },
+    ]
+  }
+];
+
 const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   "/studio": {
     title: "Home",
@@ -292,9 +369,17 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
     title: "Gallery",
     subtitle: "Browse generated images across review states in one place.",
   },
-  "/studio/settings": {
-    title: "Settings",
-    subtitle: "Save preferred posting windows so scheduling forms can suggest your usual channel and time combinations.",
+  "/studio/workspace-admin": {
+    title: "Workspace Admin",
+    subtitle: "Workspace-level access and member management.",
+  },
+  "/studio/workspace-admin/team": {
+    title: "Team Access",
+    subtitle: "Add users, manage workspace access, and set passwords directly.",
+  },
+  "/studio/workspace-admin/posting-windows": {
+    title: "Posting Windows",
+    subtitle: "Manage default posting slots used as scheduling suggestions.",
   },
   "/studio/admin/credits": {
     title: "Admin Credits",
@@ -367,16 +452,26 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   const isEditorRoute = pathname === "/studio/ai-edit" || pathname.startsWith("/studio/ai-edit/");
   const isCalendarRoute = pathname === "/studio/calendar" || pathname.startsWith("/studio/calendar/");
   const isAdminRoute = pathname === "/studio/admin" || pathname.startsWith("/studio/admin/");
+  const isWorkspaceAdminRoute = pathname === "/studio/workspace-admin" || pathname.startsWith("/studio/workspace-admin/");
   const isPlatformAdmin = bootstrap?.viewer.isPlatformAdmin === true;
+  const workspaceRole = bootstrap?.workspace?.role ?? null;
+  const isWorkspaceAdmin = workspaceRole === "owner" || workspaceRole === "admin";
   const showAdminSidebar = isAdminRoute && isPlatformAdmin;
+  const showWorkspaceAdminSidebar = isWorkspaceAdminRoute && isWorkspaceAdmin;
   const navigation = useMemo(
     () =>
       showAdminSidebar
         ? adminSidebarNavigation
-        : isPlatformAdmin
-          ? [...primaryNavigation, superAdminNavigationItem]
-          : primaryNavigation,
-    [showAdminSidebar, isPlatformAdmin]
+        : showWorkspaceAdminSidebar
+          ? workspaceAdminSidebarNavigation
+          : isPlatformAdmin && isWorkspaceAdmin
+            ? [...primaryNavigation, workspaceAdminNavigationItem, superAdminNavigationItem]
+            : isWorkspaceAdmin
+              ? [...primaryNavigation, workspaceAdminNavigationItem]
+              : isPlatformAdmin
+                ? [...primaryNavigation, superAdminNavigationItem]
+                : primaryNavigation,
+    [showAdminSidebar, showWorkspaceAdminSidebar, isPlatformAdmin, isWorkspaceAdmin]
   );
   const shellCollapsed = isCreateRoute ? !createSidebarExpanded : isEditorRoute ? !editorSidebarExpanded : collapsed;
   const pageMeta = resolvePageMeta(pathname);
@@ -534,8 +629,8 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
 
   const topbarTitle = topbarMeta?.title ?? pageMeta.title;
   const topbarSubtitle = topbarMeta?.subtitle ?? pageMeta.subtitle;
-  const sidebarEyebrow = showAdminSidebar ? "Platform admin" : "Workspace";
-  const sidebarWordmark = showAdminSidebar ? "Admin Console" : "Briefly Social";
+  const sidebarEyebrow = showAdminSidebar ? "Platform admin" : showWorkspaceAdminSidebar ? "Workspace admin" : "Workspace";
+  const sidebarWordmark = showAdminSidebar ? "Admin Console" : showWorkspaceAdminSidebar ? "Admin Workspace" : "Briefly Social";
 
   return (
     <div className={shellCollapsed ? "workspace-shell sidebar-collapsed" : "workspace-shell"}>
@@ -653,22 +748,6 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
                 </svg>
                 <span>{darkMode ? "Switch to Light" : "Switch to Dark"}</span>
               </button>
-
-              <Link className="popover-item" href="/studio/settings" onClick={() => setShowPopover(false)} prefetch={false}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 3v4" />
-                  <path d="M12 17v4" />
-                  <path d="M4 8h8" />
-                  <path d="M4 16h4" />
-                  <path d="M12 8h8" />
-                  <path d="M16 16h4" />
-                  <circle cx="15" cy="16" r="2" />
-                  <circle cx="10" cy="8" r="2" />
-                </svg>
-                <span>Settings</span>
-              </Link>
-
-              <div className="popover-divider" />
 
               <button
                 className="popover-item signout-btn"
@@ -855,6 +934,18 @@ function resolvePageMeta(pathname: string) {
     return PAGE_META["/studio/calendar"] ?? { title: "Calendar", subtitle: "" };
   }
 
+  if (pathname.startsWith("/studio/workspace-admin/team")) {
+    return PAGE_META["/studio/workspace-admin/team"] ?? { title: "Team Access", subtitle: "" };
+  }
+
+  if (pathname.startsWith("/studio/workspace-admin/posting-windows")) {
+    return PAGE_META["/studio/workspace-admin/posting-windows"] ?? { title: "Posting Windows", subtitle: "" };
+  }
+
+  if (pathname === "/studio/workspace-admin" || pathname.startsWith("/studio/workspace-admin/")) {
+    return PAGE_META["/studio/workspace-admin"] ?? { title: "Workspace Admin", subtitle: "" };
+  }
+
   if (pathname.startsWith("/studio/admin/credits/ledger")) {
     return PAGE_META["/studio/admin/credits/ledger"] ?? { title: "Credit Ledger", subtitle: "" };
   }
@@ -907,8 +998,8 @@ function resolveBootstrapMode(pathname: string) {
     pathname.startsWith("/studio/gallery/") ||
     pathname === "/studio/library" ||
     pathname.startsWith("/studio/library/") ||
-    pathname === "/studio/settings" ||
-    pathname.startsWith("/studio/settings/") ||
+    pathname === "/studio/workspace-admin" ||
+    pathname.startsWith("/studio/workspace-admin/") ||
     pathname === "/studio/admin" ||
     pathname.startsWith("/studio/admin/") ||
     pathname === "/studio/brands" ||

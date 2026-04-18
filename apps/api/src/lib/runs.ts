@@ -83,8 +83,14 @@ type OutputRow = {
   post_version_id: string | null;
   kind: CreativeOutputRecord["kind"];
   storage_path: string;
+  thumbnail_storage_path: string | null;
   provider_url: string | null;
   output_index: number;
+  parent_output_id: string | null;
+  root_output_id: string | null;
+  edited_from_output_id: string | null;
+  version_number: number;
+  is_latest_version: boolean;
   review_state: CreativeOutputRecord["reviewState"];
   latest_feedback_verdict: CreativeOutputRecord["latestVerdict"];
   reviewed_at: string | null;
@@ -326,7 +332,7 @@ async function listOutputsByJobIds(jobIds: string[]) {
   const { data, error } = await supabaseAdmin
     .from("creative_outputs")
     .select(
-      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at, created_by"
+      "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by"
     )
     .in("job_id", jobIds);
 
@@ -585,8 +591,14 @@ function mapOutputRow(row: OutputRow, outputIndex = row.output_index): CreativeO
     postVersionId: row.post_version_id,
     kind: row.kind,
     storagePath: row.storage_path,
+    thumbnailStoragePath: row.thumbnail_storage_path,
     providerUrl: row.provider_url,
     outputIndex,
+    parentOutputId: row.parent_output_id,
+    rootOutputId: row.root_output_id,
+    editedFromOutputId: row.edited_from_output_id,
+    versionNumber: row.version_number,
+    isLatestVersion: row.is_latest_version,
     reviewState: row.review_state,
     latestVerdict: row.latest_feedback_verdict,
     reviewedAt: row.reviewed_at,

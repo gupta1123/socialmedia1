@@ -45,6 +45,7 @@ import type {
   CreativeBrief,
   DeliverableDetail,
   DeliverableRecord,
+  EditorSaveOutputResponse,
   ExternalPostReviewMode,
   ExternalPostUploadResponse,
   FestivalRecord,
@@ -820,6 +821,32 @@ export function applyMaskedImageEdit(
   });
 }
 
+export function saveEditedCreativeOutput(
+  token: string,
+  payload: {
+    brandId: string;
+    saveMode: "new" | "version" | "replace";
+    sourceOutputId?: string | null;
+    image: File | Blob;
+    imageFileName?: string;
+  }
+) {
+  const body = new FormData();
+  body.append("brandId", payload.brandId);
+  body.append("saveMode", payload.saveMode);
+
+  if (payload.sourceOutputId) {
+    body.append("sourceOutputId", payload.sourceOutputId);
+  }
+
+  body.append("image", payload.image, payload.imageFileName ?? "editor-save.png");
+
+  return request<EditorSaveOutputResponse>("/api/creative/editor-save", token, {
+    method: "POST",
+    body
+  });
+}
+
 export function updateDeliverable(token: string, deliverableId: string, payload: UpdateDeliverableInput) {
   return request<DeliverableRecord>(`/api/deliverables/${deliverableId}`, token, {
     method: "PATCH",
@@ -863,13 +890,21 @@ export function approvePostVersion(
 
 export function getReviewQueue(
   token: string,
-  filters?: { brandId?: string; deliverableId?: string; scope?: "my" | "team" | "unassigned" }
+  filters?: {
+    brandId?: string;
+    deliverableId?: string;
+    scope?: "my" | "team" | "unassigned";
+    limit?: number;
+    offset?: number;
+  }
 ) {
   return request<ReviewQueueEntry[]>(
     withQuery("/api/review-queue", {
       brandId: filters?.brandId,
       deliverableId: filters?.deliverableId,
-      scope: filters?.scope
+      scope: filters?.scope,
+      limit: typeof filters?.limit === "number" ? String(filters.limit) : undefined,
+      offset: typeof filters?.offset === "number" ? String(filters.offset) : undefined
     }),
     token
   );
@@ -938,6 +973,8 @@ export function getQueue(
     statusGroup?: "todo" | "in_progress" | "ready_to_ship" | "done" | "blocked";
     planningMode?: "campaign" | "series" | "one_off" | "always_on" | "ad_hoc";
     dueWindow?: "today" | "week" | "overdue";
+    limit?: number;
+    offset?: number;
   }
 ) {
   return request<QueueEntry[]>(
@@ -947,7 +984,9 @@ export function getQueue(
       projectId: filters?.projectId,
       statusGroup: filters?.statusGroup,
       planningMode: filters?.planningMode,
-      dueWindow: filters?.dueWindow
+      dueWindow: filters?.dueWindow,
+      limit: typeof filters?.limit === "number" ? String(filters.limit) : undefined,
+      offset: typeof filters?.offset === "number" ? String(filters.offset) : undefined
     }),
     token
   );
@@ -1299,11 +1338,14 @@ export function updateBrand(token: string, brandId: string, payload: UpdateBrand
 export function uploadBrandAsset(
   token: string,
   brandId: string,
-  payload: { file: File; kind: string; label: string }
+  payload: { file: File; kind: string; label: string; projectId?: string | null }
 ) {
   const body = new FormData();
   body.append("kind", payload.kind);
   body.append("label", payload.label);
+  if (payload.projectId) {
+    body.append("projectId", payload.projectId);
+  }
   body.append("file", payload.file);
 
   return request<{ id: string; storagePath: string }>(`/api/brands/${brandId}/assets`, token, {

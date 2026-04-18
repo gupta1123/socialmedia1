@@ -2506,7 +2506,7 @@ export default function CreatePage() {
                     emptyLabel="No source post"
                     helper="Choose the source post."
                     label="Source post"
-                    mediaSrc={selectedSourceOutput?.previewUrl}
+                    mediaSrc={selectedSourceOutput?.originalUrl ?? selectedSourceOutput?.previewUrl}
                     onAction={() => setActivePicker("output")}
                     onClear={selectedSourceOutput ? clearSourceOutput : undefined}
                     value={
@@ -2719,8 +2719,8 @@ export default function CreatePage() {
                                   onClick={() => setActivePicker("references")}
                                   type="button"
                                 >
-                                  {asset.previewUrl ? (
-                                    <img alt={asset.label} src={asset.previewUrl} />
+                                  {asset.thumbnailUrl ?? asset.previewUrl ? (
+                                    <img alt={asset.label} src={asset.thumbnailUrl ?? asset.previewUrl} />
                                   ) : (
                                     <span>{getInitials(asset.label)}</span>
                                   )}
@@ -2767,8 +2767,11 @@ export default function CreatePage() {
                       type="button"
                     >
                       <div className="create-brand-asset-toggle-preview">
-                        {selectedLogoAsset?.previewUrl ? (
-                          <img alt={selectedLogoAsset.label} src={selectedLogoAsset.previewUrl} />
+                        {selectedLogoAsset?.thumbnailUrl ?? selectedLogoAsset?.previewUrl ? (
+                          <img
+                            alt={selectedLogoAsset.label}
+                            src={selectedLogoAsset?.thumbnailUrl ?? selectedLogoAsset?.previewUrl}
+                          />
                         ) : selectedLogoAsset ? (
                           <span>{getInitials(selectedLogoAsset.label)}</span>
                         ) : (
@@ -2803,8 +2806,8 @@ export default function CreatePage() {
                             }
                             type="button"
                           >
-                            {asset.previewUrl ? (
-                              <img alt={asset.label} src={asset.previewUrl} />
+                            {asset.thumbnailUrl ?? asset.previewUrl ? (
+                              <img alt={asset.label} src={asset.thumbnailUrl ?? asset.previewUrl} />
                             ) : (
                               <span>{getInitials(asset.label)}</span>
                             )}
@@ -3289,7 +3292,7 @@ export default function CreatePage() {
                       className="candidate-media"
                       style={{ aspectRatio: compiledPlacement?.aspectRatio === "9:16" ? "9/16" : "1/1" }}
                     >
-                      {output.previewUrl ? (
+                      {output.thumbnailUrl ?? output.previewUrl ? (
                         <ImagePreviewTrigger
                           alt={`Option ${output.outputIndex + 1} for ${promptPackage.promptSummary}`}
                           actions={[
@@ -3301,15 +3304,25 @@ export default function CreatePage() {
                             output.reviewState.replaceAll("_", " ")
                           ]}
                           details={[
-                            { label: "Prompt", value: promptPackage.promptSummary },
-                            { label: "State", value: output.reviewState.replaceAll("_", " ") }
+                            { label: "State", value: output.reviewState.replaceAll("_", " ") },
+                            {
+                              label: "Source",
+                              value: describeFinalOutputSource(
+                                output.jobId,
+                                runDetail?.jobs ?? [],
+                                seedTemplateLabelById,
+                                briefForm.selectedReferenceAssetIds.length,
+                                Boolean(briefForm.sourceOutputId),
+                                getTemplateFamilyLabel(selectedReusableTemplate)
+                              )
+                            }
                           ]}
-                          src={output.previewUrl}
+                          src={output.originalUrl ?? output.previewUrl}
                           subtitle={promptPackage.promptSummary}
                           title={`Option ${output.outputIndex + 1}`}
-                          meta={promptPackage.promptSummary}
+                          meta={`Output ${output.outputIndex + 1}`}
                         >
-                          <img alt="" src={output.previewUrl} />
+                          <img alt="" src={output.thumbnailUrl ?? output.previewUrl} />
                         </ImagePreviewTrigger>
                       ) : (
                         <div className="create-generating-shimmer" />
@@ -3894,8 +3907,8 @@ export default function CreatePage() {
                           type="button"
                         >
                           <div className="create-gallery-media">
-                            {output.previewUrl ? (
-                              <img alt={deliverableTitle} src={output.previewUrl} />
+                            {output.thumbnailUrl ?? output.previewUrl ? (
+                              <img alt={deliverableTitle} src={output.thumbnailUrl ?? output.previewUrl} />
                             ) : (
                               <div className="create-gallery-empty-swatch">{getInitials(deliverableTitle)}</div>
                             )}
@@ -3927,8 +3940,8 @@ export default function CreatePage() {
                           type="button"
                         >
                           <div className="create-gallery-media">
-                            {asset.previewUrl ? (
-                              <img alt={asset.label} src={asset.previewUrl} />
+                            {asset.thumbnailUrl ?? asset.previewUrl ? (
+                              <img alt={asset.label} src={asset.thumbnailUrl ?? asset.previewUrl} />
                             ) : (
                               <div className="create-gallery-empty-swatch">{getInitials(asset.label)}</div>
                             )}
