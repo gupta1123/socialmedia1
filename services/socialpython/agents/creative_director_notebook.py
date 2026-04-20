@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import MethodType
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
@@ -13,7 +14,7 @@ try:
     from agno.agent import Agent
     from agno.models.openai import OpenAIResponses
     from agno.run import RunContext
-    from agno.tools import tool
+    from agno.tools import Function, tool
 except ImportError as exc:  # pragma: no cover - exercised only when deps missing
     raise SystemExit(f"Agno dependencies are missing: {exc}") from exc
 
@@ -151,6 +152,56 @@ def _format_skill_validation_error(exc: Exception) -> str:
     return str(exc)
 
 
+def _instruction_only_skill_tools(skills_runtime: Any) -> list[Any]:
+    return [
+        Function(
+            name="get_skill_instructions",
+            description="Load the full instructions for a skill. Use this when you need to follow a skill's guidance.",
+            entrypoint=skills_runtime._get_skill_instructions,
+        )
+    ]
+
+
+def _instruction_only_skill_prompt(skills_runtime: Any) -> str:
+    skills = list(getattr(skills_runtime, "_skills", {}).values())
+    if not skills:
+        return ""
+
+    lines = [
+        "<skills_system>",
+        "",
+        "## Available Skills",
+        "Use `get_skill_instructions(skill_name)` to load a skill's full guidance.",
+        "Only the instruction-loading skill tool is available in this runtime.",
+        "Do not call `get_skill_reference` or `get_skill_script`; these tools are intentionally unavailable because this skill pack does not ship references or scripts.",
+        "",
+    ]
+    for skill in skills:
+        lines.append("<skill>")
+        lines.append(f"  <name>{skill.name}</name>")
+        lines.append(f"  <description>{skill.description}</description>")
+        lines.append("</skill>")
+    lines.append("")
+    lines.append("</skills_system>")
+    return "\n".join(lines)
+
+
+def _bind_instruction_only_skill_runtime(skills_runtime: Any) -> Any:
+    allow_reference_tools = (
+        os.getenv("AGNO_SKILLS_ALLOW_REFERENCE_TOOLS", "false").lower() == "true"
+    )
+    if allow_reference_tools:
+        return skills_runtime
+
+    skills_runtime.get_tools = MethodType(
+        lambda runtime: _instruction_only_skill_tools(runtime), skills_runtime
+    )
+    skills_runtime.get_system_prompt_snippet = MethodType(
+        lambda runtime: _instruction_only_skill_prompt(runtime), skills_runtime
+    )
+    return skills_runtime
+
+
 def build_skills_runtime() -> tuple[Any, list[str]]:
     if LocalSkills is None or Skills is None:
         raise RuntimeError("Agno Skills support is unavailable in this runtime.")
@@ -172,12 +223,24 @@ def build_skills_runtime() -> tuple[Any, list[str]]:
     if not skill_names:
         raise RuntimeError(f"Agno Skills loaded no skills from {SKILLS_DIR}")
 
+    skills_runtime = _bind_instruction_only_skill_runtime(skills_runtime)
+
     return skills_runtime, skill_names
 
 
 def get_registered_skill_names() -> list[str]:
     _, skill_names = build_skills_runtime()
     return skill_names
+
+
+def get_registered_skill_tool_names() -> list[str]:
+    skills_runtime, _ = build_skills_runtime()
+    tools = skills_runtime.get_tools()
+    return [
+        str(getattr(skill_tool, "name", ""))
+        for skill_tool in tools
+        if getattr(skill_tool, "name", None)
+    ]
 
 
 def reload_skills() -> list[str]:

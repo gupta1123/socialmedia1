@@ -231,11 +231,16 @@ def runtime_diagnostics(agent: Any | None = None) -> dict[str, Any]:
         skill_names = []
         skill_runtime_error = str(exc)
 
-    tool_names = (
-        ["get_skill_instructions", "get_skill_reference", "get_skill_script"]
-        if skill_names
-        else []
-    )
+    if skill_names and hasattr(CREATIVE_DIRECTOR, "get_registered_skill_tool_names"):
+        try:
+            tool_names = CREATIVE_DIRECTOR.get_registered_skill_tool_names()
+        except Exception as exc:  # pragma: no cover - diagnostics only
+            tool_names = ["get_skill_instructions"]
+            skill_runtime_error = skill_runtime_error or str(exc)
+    elif skill_names:
+        tool_names = ["get_skill_instructions"]
+    else:
+        tool_names = []
     skills_runtime_available = bool(skill_names)
     supabase_url = os.getenv("SUPABASE_URL", "").strip()
     supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
