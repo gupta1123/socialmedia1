@@ -2338,6 +2338,7 @@ export default function CreatePage() {
             <div className="create-section-body">
               {isPostMode ? (
                 <>
+                  {/* Post tasks are hidden for now. Keep this block so task linking can be restored later.
                   <div className="create-mode-switch" role="tablist" aria-label="Post source">
                     <button
                       className={`create-mode-option ${!canUseDeliverableInheritance ? "is-active" : ""}`}
@@ -2383,7 +2384,7 @@ export default function CreatePage() {
                     <div className="create-task-card create-task-card-minimal">
                       <p className="create-hint">Using this task’s project, post type, placement, and brief.</p>
                     </div>
-                  ) : null}
+                  ) : null} */}
                 </>
               ) : null}
 
@@ -2922,8 +2923,8 @@ export default function CreatePage() {
                   <div className="create-copy-mode-card">
                     <div className="create-copy-mode-header">
                       <div>
-                        <p className="create-copy-mode-label">On-image copy</p>
-                        <strong>{isAutoCopyMode ? "AI writes suitable copy" : "You control the copy"}</strong>
+                        <p className="create-copy-mode-label">Copy</p>
+                        <strong>{isAutoCopyMode ? "AI decides text" : "Manual text"}</strong>
                       </div>
                       <div className="create-mode-switch" role="tablist" aria-label="On-image copy mode">
                         <button
@@ -2965,11 +2966,7 @@ export default function CreatePage() {
                       </div>
                     </div>
 
-                    {isAutoCopyMode ? (
-                      <p className="create-hint">
-                        The agent will decide whether the image needs a headline or CTA, then write concise copy that fits the brief and format.
-                      </p>
-                    ) : (
+                    {!isAutoCopyMode ? (
                       <>
                         <label className="create-field-label">
                           Offer / CTA
@@ -2991,7 +2988,7 @@ export default function CreatePage() {
                           />
                         </label>
                       </>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -3459,7 +3456,7 @@ export default function CreatePage() {
           </div>
         )}
 
-        {activePicker ? (
+        {activePicker && activePicker !== "post-task" ? (
           <div className="drawer-overlay create-picker-overlay" onClick={() => setActivePicker(null)}>
             <div
               className={`drawer-content create-picker-dialog ${
@@ -3505,6 +3502,7 @@ export default function CreatePage() {
                   ) : null}
                 </div>
 
+                {/* Post task picker hidden for now. Keep implementation commented for quick restore.
                 {activePicker === "post-task" ? (
                   <>
                     <div className="create-picker-filters">
@@ -3626,7 +3624,7 @@ export default function CreatePage() {
                       </div>
                     ) : null}
                   </div>
-                ) : null}
+                ) : null} */}
 
                 {activePicker === "project" ? (
                   <div className="create-picker-list">

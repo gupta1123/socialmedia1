@@ -153,7 +153,13 @@ type StudioContextValue = {
   refresh: (preferredBrandId?: string) => Promise<void>;
   createBrandRecord: () => Promise<boolean>;
   uploadReference: (file: File, label: string) => Promise<boolean>;
-  uploadBrandAssetFile: (file: File, label: string, kind: AssetKind, projectId?: string | null) => Promise<boolean>;
+  uploadBrandAssetFile: (
+    file: File,
+    label: string,
+    kind: AssetKind,
+    projectId?: string | null,
+    options?: { reraNumber?: string }
+  ) => Promise<boolean>;
   compilePromptPackage: (options?: { silentSuccess?: boolean }) => Promise<PromptPackage | null>;
   generateSeeds: () => Promise<void>;
   generateSeedsForPackage: (promptPackageId: string, promptPackageOverride?: PromptPackage) => Promise<boolean>;
@@ -659,7 +665,13 @@ export function StudioProvider({
     return uploadBrandAssetFile(file, label, "reference");
   }
 
-  async function uploadBrandAssetFile(file: File, label: string, kind: AssetKind, projectId?: string | null) {
+  async function uploadBrandAssetFile(
+    file: File,
+    label: string,
+    kind: AssetKind,
+    projectId?: string | null,
+    options?: { reraNumber?: string }
+  ) {
     if (!sessionToken || !activeBrandId) {
       return false;
     }
@@ -672,7 +684,8 @@ export function StudioProvider({
         file,
         kind,
         label,
-        ...(projectId !== undefined ? { projectId } : {})
+        ...(projectId !== undefined ? { projectId } : {}),
+        ...(options?.reraNumber ? { reraNumber: options.reraNumber } : {})
       });
       await refresh(activeBrandId);
       setMessage("Asset uploaded.");
@@ -974,7 +987,18 @@ function splitList(value: string) {
 function normalizeBootstrapPayload(payload: BootstrapResponse): BootstrapResponse {
   return {
     ...payload,
-    aiEdit: payload.aiEdit ?? { flow: "mask" }
+    aiEdit: payload.aiEdit ?? { flow: "mask" },
+    workspaceComplianceSettings: payload.workspaceComplianceSettings ?? (
+      payload.workspace
+        ? {
+            workspaceId: payload.workspace.id,
+            reraAuthorityLabel: "MahaRERA",
+            reraWebsiteUrl: "https://maharera.maharashtra.gov.in",
+            reraTextColor: "#111111",
+            updatedAt: null
+          }
+        : null
+    )
   };
 }
 

@@ -11,6 +11,7 @@ import {
   type QueueStatusGroup,
   SetWorkspaceMemberPasswordSchema,
   SeriesSchema,
+  UpdateWorkspaceComplianceSettingsSchema,
   UpdateSeriesSchema,
   UpdateWorkspaceMemberRoleSchema,
   WorkspaceMemberDeleteResponseSchema,
@@ -19,9 +20,16 @@ import {
   WorkspaceMemberRoleUpdateResponseSchema,
   WorkspaceMemberSchema,
   WorkspaceMemberUpsertResponseSchema,
+  WorkspaceComplianceSettingsSchema,
   type WorkspaceRole
 } from "@image-lab/contracts";
-import { assertWorkspaceRole, getBrand, getPrimaryWorkspace } from "../lib/repository.js";
+import {
+  assertWorkspaceRole,
+  getBrand,
+  getPrimaryWorkspace,
+  getWorkspaceComplianceSettings,
+  updateWorkspaceComplianceSettings
+} from "../lib/repository.js";
 import {
   getHomeOverview,
   getPlanOverview,
@@ -46,6 +54,37 @@ const WorkspaceMemberParamsSchema = z.object({
 });
 
 export async function registerWorkRoutes(app: FastifyInstance) {
+  app.get("/api/workspace/compliance-settings", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) return reply.unauthorized();
+
+    const workspace = await getPrimaryWorkspace(viewer);
+    if (!workspace) return reply.badRequest("No workspace available");
+
+    await assertWorkspaceRole(viewer, workspace.id, ["owner", "admin", "editor", "viewer"], request.log);
+    return WorkspaceComplianceSettingsSchema.parse(await getWorkspaceComplianceSettings(workspace.id));
+  });
+
+  app.patch("/api/workspace/compliance-settings", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) return reply.unauthorized();
+
+    const workspace = await getPrimaryWorkspace(viewer);
+    if (!workspace) return reply.badRequest("No workspace available");
+
+    await assertWorkspaceRole(viewer, workspace.id, ["owner", "admin"], request.log);
+    const body = UpdateWorkspaceComplianceSettingsSchema.parse(request.body);
+    return WorkspaceComplianceSettingsSchema.parse(
+      await updateWorkspaceComplianceSettings({
+        workspaceId: workspace.id,
+        reraAuthorityLabel: body.reraAuthorityLabel,
+        reraWebsiteUrl: body.reraWebsiteUrl,
+        reraTextColor: body.reraTextColor,
+        userId: viewer.userId
+      })
+    );
+  });
+
   app.get("/api/series", { preHandler: app.authenticate }, async (request, reply) => {
     const viewer = request.viewer;
     if (!viewer) return reply.unauthorized();

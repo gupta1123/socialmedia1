@@ -814,6 +814,20 @@ export const WorkspaceSchema = z.object({
   role: WorkspaceRoleSchema
 });
 
+export const WorkspaceComplianceSettingsSchema = z.object({
+  workspaceId: z.string().uuid(),
+  reraAuthorityLabel: z.string().default("MahaRERA"),
+  reraWebsiteUrl: z.string().url().default("https://maharera.maharashtra.gov.in"),
+  reraTextColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default("#111111"),
+  updatedAt: z.string().nullable().default(null)
+});
+
+export const UpdateWorkspaceComplianceSettingsSchema = z.object({
+  reraAuthorityLabel: z.string().trim().min(2).max(40).default("MahaRERA"),
+  reraWebsiteUrl: z.string().trim().url().max(240).default("https://maharera.maharashtra.gov.in"),
+  reraTextColor: z.string().trim().regex(/^#[0-9A-Fa-f]{6}$/).default("#111111")
+});
+
 export const BrandSchema = z.object({
   id: z.string().uuid(),
   workspaceId: z.string().uuid(),
@@ -870,6 +884,26 @@ export const ProjectProfileVersionSchema = z.object({
 export const ProjectDetailSchema = z.object({
   project: ProjectSchema,
   activeProfile: ProjectProfileVersionSchema.nullable()
+});
+
+export const ProjectReraRegistrationSchema = z.object({
+  id: z.string().uuid(),
+  workspaceId: z.string().uuid(),
+  brandId: z.string().uuid(),
+  projectId: z.string().uuid().nullable().default(null),
+  registrationNumber: z.string().nullable().default(null),
+  label: z.string(),
+  qrAssetId: z.string().uuid().nullable().default(null),
+  isDefault: z.boolean().default(false),
+  metadataJson: JsonRecordSchema.default({}),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+
+export const UpdateProjectReraRegistrationSchema = z.object({
+  registrationNumber: z.string().trim().max(120).nullable().default(null),
+  label: z.string().trim().min(1).max(160),
+  qrAssetId: z.string().uuid().nullable().default(null)
 });
 
 export const BrandPersonaSchema = z.object({
@@ -1759,14 +1793,19 @@ export const BootstrapResponseSchema = z.object({
   }),
   aiEdit: AiEditConfigSchema,
   workspace: WorkspaceSchema.nullable(),
+  workspaceComplianceSettings: WorkspaceComplianceSettingsSchema.nullable().default(null),
   brands: z.array(BrandSchema),
   brandAssets: z.array(BrandAssetSchema),
+  projectReraRegistrations: z.array(ProjectReraRegistrationSchema).default([]),
   styleTemplates: z.array(StyleTemplateSchema),
   recentJobs: z.array(CreativeJobSchema),
   recentOutputs: z.array(CreativeOutputSchema)
 });
 
 export type WorkspaceRole = z.infer<typeof WorkspaceRoleSchema>;
+export type WorkspaceComplianceSettings = z.infer<typeof WorkspaceComplianceSettingsSchema>;
+export type UpdateWorkspaceComplianceSettingsInput = z.infer<typeof UpdateWorkspaceComplianceSettingsSchema>;
+export type UpdateProjectReraRegistrationInput = z.infer<typeof UpdateProjectReraRegistrationSchema>;
 export type AssetKind = z.infer<typeof AssetKindSchema>;
 export type ProjectStage = z.infer<typeof ProjectStageSchema>;
 export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
@@ -1887,6 +1926,7 @@ export type BrandDetail = z.infer<typeof BrandDetailSchema>;
 export type ProjectRecord = z.infer<typeof ProjectSchema>;
 export type ProjectProfileVersionRecord = z.infer<typeof ProjectProfileVersionSchema>;
 export type ProjectDetail = z.infer<typeof ProjectDetailSchema>;
+export type ProjectReraRegistrationRecord = z.infer<typeof ProjectReraRegistrationSchema>;
 export type FestivalRecord = z.infer<typeof FestivalSchema>;
 export type BrandPersonaRecord = z.infer<typeof BrandPersonaSchema>;
 export type ContentPillarRecord = z.infer<typeof ContentPillarSchema>;

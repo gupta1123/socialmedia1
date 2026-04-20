@@ -2,11 +2,13 @@ import type { FastifyInstance } from "fastify";
 import { BootstrapResponseSchema } from "@image-lab/contracts";
 import {
   assertWorkspaceRole,
+  getWorkspaceComplianceSettings,
   getPrimaryWorkspace,
   listWorkspaceAssets,
   listWorkspaceBrands,
   listWorkspaceJobs,
   listWorkspaceOutputs,
+  listProjectReraRegistrations,
   listWorkspaceTemplates
 } from "../lib/repository.js";
 import { env } from "../lib/config.js";
@@ -42,8 +44,10 @@ export async function registerSessionRoutes(app: FastifyInstance) {
           flow: env.AI_EDIT_FLOW
         },
         workspace: null,
+        workspaceComplianceSettings: null,
         brands: [],
         brandAssets: [],
+        projectReraRegistrations: [],
         styleTemplates: [],
         recentJobs: [],
         recentOutputs: []
@@ -65,16 +69,20 @@ export async function registerSessionRoutes(app: FastifyInstance) {
           flow: env.AI_EDIT_FLOW
         },
         workspace,
+        workspaceComplianceSettings: await getWorkspaceComplianceSettings(workspace.id),
         brands,
         brandAssets: [],
+        projectReraRegistrations: [],
         styleTemplates: [],
         recentJobs: [],
         recentOutputs: []
       });
     }
 
-    const [brandAssets, styleTemplates, recentJobs, recentOutputs] = await Promise.all([
+    const [workspaceComplianceSettings, brandAssets, projectReraRegistrations, styleTemplates, recentJobs, recentOutputs] = await Promise.all([
+      getWorkspaceComplianceSettings(workspace.id),
       listWorkspaceAssets(workspace.id, scopedBrandId),
+      listProjectReraRegistrations(workspace.id, scopedBrandId),
       listWorkspaceTemplates(workspace.id, scopedBrandId),
       listWorkspaceJobs(workspace.id, scopedBrandId),
       isCreateView ? Promise.resolve([]) : listWorkspaceOutputs(workspace.id, scopedBrandId)
@@ -94,6 +102,7 @@ export async function registerSessionRoutes(app: FastifyInstance) {
         flow: env.AI_EDIT_FLOW
       },
       workspace,
+      workspaceComplianceSettings,
       brands,
       brandAssets: brandAssets.map((asset, index) => ({
         ...asset,
@@ -101,6 +110,7 @@ export async function registerSessionRoutes(app: FastifyInstance) {
         thumbnailUrl: assetUrls[index]?.thumbnailUrl,
         originalUrl: assetUrls[index]?.originalUrl
       })),
+      projectReraRegistrations,
       styleTemplates: styleTemplates.map((template, index) => ({
         ...template,
         previewUrl: templateUrls[index] ?? undefined

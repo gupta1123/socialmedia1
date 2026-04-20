@@ -1,10 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type {
+  BrandAssetRecord,
   CreativeChannel,
   PostingWindowRecord,
+  ProjectRecord,
+  ProjectReraRegistrationRecord,
   WeekdayCode,
   WorkspaceCreditLedgerEntry,
   WorkspaceCreditWallet,
@@ -13,18 +15,26 @@ import type {
 import {
   addWorkspaceMember,
   createPostingWindow,
+  deleteProjectReraRegistration,
   deletePostingWindow,
+  getBrandAssets,
+  getProjectReraRegistrations,
+  getProjects,
   getWorkspaceCreditLedger,
   getWorkspaceCreditWallet,
   getWorkspaceMembers,
   getPostingWindows,
   removeWorkspaceMember,
+  setDefaultProjectReraRegistration,
   setWorkspaceMemberPassword,
+  updateProjectReraRegistration,
+  updateWorkspaceComplianceSettings,
   updatePostingWindow,
   updateWorkspaceMemberRole
 } from "../../../lib/api";
 import { formatLocalTimeLabel, formatWeekdayLabel, weekdayOptions } from "../../../lib/posting-windows";
 import { useStudio } from "../studio-context";
+import { useRegisterTopbarControls } from "../topbar-actions-context";
 
 type WorkspaceUiRole = "admin" | "team";
 type PostingWindowFormState = {
@@ -51,157 +61,458 @@ const channelOptions: Array<{ value: CreativeChannel; label: string }> = [
   { value: "ad-creative", label: "Ad creative" }
 ];
 
-export function WorkspaceAdminOverviewPanel() {
-  const { sessionToken, bootstrap } = useStudio();
-  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export function WorkspaceCompliancePanel() {
+  const { sessionToken, bootstrap, activeBrandId, refresh, setMessage } = useStudio();
+  const complianceSettings = bootstrap?.workspaceComplianceSettings ?? null;
+  const [reraAuthorityLabel, setReraAuthorityLabel] = useState(complianceSettings?.reraAuthorityLabel ?? "MahaRERA");
+  const [reraWebsiteUrl, setReraWebsiteUrl] = useState(complianceSettings?.reraWebsiteUrl ?? "https://maharera.maharashtra.gov.in");
+  const [reraTextColor, setReraTextColor] = useState(complianceSettings?.reraTextColor ?? "#111111");
+  const [savingComplianceSettings, setSavingComplianceSettings] = useState(false);
+  const [brandAssets, setBrandAssets] = useState<BrandAssetRecord[]>([]);
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [reraRegistrations, setReraRegistrations] = useState<ProjectReraRegistrationRecord[]>([]);
+  const [selectedReraRegistrationId, setSelectedReraRegistrationId] = useState("");
+  const [loadingReraPreview, setLoadingReraPreview] = useState(true);
+  const [reraPreviewError, setReraPreviewError] = useState<string | null>(null);
+  const [registrationActionKey, setRegistrationActionKey] = useState<string | null>(null);
+  const [editingRegistrationId, setEditingRegistrationId] = useState<string | null>(null);
+  const [editingRegistrationLabel, setEditingRegistrationLabel] = useState("");
+  const [editingRegistrationNumber, setEditingRegistrationNumber] = useState("");
+  const [editingRegistrationQrAssetId, setEditingRegistrationQrAssetId] = useState("");
 
   useEffect(() => {
-    if (!sessionToken) {
-      setWorkspaceMembers([]);
-      setLoading(false);
+    setReraAuthorityLabel(complianceSettings?.reraAuthorityLabel ?? "MahaRERA");
+    setReraWebsiteUrl(complianceSettings?.reraWebsiteUrl ?? "https://maharera.maharashtra.gov.in");
+    setReraTextColor(complianceSettings?.reraTextColor ?? "#111111");
+  }, [complianceSettings?.reraAuthorityLabel, complianceSettings?.reraTextColor, complianceSettings?.reraWebsiteUrl]);
+
+  async function reloadReraPreviewData() {
+    if (!sessionToken || !activeBrandId) {
+      setBrandAssets([]);
+      setProjects([]);
+      setReraRegistrations([]);
+      setSelectedReraRegistrationId("");
+      setLoadingReraPreview(false);
       return;
     }
 
-    const token = sessionToken;
-    let cancelled = false;
+    setLoadingReraPreview(true);
+    try {
+      const [assetRecords, projectRecords, registrationRecords] = await Promise.all([
+        getBrandAssets(sessionToken, activeBrandId),
+        getProjects(sessionToken, { brandId: activeBrandId }),
+        getProjectReraRegistrations(sessionToken, activeBrandId)
+      ]);
 
-    async function load() {
-      try {
-        setLoading(true);
-        const members = await getWorkspaceMembers(token);
-        if (!cancelled) {
-          setWorkspaceMembers(members);
-          setError(null);
+      setBrandAssets(assetRecords);
+      setProjects(projectRecords);
+      setReraRegistrations(registrationRecords);
+      setSelectedReraRegistrationId((current) => {
+        if (current && registrationRecords.some((registration) => registration.id === current)) {
+          return current;
         }
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : "Failed to load workspace admin overview");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        return registrationRecords.find((registration) => registration.isDefault)?.id ?? registrationRecords[0]?.id ?? "";
+      });
+      setReraPreviewError(null);
+    } catch (loadError) {
+      setReraPreviewError(loadError instanceof Error ? loadError.message : "Failed to load RERA registrations");
+    } finally {
+      setLoadingReraPreview(false);
+    }
+  }
+
+  useEffect(() => {
+    void reloadReraPreviewData();
+  }, [activeBrandId, sessionToken]);
+
+  const reraQrAssetById = useMemo(
+    () => new Map(brandAssets.filter((asset) => asset.kind === "rera_qr").map((asset) => [asset.id, asset])),
+    [brandAssets]
+  );
+  const projectNameById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project.name])),
+    [projects]
+  );
+  const reraPreviewOptions = useMemo(
+    () =>
+      reraRegistrations.map((registration) => ({
+        registration,
+        qrAsset: registration.qrAssetId ? reraQrAssetById.get(registration.qrAssetId) ?? null : null,
+        projectName: registration.projectId ? projectNameById.get(registration.projectId) ?? "Project" : "General RERA"
+      })),
+    [projectNameById, reraQrAssetById, reraRegistrations]
+  );
+  const selectedReraPreview = useMemo(
+    () => reraPreviewOptions.find((option) => option.registration.id === selectedReraRegistrationId) ?? reraPreviewOptions[0] ?? null,
+    [reraPreviewOptions, selectedReraRegistrationId]
+  );
+  const reraRegistrationGroups = useMemo(() => {
+    const groups = new Map<string, { key: string; name: string; registrations: typeof reraPreviewOptions }>();
+    for (const option of reraPreviewOptions) {
+      const key = option.registration.projectId ?? "general";
+      const name = option.projectName;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.registrations.push(option);
+      } else {
+        groups.set(key, { key, name, registrations: [option] });
       }
     }
+    return Array.from(groups.values());
+  }, [reraPreviewOptions]);
+  const editingRegistration = useMemo(
+    () => reraPreviewOptions.find((option) => option.registration.id === editingRegistrationId) ?? null,
+    [editingRegistrationId, reraPreviewOptions]
+  );
+  const editableQrAssets = useMemo(
+    () =>
+      brandAssets.filter(
+        (asset) =>
+          asset.kind === "rera_qr" &&
+          (!editingRegistration?.registration.projectId ||
+            asset.projectId === editingRegistration.registration.projectId ||
+            asset.projectId === null)
+      ),
+    [brandAssets, editingRegistration]
+  );
+  const selectedQrUrl = selectedReraPreview?.qrAsset?.thumbnailUrl ?? selectedReraPreview?.qrAsset?.previewUrl ?? selectedReraPreview?.qrAsset?.originalUrl;
+  const previewReraNumber = selectedReraPreview?.registration.registrationNumber?.trim() || "P5210054534";
 
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionToken]);
+  function startEditingRegistration(option: (typeof reraPreviewOptions)[number]) {
+    setEditingRegistrationId(option.registration.id);
+    setEditingRegistrationLabel(option.registration.label);
+    setEditingRegistrationNumber(option.registration.registrationNumber ?? "");
+    setEditingRegistrationQrAssetId(option.registration.qrAssetId ?? "");
+  }
 
-  const adminCount = useMemo(
-    () => workspaceMembers.filter((member) => member.role === "owner" || member.role === "admin").length,
-    [workspaceMembers]
+  function closeRegistrationEditor() {
+    setEditingRegistrationId(null);
+    setEditingRegistrationLabel("");
+    setEditingRegistrationNumber("");
+    setEditingRegistrationQrAssetId("");
+  }
+
+  async function handleSaveComplianceSettings(event: React.FormEvent) {
+    event.preventDefault();
+
+    if (!sessionToken) {
+      return;
+    }
+
+    setSavingComplianceSettings(true);
+    try {
+      await updateWorkspaceComplianceSettings(sessionToken, {
+        reraAuthorityLabel,
+        reraWebsiteUrl,
+        reraTextColor
+      });
+      await refresh(activeBrandId ?? bootstrap?.brands[0]?.id);
+      setMessage("RERA compliance settings saved.");
+    } catch (saveError) {
+      setMessage(saveError instanceof Error ? saveError.message : "Failed to save RERA compliance settings");
+    } finally {
+      setSavingComplianceSettings(false);
+    }
+  }
+
+  async function handleSetDefaultRegistration(registration: ProjectReraRegistrationRecord) {
+    if (!sessionToken || !activeBrandId || !registration.projectId) {
+      return;
+    }
+
+    const actionKey = `registration:${registration.id}:default`;
+    setRegistrationActionKey(actionKey);
+    try {
+      await setDefaultProjectReraRegistration(sessionToken, activeBrandId, registration.id);
+      await reloadReraPreviewData();
+      setMessage(`Default RERA registration updated for this project.`);
+    } catch (actionError) {
+      setMessage(actionError instanceof Error ? actionError.message : "Failed to update default RERA registration");
+    } finally {
+      setRegistrationActionKey(null);
+    }
+  }
+
+  async function handleSaveRegistration() {
+    if (!sessionToken || !activeBrandId || !editingRegistration) {
+      return;
+    }
+
+    const trimmedLabel = editingRegistrationLabel.trim();
+    if (!trimmedLabel) {
+      setMessage("Registration label is required.");
+      return;
+    }
+
+    const actionKey = `registration:${editingRegistration.registration.id}:save`;
+    setRegistrationActionKey(actionKey);
+    try {
+      await updateProjectReraRegistration(sessionToken, activeBrandId, editingRegistration.registration.id, {
+        label: trimmedLabel,
+        registrationNumber: editingRegistrationNumber.trim() || null,
+        qrAssetId: editingRegistrationQrAssetId || null
+      });
+      await reloadReraPreviewData();
+      setMessage("RERA registration updated.");
+      closeRegistrationEditor();
+    } catch (actionError) {
+      setMessage(actionError instanceof Error ? actionError.message : "Failed to update RERA registration");
+    } finally {
+      setRegistrationActionKey(null);
+    }
+  }
+
+  async function handleDeleteRegistration(registration: ProjectReraRegistrationRecord) {
+    if (!sessionToken || !activeBrandId) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Remove ${registration.label} from compliance registrations?`);
+    if (!confirmed) {
+      return;
+    }
+
+    const actionKey = `registration:${registration.id}:delete`;
+    setRegistrationActionKey(actionKey);
+    try {
+      await deleteProjectReraRegistration(sessionToken, activeBrandId, registration.id);
+      await reloadReraPreviewData();
+      setMessage("RERA registration removed.");
+      if (editingRegistrationId === registration.id) {
+        closeRegistrationEditor();
+      }
+    } catch (actionError) {
+      setMessage(actionError instanceof Error ? actionError.message : "Failed to remove RERA registration");
+    } finally {
+      setRegistrationActionKey(null);
+    }
+  }
+
+  const topbarControls = useMemo(
+    () => (
+      <button
+        className="button button-primary"
+        disabled={!sessionToken || savingComplianceSettings}
+        form="workspace-compliance-settings-form"
+        type="submit"
+      >
+        {savingComplianceSettings ? "Saving..." : "Save settings"}
+      </button>
+    ),
+    [savingComplianceSettings, sessionToken]
   );
 
-  const workspaceName = bootstrap?.workspace?.name ?? "Workspace";
-  const workspaceSlug = bootstrap?.workspace?.slug ?? "workspace";
-  const teamMembers = workspaceMembers.filter((member) => member.role !== "owner" && member.role !== "admin");
-  const ownerMember = workspaceMembers.find((member) => member.role === "owner") ?? null;
-  const quickActions = [
-    {
-      href: "/studio/workspace-admin/team",
-      label: "Manage team access",
-      description: "Add users, change access levels, and reset passwords directly.",
-      kicker: `${workspaceMembers.length} users`,
-      icon: (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" />
-          <circle cx="9.5" cy="7" r="3.5" />
-          <path d="M20 8v6" />
-          <path d="M17 11h6" />
-        </svg>
-      )
-    },
-    {
-      href: "/studio/workspace-admin/posting-windows",
-      label: "Manage posting windows",
-      description: "Set default posting slots so scheduling flows can suggest brand-approved times.",
-      kicker: "Scheduling setup",
-      icon: (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="4" width="18" height="18" rx="2" />
-          <path d="M16 2v4" />
-          <path d="M8 2v4" />
-          <path d="M3 10h18" />
-          <path d="M8 14h.01" />
-          <path d="M12 14h.01" />
-          <path d="M16 14h.01" />
-        </svg>
-      )
-    }
-  ];
+  useRegisterTopbarControls(topbarControls);
 
   return (
-    <section className="panel settings-panel workspace-admin-home">
-      <div className="workspace-admin-home-hero">
-        <div className="workspace-admin-home-copy">
-          <p className="panel-label">Workspace Admin</p>
-          <h3>{workspaceName}</h3>
-          <p>
-            Manage who can access <strong>{workspaceSlug}</strong> and keep the core workspace setup clean without
-            digging through general settings.
-          </p>
-          <div className="workspace-admin-home-meta">
-            <span className="workspace-admin-home-chip">Owner: {ownerMember?.displayName ?? ownerMember?.email ?? "Not set"}</span>
-            <span className="workspace-admin-home-chip">Admins: {adminCount}</span>
+    <section className="workspace-admin-team-page">
+      <form className="workspace-admin-compliance-card" id="workspace-compliance-settings-form" onSubmit={handleSaveComplianceSettings}>
+        <div className="workspace-admin-compliance-header">
+          <div>
+            <span className="workspace-admin-action-kicker">RERA compliance block</span>
+            <strong>Workspace defaults</strong>
+            <p>These defaults control the shared label, website, and text color used when a project registration is inserted.</p>
+          </div>
+          {loadingReraPreview ? (
+            <div className="settings-note workspace-admin-compliance-status">
+              <span>Loading project preview...</span>
+            </div>
+          ) : reraPreviewError ? (
+            <div className="settings-note workspace-admin-compliance-status">
+              <span>{reraPreviewError}</span>
+            </div>
+          ) : reraPreviewOptions.length > 0 ? (
+            <div className="workspace-admin-compliance-preview-wrap">
+              <label className="field-label workspace-admin-compliance-selector">
+                Preview project
+                <select value={selectedReraRegistrationId} onChange={(event) => setSelectedReraRegistrationId(event.target.value)}>
+                  {reraPreviewOptions.map((option) => (
+                    <option key={option.registration.id} value={option.registration.id}>
+                      {option.projectName} - {option.registration.registrationNumber ?? option.registration.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="workspace-admin-compliance-preview" aria-label="RERA compliance preview">
+                <span style={{ color: reraTextColor || "#111111" }}>{reraAuthorityLabel || "MahaRERA"}</span>
+                <strong style={{ color: reraTextColor || "#111111" }}>{previewReraNumber}</strong>
+                <small style={{ color: reraTextColor || "#111111" }}>{reraWebsiteUrl || "https://maharera.maharashtra.gov.in"}</small>
+                {selectedQrUrl ? <img alt={selectedReraPreview?.qrAsset?.label ?? "RERA QR"} src={selectedQrUrl} /> : <i aria-hidden="true" />}
+              </div>
+            </div>
+          ) : (
+            <div className="settings-note workspace-admin-compliance-status">
+              <span>No project RERA QR found yet. Upload one from Library / Media / RERA QR to preview it here.</span>
+            </div>
+          )}
+        </div>
+        <div className="planner-form-grid workspace-admin-compliance-fields">
+          <label className="field-label">
+            Authority label
+            <input
+              value={reraAuthorityLabel}
+              onChange={(event) => setReraAuthorityLabel(event.target.value)}
+              placeholder="MahaRERA"
+            />
+          </label>
+          <label className="field-label">
+            Website URL
+            <input
+              required
+              type="url"
+              value={reraWebsiteUrl}
+              onChange={(event) => setReraWebsiteUrl(event.target.value)}
+              placeholder="https://maharera.maharashtra.gov.in"
+            />
+          </label>
+          <label className="field-label workspace-admin-compliance-color-field">
+            Text color
+            <div className="workspace-admin-color-input">
+              <input
+                aria-label="RERA text color"
+                onChange={(event) => setReraTextColor(event.target.value)}
+                type="color"
+                value={reraTextColor}
+              />
+              <input
+                onChange={(event) => setReraTextColor(event.target.value.startsWith("#") ? event.target.value : `#${event.target.value}`)}
+                pattern="^#?[0-9A-Fa-f]{6}$"
+                placeholder="#111111"
+                value={reraTextColor}
+              />
+            </div>
+          </label>
+        </div>
+      </form>
+      <section className="workspace-admin-rera-registry">
+        <div className="workspace-admin-rera-registry-header">
+          <div>
+            <span className="workspace-admin-action-kicker">Project registrations</span>
+            <strong>Manage project RERA number and QR mappings</strong>
+            <p>Each project can keep multiple registrations. Pick the default one used in scoped generation flows and update the mapped QR here.</p>
           </div>
         </div>
-        <div className="workspace-admin-home-aside">
-          <div className="workspace-admin-aside-card">
-            <span className="workspace-admin-aside-label">Workspace focus</span>
-            <strong>{workspaceMembers.length}</strong>
-            <p>People with access to this workspace across admin and team roles.</p>
+        {loadingReraPreview ? (
+          <div className="empty-state">
+            <strong>Loading registrations…</strong>
           </div>
-        </div>
-      </div>
+        ) : reraRegistrationGroups.length === 0 ? (
+          <div className="empty-state">
+            <strong>No RERA registrations yet</strong>
+            <p>Upload project-linked RERA QR assets from Library / Media to create registrations.</p>
+          </div>
+        ) : (
+          <div className="workspace-admin-rera-group-list">
+            {reraRegistrationGroups.map((group) => (
+              <section className="workspace-admin-rera-group" key={group.key}>
+                <div className="workspace-admin-rera-group-header">
+                  <strong>{group.name}</strong>
+                  <span className="pill">{group.registrations.length} registrations</span>
+                </div>
+                <div className="workspace-admin-rera-card-grid">
+                  {group.registrations.map((option) => {
+                    const saveKey = `registration:${option.registration.id}:save`;
+                    const defaultKey = `registration:${option.registration.id}:default`;
+                    const deleteKey = `registration:${option.registration.id}:delete`;
+                    const busy = registrationActionKey === saveKey || registrationActionKey === defaultKey || registrationActionKey === deleteKey;
 
-      {loading ? (
-        <div className="empty-state empty-state-tall">
-          <strong>Loading workspace admin overview…</strong>
-        </div>
-      ) : error ? (
-        <div className="empty-state empty-state-tall">
-          <strong>Unable to load workspace admin overview</strong>
-          <p>{error}</p>
-        </div>
-      ) : (
-        <div className="workspace-admin-home-stack">
-          <div className="workspace-admin-stats-grid">
-            <article className="workspace-admin-stat-card">
-              <span className="workspace-admin-stat-label">Total users</span>
-              <strong>{workspaceMembers.length}</strong>
-              <p>Everyone who can currently access this workspace.</p>
-            </article>
-            <article className="workspace-admin-stat-card">
-              <span className="workspace-admin-stat-label">Admin seats</span>
-              <strong>{adminCount}</strong>
-              <p>Owner plus admins who can manage access and passwords.</p>
-            </article>
-            <article className="workspace-admin-stat-card">
-              <span className="workspace-admin-stat-label">Team members</span>
-              <strong>{teamMembers.length}</strong>
-              <p>Non-admin collaborators using the workspace day to day.</p>
-            </article>
-          </div>
-
-          <div className="workspace-admin-action-grid">
-            {quickActions.map((action) => (
-              <Link className="workspace-admin-action-card" href={action.href} key={action.href} prefetch={false}>
-                <span className="workspace-admin-action-icon">{action.icon}</span>
-                <span className="workspace-admin-action-kicker">{action.kicker}</span>
-                <strong>{action.label}</strong>
-                <p>{action.description}</p>
-                <span className="workspace-admin-action-link">Open</span>
-              </Link>
+                    return (
+                      <article className="workspace-admin-rera-card" key={option.registration.id}>
+                        <div className="workspace-admin-rera-card-top">
+                          <div className="workspace-admin-rera-card-copy">
+                            <strong>{option.registration.label}</strong>
+                            <span>{option.registration.registrationNumber ?? "No number set"}</span>
+                          </div>
+                          <div className="workspace-admin-rera-card-badges">
+                            {option.registration.isDefault ? <span className="pill">Default</span> : null}
+                            {option.registration.projectId ? <span className="pill pill-muted">Project</span> : <span className="pill pill-muted">General</span>}
+                          </div>
+                        </div>
+                        <div className="workspace-admin-rera-card-meta">
+                          <span>{option.qrAsset ? option.qrAsset.label : "No QR linked"}</span>
+                          <span>{option.registration.projectId ? "Project-linked" : "General registration"}</span>
+                        </div>
+                        <div className="workspace-admin-rera-card-actions">
+                          <button className="button button-secondary" onClick={() => startEditingRegistration(option)} type="button">
+                            Edit
+                          </button>
+                          <button
+                            className="button button-ghost"
+                            disabled={busy || option.registration.isDefault || !option.registration.projectId}
+                            onClick={() => void handleSetDefaultRegistration(option.registration)}
+                            type="button"
+                          >
+                            {registrationActionKey === defaultKey ? "Saving..." : "Make default"}
+                          </button>
+                          <button
+                            className="button button-ghost button-danger"
+                            disabled={busy}
+                            onClick={() => void handleDeleteRegistration(option.registration)}
+                            type="button"
+                          >
+                            {registrationActionKey === deleteKey ? "Removing..." : "Remove"}
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
             ))}
           </div>
-
+        )}
+      </section>
+      {editingRegistration ? (
+        <div className="drawer-overlay" onClick={closeRegistrationEditor}>
+          <div className="drawer-content" onClick={(event) => event.stopPropagation()}>
+            <div className="drawer-header">
+              <div>
+                <span className="workspace-admin-action-kicker">Edit registration</span>
+                <h2>{editingRegistration.projectName}</h2>
+              </div>
+              <button className="drawer-close" onClick={closeRegistrationEditor} type="button">
+                ×
+              </button>
+            </div>
+            <div className="drawer-body">
+              <div className="drawer-form">
+                <label className="field-label">
+                  Label
+                  <input onChange={(event) => setEditingRegistrationLabel(event.target.value)} value={editingRegistrationLabel} />
+                </label>
+                <label className="field-label">
+                  Registration number
+                  <input onChange={(event) => setEditingRegistrationNumber(event.target.value)} placeholder="P52100012345" value={editingRegistrationNumber} />
+                </label>
+                <label className="field-label">
+                  QR asset
+                  <select onChange={(event) => setEditingRegistrationQrAssetId(event.target.value)} value={editingRegistrationQrAssetId}>
+                    <option value="">No QR selected</option>
+                    {editableQrAssets.map((asset) => (
+                      <option key={asset.id} value={asset.id}>
+                        {asset.label}{asset.projectId ? "" : " (general)"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div className="drawer-footer">
+              <button className="button button-ghost" onClick={closeRegistrationEditor} type="button">
+                Cancel
+              </button>
+              <button
+                className="button button-primary"
+                disabled={registrationActionKey === `registration:${editingRegistration.registration.id}:save`}
+                onClick={() => void handleSaveRegistration()}
+                type="button"
+              >
+                {registrationActionKey === `registration:${editingRegistration.registration.id}:save` ? "Saving..." : "Save registration"}
+              </button>
+            </div>
+          </div>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -397,23 +708,24 @@ export function WorkspaceTeamManagementPanel() {
     }
   }
 
+  const topbarControls = useMemo(
+    () => (
+      <div className="settings-window-actions">
+        <span className="pill">{workspaceMembers.length} users</span>
+        {isWorkspaceAdmin ? (
+          <button className="button button-primary" onClick={() => setIsInviteDrawerOpen(true)} type="button">
+            Add employee
+          </button>
+        ) : null}
+      </div>
+    ),
+    [isWorkspaceAdmin, workspaceMembers.length]
+  );
+
+  useRegisterTopbarControls(topbarControls);
+
   return (
     <section className="workspace-admin-team-page">
-      <div className="workspace-admin-team-header">
-        <div>
-          <p className="panel-label">Workspace Admin</p>
-          <h3>Team management</h3>
-        </div>
-        <div className="workspace-admin-team-toolbar">
-          <span className="pill">{workspaceMembers.length} users</span>
-          {isWorkspaceAdmin ? (
-            <button className="button button-primary" onClick={() => setIsInviteDrawerOpen(true)} type="button">
-              Add employee
-            </button>
-          ) : null}
-        </div>
-      </div>
-
       {membersLoading ? (
         <div className="empty-state empty-state-tall">
           <strong>Loading workspace members…</strong>
@@ -844,6 +1156,20 @@ export function WorkspacePostingWindowsPanel() {
       .filter((group) => group.items.length > 0);
   }, [postingWindows]);
 
+  const topbarControls = useMemo(
+    () => (
+      <div className="settings-window-actions">
+        <span className="pill">{postingWindows.length} slots</span>
+        <button className="button button-primary" disabled={!activeBrandId || saving} onClick={openCreateDrawer} type="button">
+          {saving ? "Saving…" : "New slot"}
+        </button>
+      </div>
+    ),
+    [activeBrandId, postingWindows.length, saving]
+  );
+
+  useRegisterTopbarControls(topbarControls);
+
   async function reloadPostingWindows() {
     if (!sessionToken || !activeBrandId) {
       return;
@@ -964,24 +1290,7 @@ export function WorkspacePostingWindowsPanel() {
   }
 
   return (
-    <section className="panel settings-panel">
-      <div className="settings-panel-header">
-        <div>
-          <p className="panel-label">Posting windows</p>
-          <h3>{activeBrand?.name ?? "Active brand"}</h3>
-        </div>
-        <div className="settings-window-actions">
-          <span className="pill">{postingWindows.length} slots</span>
-          <button className="button button-primary" disabled={!activeBrandId || saving} onClick={openCreateDrawer} type="button">
-            {saving ? "Saving…" : "New slot"}
-          </button>
-        </div>
-      </div>
-
-      <div className="settings-note">
-        <span>Saved slots show up as quick scheduling suggestions in deliverable create and edit flows.</span>
-      </div>
-
+    <section className="workspace-admin-team-page">
       {loading ? (
         <div className="empty-state empty-state-tall">
           <strong>Loading posting windows…</strong>

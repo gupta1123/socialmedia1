@@ -5,6 +5,7 @@ import {
   type BrandAssetRecord,
   type CreativeBrief,
   type CreativeOutputRecord,
+  type ProjectReraRegistrationRecord,
   CreativeRunDetailSchema,
   CreativeRunSummarySchema,
   CreativeBriefSchema,
@@ -20,6 +21,7 @@ import {
   getPromptPackage,
   getStyleTemplate,
   listBrandAssets,
+  listProjectReraRegistrations,
   assertWorkspaceRole
 } from "../lib/repository.js";
 import {
@@ -96,7 +98,8 @@ type RoleAwareReferencePlan = {
 function selectReraQrAssetForProject(
   assets: BrandAssetRecord[],
   projectId?: string | null,
-  explicitAssetId?: string | null
+  explicitAssetId?: string | null,
+  registrations: ProjectReraRegistrationRecord[] = []
 ) {
   const matchesScope = (asset: BrandAssetRecord) =>
     asset.kind === "rera_qr" && (projectId ? asset.projectId === projectId : asset.projectId == null);
@@ -107,6 +110,16 @@ function selectReraQrAssetForProject(
     if (exactScoped) return exactScoped;
     const exactGlobal = assets.find((asset) => asset.id === explicitAssetId && matchesGlobal(asset));
     if (exactGlobal) return exactGlobal;
+  }
+
+  if (projectId) {
+    const scopedRegistration =
+      registrations.find((registration) => registration.projectId === projectId && registration.isDefault && registration.qrAssetId) ??
+      registrations.find((registration) => registration.projectId === projectId && registration.qrAssetId);
+    const registrationAsset = scopedRegistration?.qrAssetId
+      ? assets.find((asset) => asset.id === scopedRegistration.qrAssetId && asset.kind === "rera_qr")
+      : null;
+    if (registrationAsset) return registrationAsset;
   }
 
   const scoped = assets.find((asset) => matchesScope(asset));
@@ -565,9 +578,10 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       return reply.badRequest("Choose a festival before creating a festive greeting");
     }
 
-    const [brandProfileVersion, allAssets, projectProfileVersion] = await Promise.all([
+    const [brandProfileVersion, allAssets, reraRegistrations, projectProfileVersion] = await Promise.all([
       getActiveBrandProfile(brand.id),
       listBrandAssets(brand.id),
+      listProjectReraRegistrations(brand.workspaceId, brand.id),
       project ? getActiveProjectProfile(project.id).catch(() => null) : Promise.resolve(null)
     ]);
 
@@ -618,7 +632,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       ? explicitLogoAsset ?? allAssets.find((asset) => asset.kind === "logo") ?? null
       : null;
     const selectedReraQrAsset = brief.includeReraQr
-      ? selectReraQrAssetForProject(allAssets, project?.id ?? null)
+      ? selectReraQrAssetForProject(allAssets, project?.id ?? null, null, reraRegistrations)
       : null;
     const requestedVariationCount = brief.variationCount ?? env.CREATIVE_STYLE_VARIATION_COUNT;
     const sourceBriefSnapshot = {
@@ -3389,7 +3403,10 @@ async function buildAsyncV2PromptPackage(params: {
   const truthProjectProfile = asObject(truthBundle.projectProfile);
   const rawResolvedConstraints = asObject(rawCompiled.resolvedConstraints);
   const rawCompilerTrace = asObject(rawCompiled.compilerTrace);
-  const allAssets = await listBrandAssets(params.brand.id);
+  const [allAssets, reraRegistrations] = await Promise.all([
+    listBrandAssets(params.brand.id),
+    listProjectReraRegistrations(params.brand.workspaceId, params.brand.id)
+  ]);
 
   const sourceBrief = CreativeCompileV2RequestSchema.parse({
     ...inputBrief,
@@ -3411,7 +3428,8 @@ async function buildAsyncV2PromptPackage(params: {
       ? selectReraQrAssetForProject(
           allAssets,
           sourceBrief.projectId ?? null,
-          asOptionalString(exactAssetContract.reraQrAssetId)
+          asOptionalString(exactAssetContract.reraQrAssetId),
+          reraRegistrations
         )
       : null;
 

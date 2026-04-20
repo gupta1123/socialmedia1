@@ -51,6 +51,13 @@ type CanvasImageLayer = {
   rotation: number;
   filter: "none" | "grayscale" | "sepia";
   opacity: number;
+  reraBlock?: {
+    authorityLabel: string;
+    registrationNumber: string;
+    websiteUrl: string;
+    textColor: string;
+    qrSourceUrl?: string | null;
+  };
 };
 
 type CanvasShapeLayer = {
@@ -121,11 +128,12 @@ const EDITOR_PANES: Array<{ id: EditorPane; label: string; icon: string }> = [
   { id: "uploads", label: "Uploads", icon: "↑" },
   { id: "ai-edit", label: "AI Edit", icon: "⌘" },
   { id: "assets", label: "Assets", icon: "◫" },
-  { id: "templates", label: "Templates", icon: "▦" },
-  { id: "elements", label: "Elements", icon: "⊕" },
+  // Hidden for now. Keep implementations below so these panes can be restored later.
+  // { id: "templates", label: "Templates", icon: "▦" },
+  // { id: "elements", label: "Elements", icon: "⊕" },
   { id: "text", label: "Text", icon: "T" },
-  { id: "layers", label: "Layers", icon: "☰" },
-  { id: "draw", label: "Draw", icon: "◇" }
+  { id: "layers", label: "Layers", icon: "☰" }
+  // { id: "draw", label: "Draw", icon: "◇" }
 ];
 
 const TEMPLATE_PRESETS: Array<{
@@ -191,10 +199,12 @@ export default function StudioAiEditPage() {
   const [drawColor, setDrawColor] = useState(DRAW_COLORS[0] ?? "#111111");
   const [drawSize, setDrawSize] = useState(5);
   const [currentSourceOutputId, setCurrentSourceOutputId] = useState<string | null>(outputId);
+  const [currentSourceProjectId, setCurrentSourceProjectId] = useState<string | null>(null);
   const [currentSourceReviewState, setCurrentSourceReviewState] = useState<"pending_review" | "approved" | "needs_revision" | "closed" | null>(null);
   const [isSaveDrawerOpen, setIsSaveDrawerOpen] = useState(false);
   const [saveMode, setSaveMode] = useState<"new" | "version" | "replace">("new");
   const [isSavingOutput, setIsSavingOutput] = useState(false);
+  const [isGeneratedPostsModalOpen, setIsGeneratedPostsModalOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const layerImageInputRef = useRef<HTMLInputElement>(null);
@@ -229,14 +239,55 @@ export default function StudioAiEditPage() {
   const canReset = Boolean(originalImage && currentImage && (originalImage.file !== currentImage.file || canvasLayers.length > 0));
   const dimensionsLabel = currentImage ? `${currentImage.width} x ${currentImage.height}` : "No image loaded";
   const selectedLayer = canvasLayers.find((layer) => layer.id === selectedLayerId) ?? null;
-  const brandPlacementAssets = useMemo(
-    () => activeAssets.filter((asset) => asset.kind === "logo" || asset.kind === "rera_qr"),
+  const logoAssets = useMemo(
+    () => activeAssets.filter((asset) => asset.kind === "logo"),
     [activeAssets]
   );
+  const reraQrAssetById = useMemo(
+    () => new Map(activeAssets.filter((asset) => asset.kind === "rera_qr").map((asset) => [asset.id, asset])),
+    [activeAssets]
+  );
+  const workspaceComplianceSettings = bootstrap?.workspaceComplianceSettings ?? {
+    workspaceId: bootstrap?.workspace?.id ?? "",
+    reraAuthorityLabel: "MahaRERA",
+    reraWebsiteUrl: "https://maharera.maharashtra.gov.in",
+    reraTextColor: "#111111",
+    updatedAt: null
+  };
+  const [reraBlockTextColor, setReraBlockTextColor] = useState(() => normalizeHexColor(workspaceComplianceSettings.reraTextColor, "#111111"));
+  const reraComplianceOptions = useMemo(() => {
+    const registrations = bootstrap?.projectReraRegistrations ?? [];
+    const scoped = currentSourceProjectId
+      ? registrations.filter((registration) => registration.projectId === currentSourceProjectId)
+      : registrations;
+    const ordered = [...scoped].sort((left, right) => Number(right.isDefault) - Number(left.isDefault));
+
+    return ordered
+      .map((registration) => ({
+        registration,
+        qrAsset: registration.qrAssetId ? reraQrAssetById.get(registration.qrAssetId) ?? null : null
+      }))
+      .filter((option) => option.registration.registrationNumber || option.qrAsset);
+  }, [bootstrap?.projectReraRegistrations, currentSourceProjectId, reraQrAssetById]);
+  const selectedReraBlockLayer =
+    selectedLayer?.type === "image" && selectedLayer.reraBlock
+      ? selectedLayer
+      : null;
+
+  useEffect(() => {
+    setReraBlockTextColor(normalizeHexColor(workspaceComplianceSettings.reraTextColor, "#111111"));
+  }, [workspaceComplianceSettings.reraTextColor]);
+
+  useEffect(() => {
+    if (selectedReraBlockLayer?.reraBlock?.textColor) {
+      setReraBlockTextColor(normalizeHexColor(selectedReraBlockLayer.reraBlock.textColor, "#111111"));
+    }
+  }, [selectedReraBlockLayer?.id, selectedReraBlockLayer?.reraBlock?.textColor]);
   const generatedOutputAssets = useMemo(
-    () => recentOutputs.filter((output) => (output.thumbnailUrl ?? output.previewUrl) && output.id !== outputId).slice(0, 18),
+    () => recentOutputs.filter((output) => (output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl) && output.id !== outputId),
     [recentOutputs, outputId]
   );
+  const recentGeneratedOutputAssets = useMemo(() => generatedOutputAssets.slice(0, 5), [generatedOutputAssets]);
   const hasCanvasLayers = canvasLayers.length > 0;
   const canUndo = useMemo(() => editorHistory.length > 0, [editorHistory]);
   const canRedo = useMemo(() => editorFuture.length > 0, [editorFuture]);
@@ -272,7 +323,7 @@ export default function StudioAiEditPage() {
               ? "Generate target mask"
               : "Apply AI edit"
     : isComposingPrompt
-      ? "Composing prompt..."
+      ? "Preparing edit..."
       : isApplying
       ? "Applying..."
       : "Apply AI edit";
@@ -287,11 +338,11 @@ export default function StudioAiEditPage() {
   const topbarActions = useMemo(
     () => (
       <>
-        <button className="button button-ghost" onClick={() => fileInputRef.current?.click()} type="button">
-          Upload image
-        </button>
         {currentImage ? (
           <>
+            <button className="button button-ghost" onClick={() => fileInputRef.current?.click()} type="button">
+              Upload image
+            </button>
             <button
               className="button button-ghost"
               disabled={!canUndo}
@@ -307,14 +358,6 @@ export default function StudioAiEditPage() {
               type="button"
             >
               Redo
-            </button>
-            <button
-              className="button button-ghost"
-              disabled={isSharing || isApplying || isSegmenting}
-              onClick={() => void handleShareCurrentImage()}
-              type="button"
-            >
-              {isSharing ? "Sharing..." : "Share"}
             </button>
             <button
               className="button button-ghost"
@@ -426,6 +469,7 @@ export default function StudioAiEditPage() {
         setOriginalImage(image);
         setCurrentImage(image);
         setCurrentSourceOutputId(output.id);
+        setCurrentSourceProjectId(output.projectId);
         setCurrentSourceReviewState(output.reviewState);
         setCanvasLayers([]);
         setSelectedLayerId(null);
@@ -526,6 +570,7 @@ export default function StudioAiEditPage() {
       setOriginalImage(image);
       setCurrentImage(image);
       setCurrentSourceOutputId(null);
+      setCurrentSourceProjectId(null);
       setCurrentSourceReviewState(null);
       setEditPlan(null);
       setPlannedPrompt("");
@@ -733,7 +778,7 @@ export default function StudioAiEditPage() {
 
     setIsComposingPrompt(true);
     setError(null);
-    setStatus("Composing list changes into a single AI edit prompt...");
+      setStatus("Preparing your list changes for AI edit...");
 
     try {
       const composed = await composeImageEditPrompt(sessionToken, {
@@ -744,11 +789,6 @@ export default function StudioAiEditPage() {
 
       setComposedPrompt(nextPrompt);
       setComposedPromptKey(listPromptKey);
-      setStatus(
-        composed.strategy === "gemini"
-          ? `Prompt composed with ${composed.model ?? "Gemini"}.`
-          : "Prompt composed using fallback strategy."
-      );
       return nextPrompt;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to compose list-mode prompt.");
@@ -757,14 +797,6 @@ export default function StudioAiEditPage() {
     } finally {
       setIsComposingPrompt(false);
     }
-  }
-
-  async function handleComposePromptFromList() {
-    if (promptMode !== "list") {
-      return;
-    }
-
-    await resolveActivePrompt();
   }
 
   async function handleAnalyzeEdit() {
@@ -1058,11 +1090,12 @@ export default function StudioAiEditPage() {
         );
         const image = await createEditableImage(file);
 
-      setOriginalImage(image);
-      setCurrentImage(image);
-      setCurrentSourceOutputId(output.id);
-      setCurrentSourceReviewState(output.reviewState);
-      setCanvasLayers([]);
+        setOriginalImage(image);
+        setCurrentImage(image);
+        setCurrentSourceOutputId(output.id);
+        setCurrentSourceProjectId(output.projectId);
+        setCurrentSourceReviewState(output.reviewState);
+        setCanvasLayers([]);
         setSelectedLayerId(null);
         setMaskDataUrl(null);
         setHasMaskPreview(false);
@@ -1104,6 +1137,104 @@ export default function StudioAiEditPage() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to add generated post.");
     }
+  }
+
+  async function handleAddReraComplianceBlock(option: (typeof reraComplianceOptions)[number]) {
+    if (!currentImage) {
+      setError("Upload a source image before adding a RERA block.");
+      return;
+    }
+
+    const number = option.registration.registrationNumber?.trim();
+    const qrSourceUrl = option.qrAsset?.originalUrl ?? option.qrAsset?.previewUrl;
+
+    if (!number && !qrSourceUrl) {
+      setError("This RERA registration does not have a number or QR asset.");
+      return;
+    }
+
+    const authorityLabel = workspaceComplianceSettings.reraAuthorityLabel.trim() || "MahaRERA";
+    const websiteUrl = workspaceComplianceSettings.reraWebsiteUrl.trim() || "https://maharera.maharashtra.gov.in";
+    const textColor = normalizeHexColor(reraBlockTextColor, "#111111");
+    const blockImage = await createReraComplianceBlockImage({
+      authorityLabel,
+      registrationNumber: number || "RERA",
+      websiteUrl,
+      textColor,
+      ...(qrSourceUrl ? { qrSourceUrl } : {})
+    });
+    const layerWidth = 0.42;
+    const layerHeight = Math.min(
+      0.18,
+      layerWidth * (blockImage.height / blockImage.width) * (currentImage.width / currentImage.height)
+    );
+    const nextLayer: CanvasImageLayer = {
+      id: createLayerId("rera-block"),
+      type: "image",
+      name: "RERA compliance block",
+      src: blockImage.dataUrl,
+      x: 0.54,
+      y: 0.04,
+      width: layerWidth,
+      height: Math.max(0.06, layerHeight),
+      rotation: 0,
+      filter: "none",
+      opacity: 1,
+      reraBlock: {
+        authorityLabel,
+        registrationNumber: number || "RERA",
+        websiteUrl,
+        textColor,
+        ...(qrSourceUrl ? { qrSourceUrl } : {})
+      }
+    };
+
+    pushToEditorHistory();
+    setCanvasLayers((layers) => [...layers, nextLayer]);
+    setSelectedLayerId(nextLayer.id);
+    setToolMode("select");
+    setActiveEditorPane("layers");
+    setStatus("RERA compliance block added.");
+    setError(null);
+  }
+
+  async function handleSelectedReraBlockColorChange(nextColor: string) {
+    const normalizedColor = normalizeHexColor(nextColor, "#111111");
+    setReraBlockTextColor(normalizedColor);
+
+    if (!selectedReraBlockLayer?.reraBlock) {
+      return;
+    }
+    const block = selectedReraBlockLayer.reraBlock;
+
+    const nextBlockImage = await createReraComplianceBlockImage({
+      authorityLabel: block.authorityLabel,
+      registrationNumber: block.registrationNumber,
+      websiteUrl: block.websiteUrl,
+      textColor: normalizedColor,
+      ...(block.qrSourceUrl ? { qrSourceUrl: block.qrSourceUrl } : {})
+    });
+
+    pushToEditorHistory();
+    setCanvasLayers((layers) =>
+      layers.map((layer) =>
+        layer.id === selectedReraBlockLayer.id && layer.type === "image"
+          ? ({
+              ...layer,
+              src: nextBlockImage.dataUrl,
+              reraBlock: {
+                authorityLabel: block.authorityLabel,
+                registrationNumber: block.registrationNumber,
+                websiteUrl: block.websiteUrl,
+                textColor: normalizedColor,
+                ...(block.qrSourceUrl ? { qrSourceUrl: block.qrSourceUrl } : {})
+              }
+            } satisfies CanvasImageLayer)
+          : layer
+      )
+    );
+    setStatus("RERA block text color updated.");
+    setError(null);
   }
 
   function handleAddReraNumberLayer() {
@@ -1156,6 +1287,7 @@ export default function StudioAiEditPage() {
       pushToEditorHistory();
       setOriginalImage(templateImage);
       setCurrentImage(templateImage);
+      setCurrentSourceProjectId(null);
       setCurrentSourceOutputId(null);
       setCurrentSourceReviewState(null);
       setCanvasLayers(templateLayers);
@@ -1793,10 +1925,10 @@ export default function StudioAiEditPage() {
                   <p className="panel-label">Brand assets</p>
                   <h2>Assets</h2>
                 </div>
-                <p className="ai-editor-pane-copy">Add approved logo, RERA QR, or RERA text to the current canvas.</p>
+                <p className="ai-editor-pane-copy">Place approved logos and compliant RERA blocks on the current canvas.</p>
                 <div className="ai-editor-asset-list">
-                  {brandPlacementAssets.length ? (
-                    brandPlacementAssets.map((asset) => (
+                  {logoAssets.length ? (
+                    logoAssets.map((asset) => (
                       <button
                         className="ai-editor-asset-card"
                         disabled={!currentImage || !(asset.originalUrl ?? asset.previewUrl)}
@@ -1813,28 +1945,90 @@ export default function StudioAiEditPage() {
                         </span>
                         <span className="ai-editor-asset-copy">
                           <strong>{asset.label}</strong>
-                          <small>{asset.kind === "rera_qr" ? "RERA QR" : "Logo"}</small>
+                          <small>Logo</small>
                         </span>
                       </button>
                     ))
                   ) : (
-                    <div className="create-empty-state create-empty-state-compact">
-                      <p>No logo or QR assets uploaded for this brand yet.</p>
+                    <div className="ai-editor-pane-empty-state">
+                      <div className="ai-editor-pane-empty-icon">◫</div>
+                      <p>No logo assets uploaded for this brand yet.</p>
                     </div>
                   )}
                 </div>
-                <label className="create-field-label">
-                  RERA number text
-                  <input
-                    className="input"
-                    onChange={(event) => setReraNumberText(event.target.value)}
-                    placeholder="Example: P52100012345"
-                    value={reraNumberText}
-                  />
-                </label>
-                <button className="button button-ghost ai-editor-full-button" disabled={!currentImage} onClick={handleAddReraNumberLayer} type="button">
-                  Add RERA number text
-                </button>
+                <section className="ai-editor-rera-section">
+                  <div>
+                    <h3 className="ai-editor-pane-subtitle">RERA compliance block</h3>
+                    <p className="ai-editor-pane-copy">
+                      Uses {workspaceComplianceSettings.reraAuthorityLabel} with the configured website and the project-specific number + QR.
+                    </p>
+                  </div>
+                  <label className="create-field-label">
+                    Text color
+                    <div className="ai-editor-inline-color-input">
+                      <input
+                        className="ai-editor-color-input"
+                        onChange={(event) => setReraBlockTextColor(normalizeHexColor(event.target.value, "#111111"))}
+                        type="color"
+                        value={normalizeHexColor(reraBlockTextColor, "#111111")}
+                      />
+                      <input
+                        className="input"
+                        onChange={(event) => setReraBlockTextColor(normalizeHexColor(event.target.value.startsWith("#") ? event.target.value : `#${event.target.value}`, "#111111"))}
+                        placeholder="#111111"
+                        value={reraBlockTextColor}
+                      />
+                    </div>
+                  </label>
+                  <div className="ai-editor-rera-card-list">
+                    {reraComplianceOptions.length ? (
+                      reraComplianceOptions.map((option) => (
+                        <button
+                          className="ai-editor-rera-card"
+                          disabled={!currentImage}
+                          key={option.registration.id}
+                          onClick={() => void handleAddReraComplianceBlock(option)}
+                          type="button"
+                        >
+                          <span className="ai-editor-rera-preview">
+                            <span style={{ color: normalizeHexColor(reraBlockTextColor, "#111111") }}>{workspaceComplianceSettings.reraAuthorityLabel}</span>
+                            <strong style={{ color: normalizeHexColor(reraBlockTextColor, "#111111") }}>{option.registration.registrationNumber ?? "QR only"}</strong>
+                            <small style={{ color: normalizeHexColor(reraBlockTextColor, "#111111") }}>{workspaceComplianceSettings.reraWebsiteUrl}</small>
+                            {option.qrAsset?.thumbnailUrl ?? option.qrAsset?.previewUrl ? (
+                              <img alt={option.qrAsset.label} src={option.qrAsset.thumbnailUrl ?? option.qrAsset.previewUrl} />
+                            ) : (
+                              <i aria-hidden="true" />
+                            )}
+                          </span>
+                          <span className="ai-editor-asset-copy">
+                            <strong>{option.registration.label}</strong>
+                            <small>{option.registration.projectId ? (option.registration.isDefault ? "Project default" : "Project RERA") : "General RERA"}</small>
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="ai-editor-pane-empty-state">
+                        <div className="ai-editor-pane-empty-icon">▦</div>
+                        <p>No project RERA registration found. Upload number + QR from Library media.</p>
+                      </div>
+                    )}
+                  </div>
+                  <details className="ai-editor-manual-rera">
+                    <summary>Manual RERA text fallback</summary>
+                    <label className="create-field-label">
+                      RERA number text
+                      <input
+                        className="input"
+                        onChange={(event) => setReraNumberText(event.target.value)}
+                        placeholder="Example: P52100012345"
+                        value={reraNumberText}
+                      />
+                    </label>
+                    <button className="button button-ghost ai-editor-full-button" disabled={!currentImage} onClick={handleAddReraNumberLayer} type="button">
+                      Add RERA number text
+                    </button>
+                  </details>
+                </section>
                 {!currentImage ? <p className="create-hint">Upload an image or choose a template before placing assets.</p> : null}
               </div>
             ) : null}
@@ -1908,11 +2102,25 @@ export default function StudioAiEditPage() {
                 <button className="button button-ghost ai-editor-full-button" disabled={!currentImage} onClick={() => layerImageInputRef.current?.click()} type="button">
                   Add image layer
                 </button>
-                <h3 className="ai-editor-pane-subtitle">Generated posts</h3>
-                <p className="ai-editor-pane-copy">Use recently generated posts as full image sources for the current composition.</p>
-                <div className="ai-editor-upload-source-list">
-                  {generatedOutputAssets.length ? (
-                    generatedOutputAssets.map((output) => (
+                <section className="ai-editor-generated-section">
+                  <div className="ai-editor-generated-header">
+                    <div>
+                      <h3 className="ai-editor-pane-subtitle">Recent generated posts</h3>
+                      <p className="ai-editor-pane-copy">Use a post as your base image or add it as a layer.</p>
+                    </div>
+                    {generatedOutputAssets.length > recentGeneratedOutputAssets.length ? (
+                      <button
+                        className="create-inline-action ai-editor-view-more"
+                        onClick={() => setIsGeneratedPostsModalOpen(true)}
+                        type="button"
+                      >
+                        View more
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="ai-editor-upload-source-list is-compact">
+                    {recentGeneratedOutputAssets.length ? (
+                      recentGeneratedOutputAssets.map((output) => (
                       <button
                         className="ai-editor-upload-source-card"
                         disabled={!(output.originalUrl ?? output.previewUrl)}
@@ -1921,10 +2129,10 @@ export default function StudioAiEditPage() {
                         type="button"
                       >
                         <span className="ai-editor-upload-source-preview">
-                          {output.originalUrl ?? output.previewUrl ? (
+                          {output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl ? (
                             <img
                               alt={`Generated post ${output.outputIndex + 1}`}
-                              src={output.originalUrl ?? output.previewUrl}
+                              src={output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl}
                             />
                           ) : (
                             <span>Post</span>
@@ -1932,16 +2140,18 @@ export default function StudioAiEditPage() {
                         </span>
                         <span className="ai-editor-upload-source-copy">
                           <strong>{`Generated post #${output.outputIndex + 1}`}</strong>
-                          <small>{output.createdBy ? `Created by ${output.createdBy}` : "Generated output"}</small>
+                          <small>{output.versionNumber ? `Version ${output.versionNumber}` : "Gallery output"}</small>
                         </span>
                       </button>
-                    ))
-                  ) : (
-                    <div className="create-empty-state create-empty-state-compact">
-                      <p>No generated posts available yet for this brand.</p>
-                    </div>
-                  )}
-                </div>
+                      ))
+                    ) : (
+                      <div className="ai-editor-pane-empty-state">
+                        <div className="ai-editor-pane-empty-icon">⌘</div>
+                        <p>No generated posts available yet for this brand.</p>
+                      </div>
+                    )}
+                  </div>
+                </section>
                 <div className="create-picker-summary">
                   <div>
                     <p className="create-picker-summary-label">Current canvas</p>
@@ -1982,8 +2192,9 @@ export default function StudioAiEditPage() {
                       </button>
                     ))
                   ) : (
-                    <div className="create-empty-state create-empty-state-compact">
-                      <p>No editable layers yet.</p>
+                    <div className="ai-editor-pane-empty-state">
+                      <div className="ai-editor-pane-empty-icon">☰</div>
+                      <p>No editable layers yet. Add text or images to get started.</p>
                     </div>
                   )}
                 </div>
@@ -2022,14 +2233,29 @@ export default function StudioAiEditPage() {
                       </label>
                     ) : null}
                     {selectedLayer.type === "image" ? (
-                      <label className="create-field-label">
-                        Filter
-                        <select className="select-input" onChange={(event) => updateSelectedLayer({ filter: event.target.value as CanvasImageLayer["filter"] })} value={selectedLayer.filter}>
-                          <option value="none">None</option>
-                          <option value="grayscale">Grayscale</option>
-                          <option value="sepia">Sepia</option>
-                        </select>
-                      </label>
+                      selectedLayer.reraBlock ? (
+                        <label className="create-field-label">
+                          RERA text color
+                          <div className="ai-editor-inline-color-input">
+                            <input
+                              className="ai-editor-color-input"
+                              onChange={(event) => void handleSelectedReraBlockColorChange(event.target.value)}
+                              type="color"
+                              value={normalizeHexColor(selectedLayer.reraBlock.textColor, "#111111")}
+                            />
+                            <input
+                              className="input"
+                              onChange={(event) =>
+                                void handleSelectedReraBlockColorChange(
+                                  event.target.value.startsWith("#") ? event.target.value : `#${event.target.value}`
+                                )
+                              }
+                              placeholder="#111111"
+                              value={selectedLayer.reraBlock.textColor}
+                            />
+                          </div>
+                        </label>
+                      ) : null
                     ) : null}
                     <div className="ai-editor-control-grid">
                       <label className="create-field-label">
@@ -2166,46 +2392,47 @@ export default function StudioAiEditPage() {
                   </label>
                 ) : (
                   <>
-                    <p className="ai-editor-pane-copy">Add each requested change as a separate item. We’ll combine them into one AI prompt.</p>
-                    {listPromptItems.map((item, index) => (
-                      <div className="create-picker-summary-actions" key={`change-item-${index + 1}`}>
-                        <input
-                          className="input"
-                          onChange={(event) => handleListPromptItemChange(index, event.target.value)}
-                          placeholder={`Change ${index + 1}`}
-                          value={item}
-                        />
-                        <button
-                          className="create-inline-action"
-                          disabled={listPromptItems.length <= 1}
-                          onClick={() => handleRemoveListPromptItem(index)}
-                          type="button"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                    <div className="create-picker-summary-actions">
-                      <button className="create-inline-action" onClick={handleAddListPromptItem} type="button">
-                        Add change
-                      </button>
-                      <button
-                        className="create-inline-action"
-                        disabled={normalizedListPromptItems.length === 0 || isComposingPrompt}
-                        onClick={() => void handleComposePromptFromList()}
-                        type="button"
-                      >
-                        {isComposingPrompt ? "Composing..." : "Compose prompt"}
+                    <p className="ai-editor-pane-copy">Add each requested change separately. Apply AI edit will combine them automatically.</p>
+                    <div className="ai-editor-list-container">
+                      {listPromptItems.map((item, index) => (
+                        <div className="ai-editor-list-item" key={`change-item-${index + 1}`}>
+                          <textarea
+                            className="create-prompt-textarea is-list-item"
+                            onChange={(event) => {
+                              handleListPromptItemChange(index, event.target.value);
+                              event.currentTarget.style.height = "auto";
+                              event.currentTarget.style.height = event.currentTarget.scrollHeight + "px";
+                            }}
+                            onFocus={(event) => {
+                              event.currentTarget.style.height = "auto";
+                              event.currentTarget.style.height = event.currentTarget.scrollHeight + "px";
+                            }}
+                            placeholder={`Change ${index + 1}`}
+                            rows={1}
+                            value={item}
+                          />
+                          <button
+                            className="ai-editor-list-remove-btn"
+                            disabled={listPromptItems.length <= 1}
+                            onClick={() => handleRemoveListPromptItem(index)}
+                            title="Remove change"
+                            type="button"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M18 12H6" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="ai-editor-list-footer">
+                      <button className="ai-editor-list-add-btn" onClick={handleAddListPromptItem} type="button">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 5v14M5 12h14" />
+                        </svg>
+                        <span>Add change</span>
                       </button>
                     </div>
-                    {hasFreshComposedPrompt ? (
-                      <div className="create-picker-summary">
-                        <div>
-                          <p className="create-picker-summary-label">Composed prompt</p>
-                          <p className="ai-edit-plan-copy">{composedPrompt}</p>
-                        </div>
-                      </div>
-                    ) : null}
                   </>
                 )}
                 {isMaskFlow ? (
@@ -2261,12 +2488,13 @@ export default function StudioAiEditPage() {
 
       <main className="create-v2-main ai-edit-main">
         <section className="ai-edit-stage-panel">
-          <div className="ai-edit-stage-header">
-            <div>
-              <p className="panel-label">Canvas</p>
-              <h3>{currentImage ? currentImage.file.name : "Waiting for image"}</h3>
-            </div>
-            {currentImage ? (
+          {currentImage ? (
+            <div className="ai-edit-stage-header">
+              <div>
+                <p className="panel-label">Canvas</p>
+                <h3>{currentImage.file.name}</h3>
+                <span className="ai-edit-stage-dimensions">{dimensionsLabel}</span>
+              </div>
               <span className="pill pill-sm">
                 {isMaskFlow
                   ? toolMode === "target"
@@ -2278,8 +2506,8 @@ export default function StudioAiEditPage() {
                         : "Awaiting analysis"
                   : "Direct edit"}
               </span>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
 
           <div className="ai-edit-stage-shell">
             {currentImage && currentImageUrl ? (
@@ -2403,18 +2631,78 @@ export default function StudioAiEditPage() {
                 ) : null}
               </div>
             ) : (
-              <div className="create-empty-state create-empty-state-compact">
-                <div className="create-empty-icon" aria-hidden="true">□</div>
-                <h4>Empty canvas</h4>
-                <p>Upload a source image or choose a template to start editing.</p>
+              <div className="ai-edit-empty-canvas">
+                <div className="create-empty-icon" aria-hidden="true">
+                  <svg fill="none" height="40" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <polyline points="21 15 16 10 5 21" />
+                  </svg>
+                </div>
+                <h2>Start your composition</h2>
+                <p>Upload a high-quality image or select a base layer from your gallery to begin the AI editing process.</p>
                 <button className="button button-primary" onClick={() => fileInputRef.current?.click()} type="button">
-                  Upload image
+                  Upload source image
                 </button>
               </div>
             )}
           </div>
         </section>
       </main>
+
+      {isGeneratedPostsModalOpen ? (
+        <div className="drawer-overlay ai-editor-generated-modal-overlay" onClick={() => setIsGeneratedPostsModalOpen(false)}>
+          <div className="ai-editor-generated-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="drawer-header ai-editor-generated-modal-header">
+              <div>
+                <p className="panel-label">Gallery import</p>
+                <h2>Generated posts</h2>
+              </div>
+              <button className="drawer-close" onClick={() => setIsGeneratedPostsModalOpen(false)} type="button">
+                ×
+              </button>
+            </div>
+            <div className="ai-editor-generated-modal-body">
+              {generatedOutputAssets.length ? (
+                <div className="ai-editor-generated-modal-grid">
+                  {generatedOutputAssets.map((output) => (
+                    <button
+                      className="ai-editor-upload-source-card ai-editor-generated-modal-card"
+                      disabled={!(output.originalUrl ?? output.previewUrl)}
+                      key={output.id}
+                      onClick={() => {
+                        setIsGeneratedPostsModalOpen(false);
+                        void handleAddGeneratedOutputLayer(output);
+                      }}
+                      type="button"
+                    >
+                      <span className="ai-editor-upload-source-preview">
+                        {output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl ? (
+                          <img
+                            alt={`Generated post ${output.outputIndex + 1}`}
+                            src={output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl}
+                          />
+                        ) : (
+                          <span>Post</span>
+                        )}
+                      </span>
+                      <span className="ai-editor-upload-source-copy">
+                        <strong>{`Generated post #${output.outputIndex + 1}`}</strong>
+                        <small>{output.versionNumber ? `Version ${output.versionNumber}` : "Gallery output"}</small>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="create-empty-state">
+                  <strong>No generated posts yet</strong>
+                  <p>Create or approve posts first, then use them as editor sources here.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {isSaveDrawerOpen ? (
         <div className="drawer-overlay" onClick={() => setIsSaveDrawerOpen(false)}>
@@ -2803,6 +3091,80 @@ async function loadImage(source: string) {
     image.onerror = () => reject(new Error("Unable to load image."));
     image.src = source;
   });
+}
+
+async function createReraComplianceBlockImage(input: {
+  authorityLabel: string;
+  registrationNumber: string;
+  websiteUrl: string;
+  textColor: string;
+  qrSourceUrl?: string | null;
+}) {
+  const width = 920;
+  const height = 250;
+  const paddingX = 4;
+  const qrSize = input.qrSourceUrl ? 190 : 0;
+  const qrX = width - qrSize - paddingX;
+  const textMaxWidth = input.qrSourceUrl ? qrX - paddingX - 26 : width - paddingX * 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+
+  if (!ctx) {
+    throw new Error("Unable to create the RERA block.");
+  }
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = input.textColor;
+  ctx.textBaseline = "alphabetic";
+
+  ctx.font = "700 34px 'Helvetica Neue', Arial, sans-serif";
+  ctx.fillText(input.authorityLabel, paddingX, 48, textMaxWidth);
+  const labelWidth = Math.min(ctx.measureText(input.authorityLabel).width, textMaxWidth * 0.42);
+  ctx.strokeStyle = input.textColor;
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(paddingX + labelWidth + 16, 48);
+  ctx.lineTo(textMaxWidth, 48);
+  ctx.stroke();
+
+  ctx.font = fitCanvasFont(ctx, input.registrationNumber, "700", textMaxWidth, 86, 42);
+  ctx.fillText(input.registrationNumber, paddingX, 132, textMaxWidth);
+
+  ctx.font = fitCanvasFont(ctx, input.websiteUrl, "700", textMaxWidth, 34, 22);
+  ctx.fillText(input.websiteUrl, paddingX, 196, textMaxWidth);
+
+  if (input.qrSourceUrl) {
+    const qrImage = await loadImage(input.qrSourceUrl);
+    ctx.drawImage(qrImage, qrX, 30, qrSize, qrSize);
+  }
+
+  return {
+    dataUrl: canvas.toDataURL("image/png"),
+    width,
+    height
+  };
+}
+
+function fitCanvasFont(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  weight: "600" | "700" | "800",
+  maxWidth: number,
+  startSize: number,
+  minSize: number
+) {
+  let size = startSize;
+  while (size > minSize) {
+    const font = `${weight} ${size}px 'Helvetica Neue', Arial, sans-serif`;
+    ctx.font = font;
+    if (ctx.measureText(text).width <= maxWidth) {
+      return font;
+    }
+    size -= 2;
+  }
+  return `${weight} ${minSize}px 'Helvetica Neue', Arial, sans-serif`;
 }
 
 function downloadFile(file: File) {

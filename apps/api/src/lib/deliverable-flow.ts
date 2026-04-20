@@ -3,7 +3,8 @@ import type {
   BrandAssetRecord,
   CreativeBrief,
   OutputVerdict,
-  PostVersionRecord
+  PostVersionRecord,
+  ProjectReraRegistrationRecord
 } from "@image-lab/contracts";
 import { compilePromptPackage } from "./creative-director.js";
 import { buildInferredReferenceSelection } from "./creative-reference-selection.js";
@@ -18,7 +19,8 @@ import {
 import {
   getActiveBrandProfile,
   getBrand,
-  listBrandAssets
+  listBrandAssets,
+  listProjectReraRegistrations
 } from "./repository.js";
 import {
   getFestival,
@@ -34,8 +36,19 @@ import { randomId } from "./utils.js";
 
 function selectReraQrAssetForProject(
   assets: BrandAssetRecord[],
-  projectId?: string | null
+  projectId?: string | null,
+  registrations: ProjectReraRegistrationRecord[] = []
 ) {
+  if (projectId) {
+    const scopedRegistration =
+      registrations.find((registration) => registration.projectId === projectId && registration.isDefault && registration.qrAssetId) ??
+      registrations.find((registration) => registration.projectId === projectId && registration.qrAssetId);
+    const registrationAsset = scopedRegistration?.qrAssetId
+      ? assets.find((asset) => asset.id === scopedRegistration.qrAssetId && asset.kind === "rera_qr")
+      : null;
+    if (registrationAsset) return registrationAsset;
+  }
+
   return (
     assets.find((asset) => asset.kind === "rera_qr" && asset.projectId === (projectId ?? null)) ??
     assets.find((asset) => asset.kind === "rera_qr" && asset.projectId == null) ??
@@ -59,7 +72,10 @@ export async function compileDeliverablePromptPackage(params: {
   const festivalId =
     params.briefOverride?.festivalId ??
     (typeof deliverable.sourceJson?.festivalId === "string" ? deliverable.sourceJson.festivalId : null);
-  const allAssets = await listBrandAssets(deliverable.brandId);
+  const [allAssets, reraRegistrations] = await Promise.all([
+    listBrandAssets(deliverable.brandId),
+    listProjectReraRegistrations(brand.workspaceId, brand.id)
+  ]);
   const project = deliverable.projectId ? await getProject(deliverable.projectId).catch(() => null) : null;
   const projectProfileVersion = deliverable.projectId
     ? await getActiveProjectProfile(deliverable.projectId).catch(() => null)
@@ -72,7 +88,7 @@ export async function compileDeliverablePromptPackage(params: {
       : null;
   const selectedReraQrAsset =
     params.briefOverride?.includeReraQr
-      ? selectReraQrAssetForProject(allAssets, project?.id ?? null)
+      ? selectReraQrAssetForProject(allAssets, project?.id ?? null, reraRegistrations)
       : null;
   const brief = buildCreativeBrief({
     brandId: deliverable.brandId,

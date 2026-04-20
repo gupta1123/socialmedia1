@@ -6,19 +6,19 @@ import type {
   AssetKind,
   BrandAssetRecord,
   CreativeTemplateRecord,
-  PostingWindowRecord,
   PostTypeRecord,
+  ProjectReraRegistrationRecord,
   ProjectRecord
 } from "@image-lab/contracts";
 import {
   deleteBrandAsset,
   getBrandAssets,
   getPlanningTemplates,
-  getPostingWindows,
   getPostTypes,
-  getProjects
+  getProjectReraRegistrations,
+  getProjects,
+  setDefaultProjectReraRegistration
 } from "../../../lib/api";
-import { formatLocalTimeLabel, formatWeekdayLabel } from "../../../lib/posting-windows";
 import { ImagePreviewTrigger } from "../image-preview";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions, useRegisterTopbarControls } from "../topbar-actions-context";
@@ -27,8 +27,7 @@ import { Skeleton } from "../skeleton";
 const LIBRARY_TABS = [
   { id: "system", label: "System" },
   { id: "templates", label: "Templates" },
-  { id: "assets", label: "Media" },
-  { id: "scheduling", label: "Scheduling" }
+  { id: "assets", label: "Media" }
 ] as const;
 
 type LibraryTab = (typeof LIBRARY_TABS)[number]["id"];
@@ -37,14 +36,12 @@ type LoadedTabsState = {
   system: boolean;
   templates: boolean;
   assets: boolean;
-  scheduling: boolean;
 };
 
 const DEFAULT_LOADED_TABS: LoadedTabsState = {
   system: false,
   templates: false,
-  assets: false,
-  scheduling: false
+  assets: false
 };
 
 export default function LibraryPage() {
@@ -53,9 +50,9 @@ export default function LibraryPage() {
   const [tab, setTab] = useState<LibraryTab>("system");
   const [assets, setAssets] = useState<BrandAssetRecord[]>([]);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [reraRegistrations, setReraRegistrations] = useState<ProjectReraRegistrationRecord[]>([]);
   const [templates, setTemplates] = useState<CreativeTemplateRecord[]>([]);
   const [postTypes, setPostTypes] = useState<PostTypeRecord[]>([]);
-  const [postingWindows, setPostingWindows] = useState<PostingWindowRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loadedTabs, setLoadedTabs] = useState<LoadedTabsState>(DEFAULT_LOADED_TABS);
@@ -64,26 +61,33 @@ export default function LibraryPage() {
   const [file, setFile] = useState<File | null>(null);
   const [assetKind, setAssetKind] = useState<AssetKind>("reference");
   const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [reraNumber, setReraNumber] = useState("");
   const [replacingAssetId, setReplacingAssetId] = useState<string | null>(null);
+  const complianceSettings = bootstrap?.workspaceComplianceSettings ?? {
+    reraAuthorityLabel: "MahaRERA",
+    reraWebsiteUrl: "https://maharera.maharashtra.gov.in",
+    reraTextColor: "#111111"
+  };
 
   const topbarActions = useMemo(
-    () => (
-      <button
-        className="button button-primary"
-        disabled={!activeBrand || pendingAction === "upload-reference"}
-        onClick={() => {
-          setTab("assets");
-          setAssetKind("reference");
-          setSelectedProjectId("");
-          setIsDrawerOpen(true);
-        }}
-        title={!activeBrand ? "Set an active brand first" : ""}
-        type="button"
-      >
-        {pendingAction === "upload-reference" ? "Uploading…" : "Upload asset"}
-      </button>
-    ),
-    [activeBrand, pendingAction]
+    () =>
+      tab === "assets" ? (
+        <button
+          className="button button-primary"
+          disabled={!activeBrand || pendingAction === "upload-reference"}
+          onClick={() => {
+            setAssetKind("reference");
+            setSelectedProjectId("");
+            setReraNumber("");
+            setIsDrawerOpen(true);
+          }}
+          title={!activeBrand ? "Set an active brand first" : ""}
+          type="button"
+        >
+          {pendingAction === "upload-reference" ? "Uploading…" : "Upload asset"}
+        </button>
+      ) : null,
+    [activeBrand, pendingAction, tab]
   );
 
   const topbarControls = useMemo(
@@ -112,9 +116,9 @@ export default function LibraryPage() {
   useEffect(() => {
     setAssets([]);
     setProjects([]);
+    setReraRegistrations([]);
     setTemplates([]);
     setPostTypes([]);
-    setPostingWindows([]);
     setLoadedTabs(DEFAULT_LOADED_TABS);
   }, [activeBrandId]);
 
@@ -129,15 +133,17 @@ export default function LibraryPage() {
 
     async function loadProjectContext() {
       try {
-        const [projectRecords, postTypeRecords] = await Promise.all([
+        const [projectRecords, postTypeRecords, registrations] = await Promise.all([
           getProjects(token, { brandId }),
-          getPostTypes(token)
+          getPostTypes(token),
+          getProjectReraRegistrations(token, brandId)
         ]);
 
         if (cancelled) return;
 
         setProjects(projectRecords);
         setPostTypes(postTypeRecords);
+        setReraRegistrations(registrations);
         setLoadedTabs((current) => ({ ...current, system: true }));
         setError(null);
       } catch (cause) {
@@ -165,9 +171,13 @@ export default function LibraryPage() {
 
     async function loadAssets() {
       try {
-        const assetRecords = await getBrandAssets(token, brandId);
+        const [assetRecords, registrations] = await Promise.all([
+          getBrandAssets(token, brandId),
+          getProjectReraRegistrations(token, brandId)
+        ]);
         if (cancelled) return;
         setAssets(assetRecords);
+        setReraRegistrations(registrations);
         setError(null);
         setLoadedTabs((current) => ({ ...current, assets: true }));
       } catch (cause) {
@@ -200,7 +210,7 @@ export default function LibraryPage() {
           return;
         }
 
-        if ((tab === "system" && loadedTabs.system) || (tab === "templates" && loadedTabs.templates) || (tab === "scheduling" && loadedTabs.scheduling)) {
+        if ((tab === "system" && loadedTabs.system) || (tab === "templates" && loadedTabs.templates)) {
           setLoading(false);
           return;
         }
@@ -208,15 +218,17 @@ export default function LibraryPage() {
         setLoading(true);
 
         if (tab === "system") {
-          const [projectRecords, postTypeRecords] = await Promise.all([
+          const [projectRecords, postTypeRecords, registrations] = await Promise.all([
             getProjects(token, activeBrandId ? { brandId: activeBrandId } : undefined),
-            getPostTypes(token)
+            getPostTypes(token),
+            activeBrandId ? getProjectReraRegistrations(token, activeBrandId) : Promise.resolve([])
           ]);
 
           if (cancelled) return;
 
           setProjects(projectRecords);
           setPostTypes(postTypeRecords);
+          setReraRegistrations(registrations);
           setLoadedTabs((current) => ({ ...current, system: true }));
         }
 
@@ -225,15 +237,6 @@ export default function LibraryPage() {
           if (cancelled) return;
           setTemplates(templateRecords);
           setLoadedTabs((current) => ({ ...current, templates: true }));
-        }
-
-        if (tab === "scheduling") {
-          const postingWindowRecords = await getPostingWindows(token, activeBrandId ?? undefined);
-
-          if (cancelled) return;
-
-          setPostingWindows(postingWindowRecords);
-          setLoadedTabs((current) => ({ ...current, scheduling: true }));
         }
 
         setError(null);
@@ -253,7 +256,7 @@ export default function LibraryPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeBrandId, loadedTabs.scheduling, loadedTabs.system, loadedTabs.templates, sessionToken, tab]);
+  }, [activeBrandId, loadedTabs.system, loadedTabs.templates, sessionToken, tab]);
 
   const activeBrands = useMemo(
     () => (activeBrandId ? bootstrap?.brands.filter((brand) => brand.id === activeBrandId) ?? [] : bootstrap?.brands ?? []),
@@ -359,23 +362,23 @@ export default function LibraryPage() {
       }
     }
 
-    if (assetKind === "rera_qr" && !selectedProjectId) {
-      setError("Choose the project this RERA QR belongs to.");
-      return;
-    }
-
     const success = await uploadBrandAssetFile(
       file,
       label || file.name,
       assetKind,
-      assetKind === "rera_qr" || assetKind === "product" ? selectedProjectId || null : null
+      assetKind === "rera_qr" || assetKind === "product" ? selectedProjectId || null : null,
+      assetKind === "rera_qr" && reraNumber.trim() ? { reraNumber: reraNumber.trim() } : undefined
     );
     if (success) {
       if (sessionToken && activeBrandId) {
         const token = sessionToken;
         const brandId = activeBrandId;
-        const assetRecords = await getBrandAssets(token, brandId);
+        const [assetRecords, registrations] = await Promise.all([
+          getBrandAssets(token, brandId),
+          getProjectReraRegistrations(token, brandId)
+        ]);
         setAssets(assetRecords);
+        setReraRegistrations(registrations);
         setError(null);
         setLoadedTabs((current) => ({ ...current, assets: true }));
       }
@@ -383,6 +386,7 @@ export default function LibraryPage() {
       setFile(null);
       setAssetKind("reference");
       setSelectedProjectId("");
+      setReraNumber("");
       setIsDrawerOpen(false);
       setReplacingAssetId(null);
     }
@@ -392,6 +396,22 @@ export default function LibraryPage() {
     () => new Map(projects.map((project) => [project.id, project.name])),
     [projects]
   );
+  const reraRegistrationByQrAssetId = useMemo(
+    () => new Map(reraRegistrations.filter((registration) => registration.qrAssetId).map((registration) => [registration.qrAssetId!, registration])),
+    [reraRegistrations]
+  );
+
+  async function handleSetDefaultReraRegistration(registrationId: string) {
+    if (!sessionToken || !activeBrandId) return;
+    const updated = await setDefaultProjectReraRegistration(sessionToken, activeBrandId, registrationId);
+    setReraRegistrations((current) =>
+      current.map((registration) =>
+        registration.projectId === updated.projectId
+          ? { ...registration, isDefault: registration.id === updated.id }
+          : registration
+      )
+    );
+  }
 
   return (
     <div className="page-stack">
@@ -569,7 +589,9 @@ export default function LibraryPage() {
                     </div>
                     {section.assets.length > 0 ? (
                       <div className="gallery-grid library-gallery-grid library-media-grid">
-                        {section.assets.map((asset) => (
+                        {section.assets.map((asset) => {
+                          const reraRegistration = reraRegistrationByQrAssetId.get(asset.id) ?? null;
+                          return (
                           <article className="review-card" key={asset.id} style={{ padding: "12px" }}>
                             <div className="creative-preview-frame" style={{ minHeight: "200px", padding: "8px" }}>
                               {asset.thumbnailUrl ?? asset.previewUrl ? (
@@ -581,6 +603,9 @@ export default function LibraryPage() {
                                     { label: "Label", value: asset.label },
                                     ...(asset.projectId
                                       ? [{ label: "Project", value: projectNameById.get(asset.projectId) ?? "Project-linked" }]
+                                      : []),
+                                    ...(reraRegistration?.registrationNumber
+                                      ? [{ label: "RERA number", value: reraRegistration.registrationNumber }]
                                       : [])
                                   ]}
                                   sections={[
@@ -609,6 +634,21 @@ export default function LibraryPage() {
                                   {projectNameById.get(asset.projectId) ?? "Project-linked"}
                                 </p>
                               ) : null}
+                              {reraRegistration ? (
+                                <div className="library-rera-registration-card">
+                                  <span>{reraRegistration.isDefault ? "Default RERA" : "RERA registration"}</span>
+                                  <strong>{reraRegistration.registrationNumber ?? "QR only"}</strong>
+                                  {!reraRegistration.isDefault ? (
+                                    <button
+                                      className="create-inline-action"
+                                      onClick={() => void handleSetDefaultReraRegistration(reraRegistration.id)}
+                                      type="button"
+                                    >
+                                      Make default
+                                    </button>
+                                  ) : null}
+                                </div>
+                              ) : null}
                               <div className="review-tag-row">
                                 <span className="review-tag">{section.tagLabel}</span>
                               </div>
@@ -635,8 +675,12 @@ export default function LibraryPage() {
                                       if (!sessionToken || !activeBrandId) return;
                                       if (!confirm("Remove this asset?")) return;
                                       await deleteBrandAsset(sessionToken, activeBrandId, asset.id);
-                                      const assetRecords = await getBrandAssets(sessionToken, activeBrandId);
+                                      const [assetRecords, registrations] = await Promise.all([
+                                        getBrandAssets(sessionToken, activeBrandId),
+                                        getProjectReraRegistrations(sessionToken, activeBrandId)
+                                      ]);
                                       setAssets(assetRecords);
+                                      setReraRegistrations(registrations);
                                     }}
                                     type="button"
                                   >
@@ -646,7 +690,8 @@ export default function LibraryPage() {
                               )}
                             </div>
                           </article>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
                       <div className="empty-state compact">
@@ -674,44 +719,14 @@ export default function LibraryPage() {
           </section>
         ) : null}
 
-
-        {!loading && tab === "scheduling" ? (
-          <div className="library-section-stack" style={{ gap: "48px" }}>
-            <section>
-              <div style={{ marginBottom: "24px", paddingBottom: "12px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <h2 style={{ fontSize: "14px", fontWeight: 600, margin: 0, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--ink)" }}>Preferred posting times</h2>
-                  <p style={{ margin: "8px 0 0", color: "var(--muted)", fontSize: "14px" }}>
-                    These show up as quick time suggestions when scheduling approved posts.
-                  </p>
-                </div>
-              </div>
-              {postingWindows.length > 0 ? (
-                <div className="library-list">
-                  {postingWindows.map((window) => (
-                    <article className="library-list-row" key={window.id}>
-                      <strong>{window.label || `${formatWeekdayLabel(window.weekday)} · ${formatLocalTimeLabel(window.localTime)}`}</strong>
-                      <span>{formatWeekdayLabel(window.weekday)} at {formatLocalTimeLabel(window.localTime)}</span>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <div className="empty-state compact">
-                  <strong>No preferred posting times yet</strong>
-                  <p>Save a few usual slots so scheduling can suggest times instantly.</p>
-                </div>
-              )}
-            </section>
-          </div>
-        ) : null}
       </section>
 
       {isDrawerOpen ? (
-        <div className="drawer-overlay" onClick={() => { setIsDrawerOpen(false); setReplacingAssetId(null); setSelectedProjectId(""); }}>
+        <div className="drawer-overlay" onClick={() => { setIsDrawerOpen(false); setReplacingAssetId(null); setSelectedProjectId(""); setReraNumber(""); }}>
           <div className="drawer-content" onClick={(event) => event.stopPropagation()}>
             <div className="drawer-header">
               <h2>{replacingAssetId ? "Replace asset" : "Upload asset"}</h2>
-              <button className="drawer-close" onClick={() => { setIsDrawerOpen(false); setReplacingAssetId(null); setSelectedProjectId(""); }} type="button">
+              <button className="drawer-close" onClick={() => { setIsDrawerOpen(false); setReplacingAssetId(null); setSelectedProjectId(""); setReraNumber(""); }} type="button">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
                 </svg>
@@ -729,6 +744,9 @@ export default function LibraryPage() {
                         setAssetKind(nextKind);
                         if (nextKind !== "rera_qr" && nextKind !== "product") {
                           setSelectedProjectId("");
+                        }
+                        if (nextKind !== "rera_qr") {
+                          setReraNumber("");
                         }
                       }}
                       value={assetKind}
@@ -763,7 +781,7 @@ export default function LibraryPage() {
                         onChange={(event) => setSelectedProjectId(event.target.value)}
                         value={selectedProjectId}
                       >
-                        <option value="">{assetKind === "rera_qr" ? "Select project" : "Brand-level / no project"}</option>
+                        <option value="">{assetKind === "rera_qr" ? "No project / general RERA" : "Brand-level / no project"}</option>
                         {projects.map((project) => (
                           <option key={project.id} value={project.id}>
                             {project.name}
@@ -771,6 +789,28 @@ export default function LibraryPage() {
                         ))}
                       </select>
                     </label>
+                  ) : null}
+
+                  {assetKind === "rera_qr" ? (
+                    <>
+                      <label className="field-label">
+                        RERA registration number optional
+                        <input
+                          onChange={(event) => setReraNumber(event.target.value)}
+                          placeholder="e.g. P52100012345"
+                          value={reraNumber}
+                        />
+                      </label>
+                      <div className="library-rera-block-preview">
+                        <span style={{ color: complianceSettings.reraTextColor }}>{complianceSettings.reraAuthorityLabel}</span>
+                        <strong style={{ color: complianceSettings.reraTextColor }}>{reraNumber.trim() || "P5210054534"}</strong>
+                        <small style={{ color: complianceSettings.reraTextColor }}>{complianceSettings.reraWebsiteUrl}</small>
+                        <i aria-hidden="true" />
+                      </div>
+                      <p className="create-hint">
+                        The editor will place this QR with the number and configured website as one compliant top-right block.
+                      </p>
+                    </>
                   ) : null}
 
                 <label className="field-label">

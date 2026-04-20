@@ -1,12 +1,17 @@
 import type { FastifyInstance } from "fastify";
-import { AssetKindSchema, BrandAssetSchema, BrandDetailSchema, CreateBrandSchema, BrandProfileSchema, UpdateBrandSchema } from "@image-lab/contracts";
+import { AssetKindSchema, BrandAssetSchema, BrandDetailSchema, CreateBrandSchema, BrandProfileSchema, ProjectReraRegistrationSchema, UpdateBrandSchema, UpdateProjectReraRegistrationSchema } from "@image-lab/contracts";
 import {
   getPrimaryWorkspace,
   assertWorkspaceRole,
+  createProjectReraRegistration,
+  deleteProjectReraRegistration,
   getBrand,
   getBrandAssetCounts,
   getBrandProfileVersion,
-  listBrandAssets
+  listBrandAssets,
+  listProjectReraRegistrations,
+  setDefaultProjectReraRegistration,
+  updateProjectReraRegistration
 } from "../lib/repository.js";
 import { getProject } from "../lib/planning-repository.js";
 import { supabaseAdmin } from "../lib/supabase.js";
@@ -61,6 +66,107 @@ export async function registerBrandRoutes(app: FastifyInstance) {
         originalUrl: assetUrls[index]?.originalUrl
       }))
     );
+  });
+
+  app.get("/api/brands/:brandId/rera-registrations", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    const brand = await getBrand((request.params as { brandId: string }).brandId);
+    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
+
+    const registrations = await listProjectReraRegistrations(brand.workspaceId, brand.id);
+    return ProjectReraRegistrationSchema.array().parse(registrations);
+  });
+
+  app.patch("/api/brands/:brandId/rera-registrations/:registrationId/default", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    const { brandId, registrationId } = request.params as { brandId: string; registrationId: string };
+    const brand = await getBrand(brandId);
+    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
+
+    const registrations = await listProjectReraRegistrations(brand.workspaceId, brand.id);
+    if (!registrations.some((registration) => registration.id === registrationId)) {
+      return reply.notFound("RERA registration not found");
+    }
+
+    const registration = await setDefaultProjectReraRegistration(registrationId);
+    return ProjectReraRegistrationSchema.parse(registration);
+  });
+
+  app.patch("/api/brands/:brandId/rera-registrations/:registrationId", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    const { brandId, registrationId } = request.params as { brandId: string; registrationId: string };
+    const brand = await getBrand(brandId);
+    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
+
+    const body = UpdateProjectReraRegistrationSchema.parse(request.body);
+    const registrations = await listProjectReraRegistrations(brand.workspaceId, brand.id);
+    const current = registrations.find((registration) => registration.id === registrationId);
+    if (!current) {
+      return reply.notFound("RERA registration not found");
+    }
+
+    if (body.qrAssetId) {
+      const { data: qrAsset, error: qrAssetError } = await supabaseAdmin
+        .from("brand_assets")
+        .select("id, kind, brand_id, project_id")
+        .eq("id", body.qrAssetId)
+        .maybeSingle<{ id: string; kind: string; brand_id: string; project_id: string | null }>();
+
+      if (qrAssetError) {
+        throw qrAssetError;
+      }
+
+      if (!qrAsset || qrAsset.brand_id !== brand.id || qrAsset.kind !== "rera_qr") {
+        return reply.badRequest("Selected QR asset is not a valid RERA QR for this brand");
+      }
+
+      if (current.projectId && qrAsset.project_id && qrAsset.project_id !== current.projectId) {
+        return reply.badRequest("Selected QR asset belongs to a different project");
+      }
+    }
+
+    const registration = await updateProjectReraRegistration({
+      registrationId,
+      registrationNumber: body.registrationNumber,
+      label: body.label,
+      qrAssetId: body.qrAssetId
+    });
+    return ProjectReraRegistrationSchema.parse(registration);
+  });
+
+  app.delete("/api/brands/:brandId/rera-registrations/:registrationId", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    const { brandId, registrationId } = request.params as { brandId: string; registrationId: string };
+    const brand = await getBrand(brandId);
+    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
+
+    const registrations = await listProjectReraRegistrations(brand.workspaceId, brand.id);
+    if (!registrations.some((registration) => registration.id === registrationId)) {
+      return reply.notFound("RERA registration not found");
+    }
+
+    await deleteProjectReraRegistration(registrationId);
+    return { success: true };
   });
 
   app.post("/api/brands", { preHandler: app.authenticate }, async (request, reply) => {
@@ -203,6 +309,7 @@ export async function registerBrandRoutes(app: FastifyInstance) {
     let labelValue: string | null = null;
     let kindValue: string | null = null;
     let projectIdValue: string | null = null;
+    let reraNumberValue: string | null = null;
     let metadataJsonValue: Record<string, unknown> = {};
 
     for await (const part of request.parts()) {
@@ -231,6 +338,10 @@ export async function registerBrandRoutes(app: FastifyInstance) {
         projectIdValue = typeof part.value === "string" ? part.value : String(part.value ?? "");
       }
 
+      if (part.fieldname === "reraNumber") {
+        reraNumberValue = typeof part.value === "string" ? part.value : String(part.value ?? "");
+      }
+
       if (part.fieldname === "metadataJson") {
         const raw = typeof part.value === "string" ? part.value : String(part.value ?? "");
         if (raw.trim()) {
@@ -251,6 +362,7 @@ export async function registerBrandRoutes(app: FastifyInstance) {
     const kind = AssetKindSchema.parse(kindValue?.trim() || "reference");
     const label = labelValue?.trim() || filePart.filename;
     const projectId = projectIdValue?.trim() || null;
+    const reraNumber = reraNumberValue?.trim() || "";
     const buffer = filePart.buffer;
     const assetId = randomId();
 
@@ -295,12 +407,24 @@ export async function registerBrandRoutes(app: FastifyInstance) {
       thumbnail_width: thumbnail?.thumbnailWidth ?? null,
       thumbnail_height: thumbnail?.thumbnailHeight ?? null,
       thumbnail_bytes: thumbnail?.thumbnailBytes ?? null,
-      metadata_json: metadataJsonValue,
+      metadata_json: kind === "rera_qr" && reraNumber ? { ...metadataJsonValue, reraNumber } : metadataJsonValue,
       created_by: viewer.userId
     });
 
     if (error) {
       throw error;
+    }
+
+    if (kind === "rera_qr" && (projectId || reraNumber)) {
+      await createProjectReraRegistration({
+        workspaceId: brand.workspaceId,
+        brandId: brand.id,
+        projectId,
+        registrationNumber: reraNumber || null,
+        label,
+        qrAssetId: assetId,
+        createdBy: viewer.userId
+      });
     }
 
     invalidateRuntimeCache(`brand-asset-counts:${brand.id}`);

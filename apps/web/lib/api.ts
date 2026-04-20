@@ -61,6 +61,7 @@ import type {
   PostingWindowRecord,
   PromptPackage,
   ProjectDetail,
+  ProjectReraRegistrationRecord,
   ProjectRecord,
   PublicationRecord,
   QueueEntry,
@@ -76,10 +77,13 @@ import type {
   UpdateCreativeTemplateInput,
   UpdateDeliverableInput,
   UpdatePostingWindowInput,
+  UpdateProjectReraRegistrationInput,
   UpdatePublicationInput,
   UpdateProjectInput,
   UpdateSeriesInput,
+  UpdateWorkspaceComplianceSettingsInput,
   UpdateWorkspaceMemberRoleInput,
+  WorkspaceComplianceSettings,
   WorkspaceMemberDeleteResponse,
   WorkspaceMemberPasswordSetResponse,
   WorkspaceMemberRecord,
@@ -192,6 +196,10 @@ function getCacheTtlMs(path: string) {
 
   if (path.startsWith("/api/workspace-members")) {
     return 20_000;
+  }
+
+  if (path.startsWith("/api/workspace/compliance-settings")) {
+    return 10_000;
   }
 
   if (path.startsWith("/api/credits")) {
@@ -1026,6 +1034,14 @@ export function setWorkspaceMemberPassword(token: string, userId: string, payloa
   });
 }
 
+export function updateWorkspaceComplianceSettings(token: string, payload: UpdateWorkspaceComplianceSettingsInput) {
+  return request<WorkspaceComplianceSettings>("/api/workspace/compliance-settings", token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
 export function getWorkspaceCreditWallet(token: string) {
   return request<WorkspaceCreditWallet>("/api/credits/wallet", token);
 }
@@ -1338,7 +1354,7 @@ export function updateBrand(token: string, brandId: string, payload: UpdateBrand
 export function uploadBrandAsset(
   token: string,
   brandId: string,
-  payload: { file: File; kind: string; label: string; projectId?: string | null }
+  payload: { file: File; kind: string; label: string; projectId?: string | null; reraNumber?: string }
 ) {
   const body = new FormData();
   body.append("kind", payload.kind);
@@ -1346,11 +1362,38 @@ export function uploadBrandAsset(
   if (payload.projectId) {
     body.append("projectId", payload.projectId);
   }
+  if (payload.reraNumber) {
+    body.append("reraNumber", payload.reraNumber);
+  }
   body.append("file", payload.file);
 
   return request<{ id: string; storagePath: string }>(`/api/brands/${brandId}/assets`, token, {
     method: "POST",
     body
+  });
+}
+
+export function getProjectReraRegistrations(token: string, brandId: string) {
+  return request<ProjectReraRegistrationRecord[]>(`/api/brands/${brandId}/rera-registrations`, token);
+}
+
+export function setDefaultProjectReraRegistration(token: string, brandId: string, registrationId: string) {
+  return request<ProjectReraRegistrationRecord>(`/api/brands/${brandId}/rera-registrations/${registrationId}/default`, token, {
+    method: "PATCH"
+  });
+}
+
+export function updateProjectReraRegistration(token: string, brandId: string, registrationId: string, payload: UpdateProjectReraRegistrationInput) {
+  return request<ProjectReraRegistrationRecord>(`/api/brands/${brandId}/rera-registrations/${registrationId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteProjectReraRegistration(token: string, brandId: string, registrationId: string) {
+  return request<{ success: boolean }>(`/api/brands/${brandId}/rera-registrations/${registrationId}`, token, {
+    method: "DELETE"
   });
 }
 

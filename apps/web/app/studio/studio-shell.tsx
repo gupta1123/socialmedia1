@@ -249,7 +249,7 @@ const adminSidebarNavigation = [
 
 const workspaceAdminSidebarNavigation = [
   {
-    category: "Mode",
+    category: "",
     items: [
       {
         href: "/studio",
@@ -267,19 +267,6 @@ const workspaceAdminSidebarNavigation = [
     category: "Workspace",
     items: [
       {
-        href: "/studio/workspace-admin",
-        label: "Overview",
-        matchPath: "/studio/workspace-admin",
-        excludeMatchPrefixes: ["/studio/workspace-admin/team", "/studio/workspace-admin/posting-windows"],
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 13h6V5H4z" />
-            <path d="M14 19h6V5h-6z" />
-            <path d="M4 19h6v-2H4z" />
-          </svg>
-        )
-      },
-      {
         href: "/studio/workspace-admin/team",
         label: "Team Access",
         matchPath: "/studio/workspace-admin/team",
@@ -289,6 +276,17 @@ const workspaceAdminSidebarNavigation = [
             <circle cx="9.5" cy="7" r="3.5" />
             <path d="M20 8v6" />
             <path d="M17 11h6" />
+          </svg>
+        )
+      },
+      {
+        href: "/studio/workspace-admin/compliance",
+        label: "Compliance",
+        matchPath: "/studio/workspace-admin/compliance",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3 5 6v5c0 4.5 2.9 8.5 7 10 4.1-1.5 7-5.5 7-10V6z" />
+            <path d="m9 12 2 2 4-5" />
           </svg>
         )
       },
@@ -376,6 +374,10 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   "/studio/workspace-admin/team": {
     title: "Team Access",
     subtitle: "Add users, manage workspace access, and set passwords directly.",
+  },
+  "/studio/workspace-admin/compliance": {
+    title: "Compliance",
+    subtitle: "Configure default RERA compliance block settings for this workspace.",
   },
   "/studio/workspace-admin/posting-windows": {
     title: "Posting Windows",
@@ -629,8 +631,8 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
 
   const topbarTitle = topbarMeta?.title ?? pageMeta.title;
   const topbarSubtitle = topbarMeta?.subtitle ?? pageMeta.subtitle;
-  const sidebarEyebrow = showAdminSidebar ? "Platform admin" : showWorkspaceAdminSidebar ? "Workspace admin" : "Workspace";
-  const sidebarWordmark = showAdminSidebar ? "Admin Console" : showWorkspaceAdminSidebar ? "Admin Workspace" : "Briefly Social";
+  const sidebarEyebrow = showAdminSidebar ? "Platform admin" : "Workspace";
+  const sidebarWordmark = showAdminSidebar ? "Admin Console" : "Briefly Social";
 
   return (
     <div className={shellCollapsed ? "workspace-shell sidebar-collapsed" : "workspace-shell"}>
@@ -658,10 +660,10 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
         {/* Navigation */}
         <nav className="sidebar-nav">
           {navigation.map((item: any, idx: number) => {
-            if (item.category) {
+            if (Array.isArray(item.items)) {
               return (
                 <div key={idx} className="nav-section">
-                  {!shellCollapsed && <span className="nav-section-label">{item.category}</span>}
+                  {!shellCollapsed && item.category ? <span className="nav-section-label">{item.category}</span> : null}
                   {item.items.map((sub: any) => {
                     const matchPath = sub.matchPath ?? sub.href.split("?")[0];
                     const excludedPrefixes = sub.excludeMatchPrefixes ?? [];
@@ -936,6 +938,10 @@ function resolvePageMeta(pathname: string) {
 
   if (pathname.startsWith("/studio/workspace-admin/team")) {
     return PAGE_META["/studio/workspace-admin/team"] ?? { title: "Team Access", subtitle: "" };
+  }
+
+  if (pathname.startsWith("/studio/workspace-admin/compliance")) {
+    return PAGE_META["/studio/workspace-admin/compliance"] ?? { title: "Compliance", subtitle: "" };
   }
 
   if (pathname.startsWith("/studio/workspace-admin/posting-windows")) {

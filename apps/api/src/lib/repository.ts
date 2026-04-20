@@ -6,8 +6,10 @@ import type {
   BrandAssetRecord,
   CreativeJobRecord,
   CreativeOutputRecord,
+  ProjectReraRegistrationRecord,
   PromptPackage,
   StyleTemplateRecord,
+  WorkspaceComplianceSettings,
   WorkspaceRole,
   WorkspaceSummary
 } from "@image-lab/contracts";
@@ -62,6 +64,28 @@ type AssetRow = {
   thumbnail_height: number | null;
   thumbnail_bytes: number | null;
   metadata_json: Record<string, unknown> | null;
+};
+
+type ProjectReraRegistrationRow = {
+  id: string;
+  workspace_id: string;
+  brand_id: string;
+  project_id: string | null;
+  registration_number: string | null;
+  label: string;
+  qr_asset_id: string | null;
+  is_default: boolean;
+  metadata_json: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type WorkspaceComplianceSettingsRow = {
+  workspace_id: string;
+  rera_authority_label: string;
+  rera_website_url: string;
+  rera_text_color: string;
+  updated_at: string | null;
 };
 
 type StyleTemplateRow = {
@@ -190,6 +214,80 @@ export async function assertWorkspaceRole(
   }
 
   return role;
+}
+
+const DEFAULT_RERA_AUTHORITY_LABEL = "MahaRERA";
+const DEFAULT_RERA_WEBSITE_URL = "https://maharera.maharashtra.gov.in";
+const DEFAULT_RERA_TEXT_COLOR = "#111111";
+
+export function getDefaultWorkspaceComplianceSettings(workspaceId: string): WorkspaceComplianceSettings {
+  return {
+    workspaceId,
+    reraAuthorityLabel: DEFAULT_RERA_AUTHORITY_LABEL,
+    reraWebsiteUrl: DEFAULT_RERA_WEBSITE_URL,
+    reraTextColor: DEFAULT_RERA_TEXT_COLOR,
+    updatedAt: null
+  };
+}
+
+export async function getWorkspaceComplianceSettings(workspaceId: string): Promise<WorkspaceComplianceSettings> {
+  const { data, error } = await supabaseAdmin
+    .from("workspace_compliance_settings")
+    .select("workspace_id, rera_authority_label, rera_website_url, rera_text_color, updated_at")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle<WorkspaceComplianceSettingsRow>();
+
+  if (error) {
+    if (error.code === "42P01" || error.code === "42703") {
+      return getDefaultWorkspaceComplianceSettings(workspaceId);
+    }
+    throw error;
+  }
+
+  if (!data) {
+    return getDefaultWorkspaceComplianceSettings(workspaceId);
+  }
+
+  return mapWorkspaceComplianceSettingsRow(data);
+}
+
+export async function updateWorkspaceComplianceSettings(params: {
+  workspaceId: string;
+  reraAuthorityLabel: string;
+  reraWebsiteUrl: string;
+  reraTextColor: string;
+  userId: string;
+}): Promise<WorkspaceComplianceSettings> {
+  const { data, error } = await supabaseAdmin
+    .from("workspace_compliance_settings")
+    .upsert(
+      {
+        workspace_id: params.workspaceId,
+        rera_authority_label: params.reraAuthorityLabel.trim() || DEFAULT_RERA_AUTHORITY_LABEL,
+        rera_website_url: params.reraWebsiteUrl.trim() || DEFAULT_RERA_WEBSITE_URL,
+        rera_text_color: params.reraTextColor.trim() || DEFAULT_RERA_TEXT_COLOR,
+        created_by: params.userId
+      },
+      { onConflict: "workspace_id" }
+    )
+    .select("workspace_id, rera_authority_label, rera_website_url, rera_text_color, updated_at")
+    .single<WorkspaceComplianceSettingsRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapWorkspaceComplianceSettingsRow(data);
+}
+
+function mapWorkspaceComplianceSettingsRow(row: WorkspaceComplianceSettingsRow): WorkspaceComplianceSettings {
+  return {
+    workspaceId: row.workspace_id,
+    reraAuthorityLabel: row.rera_authority_label,
+    reraWebsiteUrl: row.rera_website_url,
+    reraTextColor: row.rera_text_color || DEFAULT_RERA_TEXT_COLOR,
+    updatedAt: row.updated_at
+  };
 }
 
 export async function listWorkspaceBrands(workspaceId: string): Promise<BrandRecord[]> {
@@ -381,6 +479,197 @@ export async function listWorkspaceAssets(workspaceId: string, brandId?: string)
     thumbnailStoragePath: asset.thumbnail_storage_path,
     metadataJson: asset.metadata_json ?? {}
   }));
+}
+
+export async function listProjectReraRegistrations(
+  workspaceId: string,
+  brandId?: string
+): Promise<ProjectReraRegistrationRecord[]> {
+  let query = supabaseAdmin
+    .from("project_rera_registrations")
+    .select("id, workspace_id, brand_id, project_id, registration_number, label, qr_asset_id, is_default, metadata_json, created_at, updated_at")
+    .eq("workspace_id", workspaceId);
+
+  if (brandId) {
+    query = query.eq("brand_id", brandId);
+  }
+
+  const { data, error } = await query
+    .order("is_default", { ascending: false })
+    .order("created_at", { ascending: false })
+    .returns<ProjectReraRegistrationRow[]>();
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map(mapProjectReraRegistrationRow);
+}
+
+export async function createProjectReraRegistration(params: {
+  workspaceId: string;
+  brandId: string;
+  projectId: string | null;
+  registrationNumber: string | null;
+  label: string;
+  qrAssetId: string | null;
+  createdBy: string | null;
+}) {
+  const shouldBecomeDefault = params.projectId ? await shouldUseAsDefaultReraRegistration(params.projectId) : false;
+
+  if (shouldBecomeDefault) {
+    await supabaseAdmin
+      .from("project_rera_registrations")
+      .update({ is_default: false })
+      .eq("project_id", params.projectId);
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("project_rera_registrations")
+    .insert({
+      workspace_id: params.workspaceId,
+      brand_id: params.brandId,
+      project_id: params.projectId,
+      registration_number: params.registrationNumber?.trim() || null,
+      label: params.label.trim() || params.registrationNumber?.trim() || "RERA registration",
+      qr_asset_id: params.qrAssetId,
+      is_default: shouldBecomeDefault,
+      created_by: params.createdBy
+    })
+    .select("id, workspace_id, brand_id, project_id, registration_number, label, qr_asset_id, is_default, metadata_json, created_at, updated_at")
+    .single<ProjectReraRegistrationRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapProjectReraRegistrationRow(data);
+}
+
+export async function setDefaultProjectReraRegistration(registrationId: string): Promise<ProjectReraRegistrationRecord> {
+  const { data: current, error: currentError } = await supabaseAdmin
+    .from("project_rera_registrations")
+    .select("id, project_id")
+    .eq("id", registrationId)
+    .single<{ id: string; project_id: string | null }>();
+
+  if (currentError) {
+    throw currentError;
+  }
+
+  if (!current.project_id) {
+    throw new Error("Only project-linked RERA registrations can be default");
+  }
+
+  await supabaseAdmin
+    .from("project_rera_registrations")
+    .update({ is_default: false })
+    .eq("project_id", current.project_id);
+
+  const { data, error } = await supabaseAdmin
+    .from("project_rera_registrations")
+    .update({ is_default: true })
+    .eq("id", registrationId)
+    .select("id, workspace_id, brand_id, project_id, registration_number, label, qr_asset_id, is_default, metadata_json, created_at, updated_at")
+    .single<ProjectReraRegistrationRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapProjectReraRegistrationRow(data);
+}
+
+export async function updateProjectReraRegistration(params: {
+  registrationId: string;
+  registrationNumber: string | null;
+  label: string;
+  qrAssetId: string | null;
+}): Promise<ProjectReraRegistrationRecord> {
+  const { data, error } = await supabaseAdmin
+    .from("project_rera_registrations")
+    .update({
+      registration_number: params.registrationNumber?.trim() || null,
+      label: params.label.trim(),
+      qr_asset_id: params.qrAssetId
+    })
+    .eq("id", params.registrationId)
+    .select("id, workspace_id, brand_id, project_id, registration_number, label, qr_asset_id, is_default, metadata_json, created_at, updated_at")
+    .single<ProjectReraRegistrationRow>();
+
+  if (error) {
+    throw error;
+  }
+
+  return mapProjectReraRegistrationRow(data);
+}
+
+export async function deleteProjectReraRegistration(registrationId: string): Promise<void> {
+  const { data: current, error: currentError } = await supabaseAdmin
+    .from("project_rera_registrations")
+    .select("id, project_id, is_default")
+    .eq("id", registrationId)
+    .single<{ id: string; project_id: string | null; is_default: boolean }>();
+
+  if (currentError) {
+    throw currentError;
+  }
+
+  const { error } = await supabaseAdmin
+    .from("project_rera_registrations")
+    .delete()
+    .eq("id", registrationId);
+
+  if (error) {
+    throw error;
+  }
+
+  if (current.is_default && current.project_id) {
+    const { data: fallback } = await supabaseAdmin
+      .from("project_rera_registrations")
+      .select("id")
+      .eq("project_id", current.project_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .returns<Array<{ id: string }>>();
+
+    const nextId = fallback?.[0]?.id;
+    if (nextId) {
+      await supabaseAdmin
+        .from("project_rera_registrations")
+        .update({ is_default: true })
+        .eq("id", nextId);
+    }
+  }
+}
+
+async function shouldUseAsDefaultReraRegistration(projectId: string) {
+  const { count, error } = await supabaseAdmin
+    .from("project_rera_registrations")
+    .select("id", { count: "exact", head: true })
+    .eq("project_id", projectId);
+
+  if (error) {
+    throw error;
+  }
+
+  return (count ?? 0) === 0;
+}
+
+function mapProjectReraRegistrationRow(row: ProjectReraRegistrationRow): ProjectReraRegistrationRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    brandId: row.brand_id,
+    projectId: row.project_id,
+    registrationNumber: row.registration_number,
+    label: row.label,
+    qrAssetId: row.qr_asset_id,
+    isDefault: row.is_default,
+    metadataJson: row.metadata_json ?? {},
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
 }
 
 export async function listWorkspaceTemplates(workspaceId: string, brandId?: string): Promise<StyleTemplateRecord[]> {
