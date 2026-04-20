@@ -154,6 +154,11 @@ const objectiveOptions: Array<{ value: ObjectiveCode; label: string }> = [
   { value: "footfall", label: "Footfall" }
 ];
 
+function autoResizeTextarea(element: HTMLTextAreaElement) {
+  element.style.height = "auto";
+  element.style.height = `${element.scrollHeight}px`;
+}
+
 function readSeriesBriefString(
   series: SeriesRecord | null | undefined,
   keys: string[]
@@ -2008,6 +2013,7 @@ export default function CreatePage() {
                   onChange={(event) =>
                     setCampaignCreateForm((current) => ({ ...current, keyMessage: event.target.value }))
                   }
+                  onInput={(event) => autoResizeTextarea(event.currentTarget)}
                   placeholder="What should every post in this campaign reinforce?"
                   required
                   rows={4}
@@ -2137,18 +2143,6 @@ export default function CreatePage() {
                     />
                   </div>
                   <div className="create-picker-list">
-                    <button
-                      className={`create-picker-row ${!selectedCampaignCreateProject ? "is-selected" : ""}`}
-                      onClick={() => {
-                        setCampaignCreateForm((current) => ({ ...current, primaryProjectId: "" }));
-                        setActivePicker(null);
-                      }}
-                      type="button"
-                    >
-                      <div className="create-picker-row-copy">
-                        <strong>No project</strong>
-                      </div>
-                    </button>
                     {filteredProjects.map((project) => (
                       <button
                         key={project.id}
@@ -2226,6 +2220,7 @@ export default function CreatePage() {
                   onChange={(event) =>
                     setSeriesCreateForm((current) => ({ ...current, description: event.target.value }))
                   }
+                  onInput={(event) => autoResizeTextarea(event.currentTarget)}
                   placeholder="What should this recurring track keep covering over time?"
                   rows={4}
                   value={seriesCreateForm.description}
@@ -2859,6 +2854,7 @@ export default function CreatePage() {
                   className="create-prompt-textarea"
                   value={briefForm.prompt}
                   onChange={(e) => setBriefForm((s) => ({ ...s, prompt: e.target.value }))}
+                  onInput={(event) => autoResizeTextarea(event.currentTarget)}
                   placeholder={getCreativeBriefPlaceholder(selectedPostType, selectedFestival)}
                   rows={4}
                 />
@@ -2884,21 +2880,25 @@ export default function CreatePage() {
                         : isAdaptationMode
                           ? "New version title"
                           : "Primary Goal"}
-                    <input
+                    <textarea
                       value={briefForm.goal}
                       onChange={(e) => setBriefForm((s) => ({ ...s, goal: e.target.value }))}
+                      onInput={(event) => autoResizeTextarea(event.currentTarget)}
                       placeholder="e.g. Drive enquiry"
-                      className="create-field-input"
+                      className="create-prompt-textarea create-prompt-textarea-compact"
+                      rows={1}
                     />
                   </label>
 
                   <label className="create-field-label">
                     Target Audience
-                    <input
+                    <textarea
                       value={briefForm.audience ?? ""}
                       onChange={(e) => setBriefForm((s) => ({ ...s, audience: e.target.value }))}
+                      onInput={(event) => autoResizeTextarea(event.currentTarget)}
                       placeholder="e.g. Homebuyers and investors"
-                      className="create-field-input"
+                      className="create-prompt-textarea create-prompt-textarea-compact"
+                      rows={1}
                     />
                   </label>
 
@@ -2970,21 +2970,25 @@ export default function CreatePage() {
                       <>
                         <label className="create-field-label">
                           Offer / CTA
-                          <input
+                          <textarea
                             value={briefForm.offer ?? ""}
                             onChange={(e) => setBriefForm((s) => ({ ...s, offer: e.target.value }))}
+                            onInput={(event) => autoResizeTextarea(event.currentTarget)}
                             placeholder={getOfferPlaceholder(selectedPostType)}
-                            className="create-field-input"
+                            className="create-prompt-textarea create-prompt-textarea-compact"
+                            rows={1}
                           />
                         </label>
 
                         <label className="create-field-label">
                           On-image text
-                          <input
+                          <textarea
                             value={briefForm.exactText ?? ""}
                             onChange={(e) => setBriefForm((s) => ({ ...s, exactText: e.target.value }))}
+                            onInput={(event) => autoResizeTextarea(event.currentTarget)}
                             placeholder={getExactTextPlaceholder(selectedPostType, selectedFestival)}
-                            className="create-field-input"
+                            className="create-prompt-textarea create-prompt-textarea-compact"
+                            rows={1}
                           />
                         </label>
                       </>
@@ -3464,12 +3468,12 @@ export default function CreatePage() {
               }`}
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="drawer-header create-picker-header">
-                <div>
-                  <p className="panel-label">{getPickerEyebrow(activePicker)}</p>
-                  <h2>
-                    {activePicker === "post-type" ? (
-                      <>
+                <div className="drawer-header create-picker-header">
+                  <div>
+                    {getPickerEyebrow(activePicker) ? <p className="panel-label">{getPickerEyebrow(activePicker)}</p> : null}
+                    <h2>
+                      {activePicker === "post-type" ? (
+                        <>
                         Choose a <em>post type</em>
                       </>
                     ) : (
@@ -3628,18 +3632,6 @@ export default function CreatePage() {
 
                 {activePicker === "project" ? (
                   <div className="create-picker-list">
-                    <button
-                      className={`create-picker-row ${!selectedProject ? "is-selected" : ""}`}
-                      onClick={() => {
-                        handleProjectChange("");
-                        setActivePicker(null);
-                      }}
-                      type="button"
-                    >
-                      <div className="create-picker-row-copy">
-                        <strong>No project</strong>
-                      </div>
-                    </button>
                     {filteredProjects.map((project) => (
                       <button
                         key={project.id}
@@ -4426,7 +4418,7 @@ function getPickerEyebrow(activePicker: CreatePicker) {
       return "Approved source";
     case "project":
     case "post-type":
-      return "Optional context";
+      return "";
     case "festival":
       return "Occasion";
     case "template":

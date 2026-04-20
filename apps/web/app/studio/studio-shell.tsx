@@ -125,7 +125,7 @@ const superAdminNavigationItem = {
 
 const workspaceAdminNavigationItem = {
   href: "/studio/workspace-admin",
-  label: "Workspace Admin",
+  label: "Settings",
   icon: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 3 4 7v6c0 4.5 3.5 7 8 8 4.5-1 8-3.5 8-8V7l-8-4Z" />
@@ -368,8 +368,8 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
     subtitle: "Browse generated images across review states in one place.",
   },
   "/studio/workspace-admin": {
-    title: "Workspace Admin",
-    subtitle: "Workspace-level access and member management.",
+    title: "Settings",
+    subtitle: "Workspace-level access, compliance, and scheduling settings.",
   },
   "/studio/workspace-admin/team": {
     title: "Team Access",
@@ -949,7 +949,7 @@ function resolvePageMeta(pathname: string) {
   }
 
   if (pathname === "/studio/workspace-admin" || pathname.startsWith("/studio/workspace-admin/")) {
-    return PAGE_META["/studio/workspace-admin"] ?? { title: "Workspace Admin", subtitle: "" };
+    return PAGE_META["/studio/workspace-admin"] ?? { title: "Settings", subtitle: "" };
   }
 
   if (pathname.startsWith("/studio/admin/credits/ledger")) {

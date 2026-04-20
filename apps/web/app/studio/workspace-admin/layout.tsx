@@ -12,7 +12,7 @@ export default function WorkspaceAdminLayout({ children }: { children: React.Rea
       <div className="page-stack">
         <section className="panel settings-panel">
           <div className="empty-state empty-state-tall">
-            <strong>Loading workspace admin tools…</strong>
+            <strong>Loading settings…</strong>
           </div>
         </section>
       </div>
@@ -24,7 +24,7 @@ export default function WorkspaceAdminLayout({ children }: { children: React.Rea
       <div className="page-stack">
         <section className="panel settings-panel">
           <div className="empty-state empty-state-tall">
-            <strong>Workspace admin access required</strong>
+            <strong>Settings access required</strong>
             <p>Only owner and admin roles can open this area.</p>
           </div>
         </section>

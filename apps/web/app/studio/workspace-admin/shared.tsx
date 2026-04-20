@@ -738,7 +738,7 @@ export function WorkspaceTeamManagementPanel() {
       ) : !isWorkspaceAdmin ? (
         <div className="empty-state empty-state-tall">
           <strong>No admin access</strong>
-          <p>Only workspace admins can manage users.</p>
+          <p>Only workspace admins can manage these settings.</p>
         </div>
       ) : (
         <>
@@ -828,7 +828,7 @@ export function WorkspaceTeamManagementPanel() {
               <div className="drawer-content" onClick={(event) => event.stopPropagation()}>
                 <div className="drawer-header">
                   <div>
-                    <p className="panel-label">Workspace Admin</p>
+                    <p className="panel-label">Settings</p>
                     <h2>Add employee</h2>
                   </div>
                   <button className="drawer-close" onClick={() => setIsInviteDrawerOpen(false)} type="button">
@@ -882,7 +882,7 @@ export function WorkspaceTeamManagementPanel() {
               <div className="drawer-content" onClick={(event) => event.stopPropagation()}>
                 <div className="drawer-header">
                   <div>
-                    <p className="panel-label">Workspace Admin</p>
+                    <p className="panel-label">Settings</p>
                     <h2>Reset password</h2>
                   </div>
                   <button className="drawer-close" onClick={cancelMemberPasswordEdit} type="button">
@@ -1004,7 +1004,7 @@ export function WorkspaceCreditsPanel() {
     <section className="panel settings-panel settings-credits-panel">
       <div className="settings-panel-header">
         <div>
-          <p className="panel-label">Workspace Admin</p>
+          <p className="panel-label">Settings</p>
           <h3>Workspace balance</h3>
         </div>
         {creditWallet ? <span className="pill">{creditWallet.balance} available</span> : null}
