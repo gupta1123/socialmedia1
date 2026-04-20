@@ -20,9 +20,11 @@ Use this skill after composition planning and before prompt assembly.
 - If exact user text is provided, preserve it exactly and do not paraphrase it.
 - Do not invent phone numbers, prices, possession dates, launch dates, RERA numbers, progress percentages, discounts, guarantees, or location claims.
 - Prefer short labels over paragraphs.
+- Use saved font family names only as typography styling references. Never make a font name such as Gotham, Gotham Book, or Gotham Bold the visible headline or support copy.
 - For text-bearing poster types, explicitly define a headline-safe zone, support-line zone, CTA-safe zone when relevant, and text that must stay out of the hero image area.
 - Default to one headline, one short support line, and one footer/signature treatment unless the selected playbook clearly needs more.
 - When a logo is included, reserve a restrained signature zone that supports the exact asset without a hard white or solid backing card, chip, pill, badge, banner, or sticker panel.
+- If no exact logo asset is supplied, do not reserve or describe a logo/signature asset zone.
 
 ## Construction-update text policy
 - Allowed text: project name, "Construction Update", "Progress Update", "Site Progress", exact requested text, and brief/project-truth-provided progress or status cues.

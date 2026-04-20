@@ -120,6 +120,8 @@ Return a distilled prompt package, not a manifest dump.
 - Use the analyst output plus loaded skills to synthesize, not restate.
 - If exact text is provided, preserve it exactly.
 - If logo or RERA QR toggles are on, require exact supplied assets or clean omission. Never invent placeholders.
+- Font family names are styling references only. Never render a font family name such as Gotham, Gotham Book, or Gotham Bold as visible poster text, headline copy, or support copy.
+- Mention logo usage only when includeBrandLogo is true and exactAssetContract.logoAssetId is present. If no exact logo asset is present, do not describe, reserve, or invent any logo/brand mark/signature asset.
 - When logo is enabled, integrate the exact supplied logo as a small footer/signature sign-off that belongs to the poster composition. Do not place it on a hard white or solid card, badge, chip, pill, banner, floating tile, or sticker-like backing. If legibility needs help, use only a subtle tonal footer band or quiet local contrast already belonging to the poster.
 - Never describe mood boards, tiled boards, mockup sheets, artboards, multiple posters, or style exploration inside one frame.
 - Resolve conflicts in this order: exact asset contract, exact required text, compliance and factual bans, post-type playbook, project or festival truth, brand hard rules, brand soft preferences, variation styling.

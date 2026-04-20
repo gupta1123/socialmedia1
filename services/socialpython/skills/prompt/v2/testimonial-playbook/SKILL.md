@@ -157,10 +157,10 @@ Use when needed:
 ## Brand Colors & Typography (MANDATORY)
 
 - Apply the brand palette (primary, secondary, accent, neutrals) to typography, quote elements, attribution text, and graphic accents.
-- Use the brand's exact headline font family for the quote and attribution text.
+- Use the brand's exact headline font family only as typography styling metadata for the quote and attribution text.
 - Typography must feel premium and readable - the quote should be the hero, with text integrated into the design, not pasted on top.
 - Brand colors should unify the testimonial scene with the text.
-- When describing text in the scene, use the brand's exact font style (e.g., "bold Gotham sans-serif quote text" or "refined serif attribution").
+- Do not use the font family name itself as visible poster text. Describe the style as clean, bold, contemporary sans-serif or refined serif styling unless exact copy is provided.
 
 ---
 

@@ -1630,6 +1630,23 @@ function inferAssetQualityTier(asset: BrandAssetRecord, metadataJson: Record<str
   return asset.projectId ? "hero" : fallback;
 }
 
+function hasExactRequestedLogoAsset(input: Input) {
+  if (!input.brief.includeBrandLogo) {
+    return false;
+  }
+
+  const requestedLogoAssetId =
+    typeof input.brief.logoAssetId === "string" && input.brief.logoAssetId.trim().length > 0
+      ? input.brief.logoAssetId.trim()
+      : null;
+
+  if (!requestedLogoAssetId) {
+    return false;
+  }
+
+  return Boolean(input.brandAssets?.some((asset) => asset.id === requestedLogoAssetId && asset.kind === "logo"));
+}
+
 function buildV2CandidateAssets(input: Input) {
   const useProjectContext = !isFestivalGreetingInput(input);
   const postTypeGuidance = buildPostTypePromptGuidance({
@@ -1673,8 +1690,12 @@ function buildV2CandidateAssets(input: Input) {
   const projectImageIds = input.projectProfile?.actualProjectImageIds ?? [];
   const sampleFlatImageIds = input.projectProfile?.sampleFlatImageIds ?? [];
   const brandDefaultReferenceIds = input.brandProfile.referenceAssetIds ?? [];
-  const brandLogoId = input.brief.includeBrandLogo
-    ? input.brandAssets?.find((asset) => asset.kind === "logo")?.id ?? null
+  const requestedLogoAssetId =
+    typeof input.brief.logoAssetId === "string" && input.brief.logoAssetId.trim().length > 0
+      ? input.brief.logoAssetId.trim()
+      : null;
+  const brandLogoId = input.brief.includeBrandLogo && requestedLogoAssetId
+    ? input.brandAssets?.find((asset) => asset.id === requestedLogoAssetId && asset.kind === "logo")?.id ?? null
     : null;
   const reraQrId = input.brief.includeReraQr
     ? selectReraQrAssetForProject(input.brandAssets ?? [], input.projectId)?.id ?? null
@@ -1794,10 +1815,11 @@ function buildV2CandidateAssets(input: Input) {
 }
 
 function buildV2GenerationContract(input: Input) {
+  const hasExactLogoReference = hasExactRequestedLogoAsset(input);
   const hasReferences =
     (input.brief.referenceAssetIds?.length ?? 0) > 0 ||
     (input.projectProfile?.actualProjectImageIds?.length ?? 0) > 0 ||
-    Boolean(input.brief.includeBrandLogo) ||
+    hasExactLogoReference ||
     Boolean(input.brief.includeReraQr);
   const chosenModel =
     env.IMAGE_GENERATION_PROVIDER === "openrouter"
@@ -2061,15 +2083,55 @@ function buildBrandTypographyClause(input: Input) {
   const { typographyMood, headlineFontFamily, bodyFontFamily, typographyNotes } = input.brandProfile.visualSystem;
   const clauses = [
     typographyMood ? `Typography mood should follow this brand direction: ${typographyMood}.` : null,
-    headlineFontFamily ? `When rendering headline text, align the styling with the saved brand headline font family: ${headlineFontFamily}.` : null,
-    bodyFontFamily ? `When rendering supporting copy, align the styling with the saved brand body font family: ${bodyFontFamily}.` : null,
+    headlineFontFamily ? `Use ${headlineFontFamily} only as the headline font-family styling reference; never render the font family name as visible poster text.` : null,
+    bodyFontFamily ? `Use ${bodyFontFamily} only as the supporting-copy font-family styling reference; never render the font family name as visible poster text.` : null,
     typographyNotes.length > 0 ? `Typography rules: ${typographyNotes.join("; ")}.` : null
   ].filter((value): value is string => Boolean(value));
 
   return clauses.join(" ");
 }
 
+function sanitizeFontFamilyAsVisibleText(prompt: string, input: Input) {
+  const fontNames = [
+    input.brandProfile.visualSystem.headlineFontFamily,
+    input.brandProfile.visualSystem.bodyFontFamily
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.trim());
+
+  let next = prompt;
+  for (const fontName of fontNames) {
+    const escaped = fontName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    next = next
+      .replace(new RegExp(`\\b(?:bold|large|clean|premium|main)?\\s*['"]${escaped}['"]\\s+(headline|title|text|copy)\\b`, "gi"), "premium concise $1")
+      .replace(new RegExp(`\\bheadline\\s+(?:reads|says)\\s+['"]${escaped}['"]\\b`, "gi"), "headline uses concise campaign copy")
+      .replace(new RegExp(`\\btitle\\s+(?:reads|says)\\s+['"]${escaped}['"]\\b`, "gi"), "title uses concise campaign copy");
+  }
+  return next;
+}
+
+function stripLogoInstructions(prompt: string) {
+  return prompt
+    .split(/(?<=[.!?])\s+/)
+    .filter((sentence) => !/\b(?:logo|logomark|brand mark|brand signature|branding signature|transparent branding signature|signature element)\b/i.test(sentence))
+    .join(" ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function enforceLogoAvailability(prompt: string, hasExactLogoAsset: boolean) {
+  if (hasExactLogoAsset) {
+    return prompt;
+  }
+
+  const withoutLogo = stripLogoInstructions(prompt);
+  return appendMissingPromptClauses(withoutLogo, [
+    "Do not include any logo, brand mark, emblem, monogram, watermark, or invented branding asset."
+  ]);
+}
+
 function buildV2CompactGuardrailClauses(input: Input) {
+  const hasExactLogoReference = hasExactRequestedLogoAsset(input);
   const bannedClaims = [
     ...(input.brandProfile.compliance?.bannedClaims ?? []),
     ...(input.projectProfile?.bannedClaims ?? [])
@@ -2103,7 +2165,7 @@ function buildV2CompactGuardrailClauses(input: Input) {
     textGuardrail,
     bannedClaims.length > 0 ? `Avoid unsupported claims: ${bannedClaims.join(", ")}.` : null,
     projectImageRequired ? "Preserve the supplied project/building reference as subject truth." : null,
-    input.brief.includeBrandLogo
+    hasExactLogoReference
       ? "Use the supplied logo only as a small exact brand signature, or leave it blank."
       : "Do not invent logo marks, emblems, monograms, or house icons.",
     input.brief.includeReraQr
@@ -2151,7 +2213,11 @@ function extractConstructionProgressCue(input: Input) {
 }
 
 function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: CreativeTruthBundle) {
-  let next = prompt.trim();
+  const hasExactLogoAsset = Boolean(input.brief.includeBrandLogo && truthBundle.exactAssetContract.logoAssetId);
+  let next = enforceLogoAvailability(
+    sanitizeFontFamilyAsVisibleText(prompt.trim(), input),
+    hasExactLogoAsset
+  );
   const postTypeCode = input.postType?.code ?? truthBundle.postTypeContract.code;
   const exactProjectAnchor = truthBundle.exactAssetContract.requiredProjectAnchorAssetId;
   const candidateAssets = truthBundle.candidateAssets;
@@ -2160,7 +2226,7 @@ function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: Cr
   const assetAllowsAerial = candidateAssets.some((asset) => asset.normalizedMetadata.viewType === "aerial");
   const allowsAerial = briefAllowsAerial || assetAllowsAerial;
 
-  if (input.brief.includeBrandLogo) {
+  if (hasExactLogoAsset) {
     next = next
       .replace(/\bLogo in the upper left corner\.?/gi, "Small supplied logo in a quiet footer/corner signature zone.")
       .replace(/\bKrisala Developers logo in the lower right\.?/gi, "Small supplied Krisala Developers logo in a quiet footer/corner signature zone.")

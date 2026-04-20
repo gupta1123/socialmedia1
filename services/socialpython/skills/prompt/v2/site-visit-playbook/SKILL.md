@@ -170,10 +170,10 @@ Use when needed:
 
 ## Brand Colors & Typography (MANDATORY)
 - Apply the brand palette (primary, secondary, accent, neutrals) to typography, overlay elements, divider lines, and small accents.
-- Use the brand's exact headline font family for branded text and headlines.
+- Use the brand's exact headline font family only as typography styling metadata for branded text and headlines.
 - Typography must feel premium and integrated with the site-visit imagery - NOT like a sticker on top.
 - Brand colors should unify the invitation scene with the text overlays.
-- When describing text in the scene, use the brand's exact font style (e.g., "bold Gotham sans-serif branded text").
+- Do not use the font family name itself as visible poster text. Describe the style as clean, bold, contemporary sans-serif unless exact copy is provided.
 
 ---
 

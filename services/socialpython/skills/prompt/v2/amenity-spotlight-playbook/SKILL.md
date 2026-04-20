@@ -167,10 +167,10 @@ Use when needed:
 ## Brand Colors & Typography (MANDATORY)
 
 - Apply the brand palette (primary, secondary, accent, neutrals) to typography, overlay accents, and any graphic elements.
-- Use the brand's exact headline font family (e.g., Gotham, Helvetica Neue, etc.) for all text elements.
+- Use the brand's exact headline font family only as typography styling metadata.
 - Typography mood should match the brand's defined style - keep it premium, bold, and clean.
 - Brand colors should guide the overall image mood so text feels integrated, not pasted on.
-- When describing text in the scene, specify it using the brand's exact font style (e.g., "bold Gotham sans-serif text").
+- Do not use the font family name itself as visible poster text. Describe the style as clean, bold, contemporary sans-serif unless exact copy is provided.
 
 ---
 

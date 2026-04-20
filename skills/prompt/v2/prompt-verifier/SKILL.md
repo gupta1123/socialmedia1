@@ -20,9 +20,11 @@ Use this skill last.
 - Reject prompts that violate that precedence order or let soft brand styling override hard truth.
 - Reject wrong project facts, wrong amenities, and wrong landmark leakage.
 - Reject prompts where the logo becomes the main subject unless the brief explicitly requires that.
+- Reject prompts that mention a logo, brand mark, monogram, emblem, or brand-signature asset when no exact logo asset is supplied.
 - Reject prompts that place the logo on a hard white or solid backing card, badge, chip, pill, banner, floating tile, or sticker-like plate.
 - Reject prompts that describe the logo as a pasted footer card instead of an integrated signature/sign-off treatment.
 - Reject prompts that mention reference assets the bundle did not provide.
+- Reject prompts that use a font family name such as Gotham, Gotham Book, or Gotham Bold as literal visible headline/support text instead of as typography styling.
 - Reject prompts that contradict the selected playbook.
 - Reject prompts that use a different post-type playbook than the selected postTypeContract.
 - Reject prompts where the chosen amenity image does not match the selected amenity focus, or where one amenity image is used to represent a different facility.

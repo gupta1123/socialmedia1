@@ -28,10 +28,10 @@ Make the location advantage feel clear and premium.
 
 ## Brand Colors & Typography (MANDATORY)
 - Apply the brand palette (primary, secondary, accent, neutrals) to typography, location labels, overlay accents, and graphic elements.
-- Use the brand's exact headline font family for headlines and location text.
+- Use the brand's exact headline font family only as typography styling metadata for headlines and location text.
 - Typography must feel premium and cohesive with the location/context imagery - NOT like a sticker on top.
 - Brand colors should unify the location scene with the text overlays.
-- When describing text in the scene, use the brand's exact font style (e.g., "bold Gotham sans-serif location text").
+- Do not use the font family name itself as visible poster text. Describe the style as clean, bold, contemporary sans-serif unless exact copy is provided.
 
 ## Logo Integration (when enabled)
 - Logo must integrate seamlessly with the location imagery - NOT look like a sticker on top.

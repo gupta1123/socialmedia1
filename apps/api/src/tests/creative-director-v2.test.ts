@@ -258,7 +258,7 @@ describe("compilePromptPackageV2", () => {
         referenceAssetIds: [],
         includeBrandLogo: true,
         includeReraQr: false,
-        logoAssetId: null,
+        logoAssetId,
         templateType: "hero"
       },
       referenceLabels: [],
@@ -569,7 +569,7 @@ describe("compilePromptPackageV2", () => {
         referenceAssetIds: [],
         includeBrandLogo: true,
         includeReraQr: false,
-        logoAssetId: null,
+        logoAssetId,
         templateType: "quote"
       },
       referenceLabels: [],

@@ -629,7 +629,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         ? allAssets.find((asset) => asset.id === brief.logoAssetId && asset.kind === "logo") ?? null
         : null;
     const selectedBrandLogoAsset = brief.includeBrandLogo
-      ? explicitLogoAsset ?? allAssets.find((asset) => asset.kind === "logo") ?? null
+      ? explicitLogoAsset
       : null;
     const selectedReraQrAsset = brief.includeReraQr
       ? selectReraQrAssetForProject(allAssets, project?.id ?? null, null, reraRegistrations)
@@ -2836,6 +2836,22 @@ function isV2PromptPackage(promptPackage: { compilerTrace?: Record<string, unkno
   );
 }
 
+function stripInactiveLogoInstructions(prompt: string) {
+  return prompt
+    .split(/(?<=[.!?])\s+/)
+    .filter((sentence) => !/\b(?:logo|logomark|brand mark|brand signature|branding signature|transparent branding signature|signature element)\b/i.test(sentence))
+    .join(" ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function sanitizeFontNameAsHeadlineText(prompt: string) {
+  return prompt
+    .replace(/\b(?:bold|large|clean|premium|main)?\s*['"]Gotham['"]\s+(headline|title|text|copy)\b/gi, "premium concise $1")
+    .replace(/\bheadline\s+(?:reads|says)\s+['"]Gotham['"]\b/gi, "headline uses concise campaign copy")
+    .replace(/\btitle\s+(?:reads|says)\s+['"]Gotham['"]\b/gi, "title uses concise campaign copy");
+}
+
 function buildV2RoleAwarePrompt(
   basePrompt: string,
   plan: RoleAwareReferencePlan,
@@ -2864,6 +2880,9 @@ function buildV2RoleAwarePrompt(
     activeReferencePaths.has(plan.complianceQr.storagePath);
   const activeSecondaryReferences = plan.references.filter((reference) =>
     activeReferencePaths.has(reference.storagePath)
+  );
+  const sanitizedBasePrompt = sanitizeFontNameAsHeadlineText(
+    hasActiveBrandLogo ? basePrompt : stripInactiveLogoInstructions(basePrompt)
   );
 
   const heroRef = getHeroReferenceForPostType(plan, resolvedPostTypeCode).filter((storagePath) =>
@@ -2954,7 +2973,7 @@ function buildV2RoleAwarePrompt(
     roleLines.push("Do not replace the supplied project with a different generic building.");
   }
 
-  return `${basePrompt} ${roleLines.join(" ")}`.trim();
+  return `${sanitizedBasePrompt} ${roleLines.join(" ")}`.trim();
 }
 
 function getAssetForPath(plan: RoleAwareReferencePlan, storagePath: string): { role: string; label: string } | null {
@@ -3499,12 +3518,8 @@ async function buildAsyncV2PromptPackage(params: {
   const amenityAssetIds = asUuidArray(meta.amenityAssetIds ?? amenityResolution.selectedAssetIds);
   const explicitLogoAssetId = sourceBrief.logoAssetId ?? asOptionalString(exactAssetContract.logoAssetId);
   const selectedBrandLogoAsset =
-    sourceBrief.includeBrandLogo === true
-      ? explicitLogoAssetId
-        ? allAssets.find((asset) => asset.id === explicitLogoAssetId && asset.kind === "logo") ??
-          allAssets.find((asset) => asset.kind === "logo") ??
-          null
-        : allAssets.find((asset) => asset.kind === "logo") ?? null
+    sourceBrief.includeBrandLogo === true && explicitLogoAssetId
+      ? allAssets.find((asset) => asset.id === explicitLogoAssetId && asset.kind === "logo") ?? null
       : null;
   const selectedReraQrAsset =
     sourceBrief.includeReraQr === true

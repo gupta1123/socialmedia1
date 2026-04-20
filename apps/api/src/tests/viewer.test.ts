@@ -10,7 +10,8 @@ describe("toViewerResponse", () => {
       })
     ).toEqual({
       id: "35e5197a-8536-4d46-89ae-dc04647da7ee",
-      email: "demo@imagelab.local"
+      email: "demo@imagelab.local",
+      isPlatformAdmin: false
     });
   });
 });

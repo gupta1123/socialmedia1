@@ -162,4 +162,97 @@ describe("compilePromptPackageV2 minimal worker output", () => {
     expect(output.compilerTrace?.pipeline).toBe("agno-sequential-workflow-v2");
     expect(output.compilerTrace?.returnedVariationCount).toBe(1);
   });
+
+  it("does not let inactive logo or font-family text leak from worker prompts", async () => {
+    process.env.CREATIVE_DIRECTOR_V2_MODE = "agno";
+    process.env.CREATIVE_DIRECTOR_V2_TRANSPORT = "server";
+    process.env.AGNO_AGENT_V2_SERVER_URL = "http://agno.local/api/compile-v2";
+
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          result: {
+            promptSummary: "Amenity spotlight route.",
+            variations: [
+              {
+                title: "Primary route",
+                strategy: "Amenity-led lifestyle poster",
+                finalPrompt:
+                  "A premium architectural amenity spotlight poster featuring the swimming pool. The composition follows a clean editorial layout with a significant negative-space zone at the top for a bold 'Gotham' headline and a lower-third support line. In the lower corner, integrate the Pride Group logo as a subtle, transparent branding signature, perfectly embedded into the scene without any badge or container."
+              }
+            ],
+            compilerTrace: {
+              pipeline: "agno-sequential-workflow-v2"
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      )
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { compilePromptPackageV2 } = await import("../lib/creative-director.js");
+    const brandProfile = buildBrandProfile();
+    brandProfile.visualSystem.headlineFontFamily = "Gotham";
+    brandProfile.visualSystem.bodyFontFamily = "Gotham Book";
+
+    const output = await compilePromptPackageV2({
+      brandName: "Pride Group",
+      brandProfile,
+      variationCount: 1,
+      brief: {
+        brandId: "brand-1",
+        createMode: "post",
+        copyMode: "auto",
+        projectId: "project-1",
+        postTypeId: "post-type-1",
+        channel: "instagram-feed",
+        format: "portrait",
+        goal: "Build interest in a key project amenity",
+        prompt: "Spotlight Swimming Pool amenity with an aspirational lifestyle angle and a calm premium tone.",
+        audience: "Homebuyers and investors",
+        offer: "",
+        exactText: "",
+        referenceAssetIds: [],
+        includeBrandLogo: false,
+        includeReraQr: false,
+        logoAssetId: null,
+        templateType: "product-focus"
+      },
+      referenceLabels: [],
+      projectName: "Miami",
+      projectId: "project-1",
+      projectProfile: null,
+      festival: null,
+      postType: {
+        code: "amenity-spotlight",
+        name: "Amenity spotlight",
+        config: {
+          defaultChannels: ["instagram-feed"],
+          allowedFormats: ["portrait"],
+          recommendedTemplateTypes: ["product-focus"],
+          requiredBriefFields: ["goal", "prompt"],
+          safeZoneGuidance: ["Keep headline readable without blocking the amenity"],
+          ctaStyle: "restrained",
+          copyDensity: "minimal"
+        }
+      },
+      template: null,
+      series: null,
+      calendarItem: null,
+      deliverableSnapshot: null
+    });
+
+    expect(output.finalPrompt).toContain("premium concise headline");
+    expect(output.finalPrompt).not.toContain("'Gotham' headline");
+    expect(output.finalPrompt).not.toMatch(/\bintegrate\b[^.]*\blogo\b/i);
+    expect(output.finalPrompt).not.toMatch(/\bbranding signature\b/i);
+    expect(output.finalPrompt).toContain("Do not include any logo, brand mark, emblem, monogram, watermark, or invented branding asset.");
+  });
 });

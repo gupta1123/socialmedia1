@@ -316,7 +316,7 @@ function buildAmenitySpotlightGuidance(
       `Negative prompt: ${recipe.negativePrompt}`,
       `CRITICAL: Reference any supplied truth or style images only in plain language by role. Never say "Image 1 is X, Image 2 is Y", and never enumerate filenames.`
     ]),
-manifest: {
+    manifest: {
       code: input.postType?.code ?? null,
       name: input.postType?.name ?? null,
       aspectRatio: input.aspectRatio,
@@ -324,6 +324,8 @@ manifest: {
       recipeKey: recipe.key,
       recipeDirection: recipe.direction,
       negativePrompt: recipe.negativePrompt,
+      amenityFocus: amenityChoice.focusAmenity,
+      amenitySelectionSource: amenityChoice.source,
       playbookKey: getPlaybookKey(input.postType?.code)
     }
   };
