@@ -93,14 +93,13 @@ import type {
 } from "@image-lab/contracts";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-const rawCreativeFlowVersion = process.env.NEXT_PUBLIC_CREATIVE_FLOW_VERSION;
 const rawStyleVariationCount = Number(process.env.NEXT_PUBLIC_STYLE_VARIATION_COUNT ?? "3");
 
 export type CreativeFlowVersion = "v1" | "v2";
 export type BootstrapMode = "full" | "light" | "create";
-export const creativeFlowVersion: CreativeFlowVersion = rawCreativeFlowVersion === "v2" ? "v2" : "v1";
-export const styleVariationLimit = creativeFlowVersion === "v2" ? 3 : 4;
-export const defaultStyleVariationCount = creativeFlowVersion === "v2" ? 1 : clampInt(rawStyleVariationCount, 1, styleVariationLimit, 3);
+export const creativeFlowVersion: CreativeFlowVersion = "v2";
+export const styleVariationLimit = 3;
+export const defaultStyleVariationCount = clampInt(rawStyleVariationCount, 1, styleVariationLimit, 1);
 export type PlanningTemplateOption = {
   id: string;
   workspaceId: string;
@@ -117,12 +116,12 @@ export type CompileCreativeV2Payload = CreativeBrief & {
   variationCount?: number;
 };
 
-export type StyleSeedV2Request = {
+export type GenerateOptionsRequest = {
   promptPackage: PromptPackage;
   variationCount?: number;
 };
 
-export type StyleSeedV2Response = {
+export type GenerateOptionsResponse = {
   promptPackageId: string;
   jobs: Array<{
     id: string;
@@ -1442,8 +1441,8 @@ export function generateStyleSeeds(token: string, payload: StyleSeedRequest) {
   });
 }
 
-export function generateStyleSeedsV2(token: string, payload: StyleSeedV2Request) {
-  return request<StyleSeedV2Response>("/api/creative/style-seeds-v2", token, {
+export function generateOptions(token: string, payload: GenerateOptionsRequest) {
+  return request<GenerateOptionsResponse>("/api/creative/options", token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)

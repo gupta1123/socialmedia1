@@ -23,8 +23,8 @@ import {
   creativeFlowVersion,
   defaultStyleVariationCount,
   generateFinals,
+  generateOptions,
   generateStyleSeeds,
-  generateStyleSeedsV2,
   getCompileV2AsyncStatus,
   styleVariationLimit,
   getCreativeJob,
@@ -789,7 +789,7 @@ export function StudioProvider({
             ? promptPackage
             : null;
       if (creativeFlowVersion === "v2" && activePromptPackage) {
-        await generateStyleSeedsV2(sessionToken, {
+        await generateOptions(sessionToken, {
           promptPackage: activePromptPackage,
           variationCount: styleVariationCount
         });

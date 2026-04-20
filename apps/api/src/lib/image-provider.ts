@@ -36,7 +36,7 @@ export function getFinalProviderModel(referenceCount = 0) {
 
 export async function submitStyleSeedGeneration(
   job: CreativeJobRecord,
-  promptPackage: Pick<PromptPackage, "seedPrompt" | "aspectRatio"> | { prompt: string; aspectRatio: string },
+  promptPackage: Pick<PromptPackage, "finalPrompt" | "aspectRatio"> | { prompt: string; aspectRatio: string },
   referencePaths: string[] = []
 ): Promise<ImageProviderSubmission> {
   const provider = resolveImageGenerationProvider();
@@ -45,7 +45,7 @@ export async function submitStyleSeedGeneration(
   if (provider === "openrouter") {
     const result = await generateOpenRouterImages({
       model: providerModel,
-      prompt: "prompt" in promptPackage ? promptPackage.prompt : promptPackage.seedPrompt,
+      prompt: "prompt" in promptPackage ? promptPackage.prompt : promptPackage.finalPrompt,
       aspectRatio: promptPackage.aspectRatio,
       count: job.requestedCount,
       referencePaths

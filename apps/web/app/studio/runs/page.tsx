@@ -86,7 +86,7 @@ export default function RunsPage() {
         header: "Stats",
         cell: (run: CreativeRunSummary) => (
           <div className="data-table-primary">
-            <span className="data-table-subtitle">{run.seedTemplateCount} directions</span>
+            <span className="data-table-subtitle">{run.optionCount} options</span>
             <span className="data-table-subtitle">{run.finalOutputCount} finals</span>
           </div>
         )

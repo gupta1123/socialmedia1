@@ -291,7 +291,6 @@ export async function compileDeliverablePromptPackage(params: {
     creativeRequestId,
     brandProfileVersionId: brandProfileVersion.id,
     promptSummary: compiled.promptSummary,
-    seedPrompt: compiled.seedPrompt,
     finalPrompt: compiled.finalPrompt,
     aspectRatio: compiled.aspectRatio,
     chosenModel: compiled.chosenModel,

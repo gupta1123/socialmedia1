@@ -378,7 +378,6 @@ function mapPromptPackageRow(row: PromptPackageRow): PromptPackage {
     creativeRequestId: row.creative_request_id,
     brandProfileVersionId: row.brand_profile_version_id,
     promptSummary: row.prompt_summary,
-    seedPrompt: row.seed_prompt,
     finalPrompt: row.final_prompt,
     aspectRatio: row.aspect_ratio,
     chosenModel: row.chosen_model,
@@ -424,8 +423,13 @@ function buildRunSummary(
       .filter((outputId): outputId is string => Boolean(outputId))
       .filter((outputId) => latestSeedOutputIds.has(outputId))
   );
-  const seedTemplateCount = templatedSeedOutputIds.size;
   const finalOutputCount = outputs.filter((output) => output.kind === "final" && latestFinalJobIdSet.has(output.job_id)).length;
+  const optionCount =
+    Array.isArray(pkg.variations) && pkg.variations.length > 0
+      ? pkg.variations.length
+      : templatedSeedOutputIds.size > 0
+        ? templatedSeedOutputIds.size
+      : jobs.filter((job) => job.job_type === "final").length;
 
   return {
     id: pkg.id,
@@ -449,9 +453,8 @@ function buildRunSummary(
     createdAt: pkg.created_at,
     status: latestJob?.status ?? "queued",
     latestJobId: latestJob?.id ?? null,
-    seedJobCount: jobs.filter((job) => job.job_type === "style_seed").length,
+    optionCount,
     finalJobCount: jobs.filter((job) => job.job_type === "final").length,
-    seedTemplateCount,
     finalOutputCount
   };
 }

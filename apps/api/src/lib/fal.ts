@@ -81,7 +81,7 @@ fal.config({
 
 export async function submitStyleSeedGeneration(
   job: CreativeJobRecord,
-  promptPackage: Pick<PromptPackage, "seedPrompt" | "aspectRatio"> | { prompt: string; aspectRatio: string },
+  promptPackage: Pick<PromptPackage, "finalPrompt" | "aspectRatio"> | { prompt: string; aspectRatio: string },
   referenceUrls: string[] = []
 ) {
   console.log(`[submitStyleSeedGeneration] jobId=${job.id}, refCount=${referenceUrls.length}, refs=${JSON.stringify(referenceUrls)}`);
@@ -99,7 +99,7 @@ export async function submitStyleSeedGeneration(
     webhookUrl?: string;
   } = {
     input: {
-      prompt: "prompt" in promptPackage ? promptPackage.prompt : promptPackage.seedPrompt,
+      prompt: "prompt" in promptPackage ? promptPackage.prompt : promptPackage.finalPrompt,
       aspect_ratio: promptPackage.aspectRatio,
       num_images: job.requestedCount
     }

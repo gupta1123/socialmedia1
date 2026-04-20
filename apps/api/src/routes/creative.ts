@@ -74,7 +74,7 @@ const MAX_SUPPORTING_REFERENCE_IMAGES = 2;
 const CreativeCompileV2RequestSchema = CreativeBriefSchema.extend({
   variationCount: z.number().int().min(1).max(6).optional()
 });
-const StyleSeedV2RequestSchema = z.object({
+const GenerateOptionsRequestSchema = z.object({
   promptPackage: PromptPackageSchema,
   variationCount: z.number().int().min(1).max(6).optional()
 });
@@ -727,7 +727,6 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       creativeRequestId: randomId(),
       brandProfileVersionId: brandProfileVersion.id,
       promptSummary: compiled.promptSummary,
-      seedPrompt: compiled.seedPrompt,
       finalPrompt: compiled.finalPrompt,
       aspectRatio: compiled.aspectRatio,
       chosenModel: compiled.chosenModel,
@@ -1092,13 +1091,17 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     return { status: compileJob.status as "pending" | "processing" };
   });
 
-  app.post("/api/creative/style-seeds-v2", { preHandler: app.authenticate }, async (request, reply) => {
+  const handleGenerateOptions = async (request: any, reply: any) => {
     const viewer = request.viewer;
     if (!viewer) {
       return reply.unauthorized();
     }
 
-    const body = StyleSeedV2RequestSchema.parse(request.body);
+    const bodyParse = GenerateOptionsRequestSchema.safeParse(request.body);
+    if (!bodyParse.success) {
+      return reply.badRequest(bodyParse.error.message);
+    }
+    const body = bodyParse.data;
     let promptPackage = body.promptPackage;
     const brand = await getBrand(promptPackage.brandId);
 
@@ -1116,9 +1119,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
             id: "variation_1",
             title: "Primary route",
             strategy: "Primary route",
-            seedPrompt: promptPackage.seedPrompt,
             finalPrompt: promptPackage.finalPrompt,
-            referenceStrategy: promptPackage.referenceStrategy,
             resolvedConstraints: {},
             compilerTrace: {}
           }
@@ -1219,7 +1220,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         creative_request_id: promptPackage.creativeRequestId,
         brand_profile_version_id: promptPackage.brandProfileVersionId,
         prompt_summary: promptPackage.promptSummary,
-        seed_prompt: promptPackage.seedPrompt,
+        seed_prompt: promptPackage.finalPrompt,
         final_prompt: promptPackage.finalPrompt,
         aspect_ratio: promptPackage.aspectRatio,
         chosen_model: promptPackage.chosenModel,
@@ -1397,7 +1398,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
             amount: perOptionCreditAmount,
             actorUserId: viewer.userId,
             metadata: {
-              endpoint: "/api/creative/style-seeds-v2",
+              endpoint: "/api/creative/options",
               jobType: "final",
               promptPackageId: promptPackage.id,
               variationId: option.variationId
@@ -1408,9 +1409,9 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           for (const reservationId of optionReservationByJobId.values()) {
             await releaseReservationIfPresent(reservationId, {
               actorUserId: viewer.userId,
-              note: "style-seeds-v2 reservation rollback",
+              note: "options reservation rollback",
               metadata: {
-                endpoint: "/api/creative/style-seeds-v2",
+                endpoint: "/api/creative/options",
                 reason: "reservation_rollback"
               }
             }).catch(() => null);
@@ -1465,9 +1466,9 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       for (const reservationId of optionReservationByJobId.values()) {
         await releaseReservationIfPresent(reservationId, {
           actorUserId: viewer.userId,
-          note: "style-seeds-v2 reservation rollback",
+          note: "options reservation rollback",
           metadata: {
-            endpoint: "/api/creative/style-seeds-v2",
+            endpoint: "/api/creative/options",
             reason: "job_insert_failed"
           }
         }).catch(() => null);
@@ -1525,59 +1526,78 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         });
       }
     } else {
-      const submissionResults = await Promise.all(
-        preparedOptionJobs.map(async ({ jobId, variationId, variationTitle, optionPromptWithRoles, optionJob }) => {
-          try {
-            const requestInfo = await submitFinalGeneration(
-              optionJob,
-              {
-                prompt: optionPromptWithRoles,
-                aspectRatio: promptPackage.aspectRatio
-              },
-              filteredRefs
-            );
+      const submissionResults: Array<
+        | {
+            status: "accepted";
+            id: string;
+            variationId: string;
+            variationTitle: string;
+            requestId: string | null;
+          }
+        | {
+            status: "failed";
+            id: string;
+            variationId: string;
+            variationTitle: string;
+            requestId: null;
+            error: { message: string; statusCode?: number };
+          }
+      > = [];
 
-            const { error: optionJobUpdateError } = await supabaseAdmin
-              .from("creative_jobs")
-              .update({
-                provider_request_id: requestInfo?.request_id ?? null,
-                status: "processing",
-                submitted_at: new Date().toISOString()
-              })
-              .eq("id", jobId);
+      // FAL option submissions are more reliable when serialized. The single-option
+      // paths already behave this way; only multi-option generation was fan-out parallel.
+      for (const { jobId, variationId, variationTitle, optionPromptWithRoles, optionJob } of preparedOptionJobs) {
+        try {
+          const requestInfo = await submitFinalGeneration(
+            optionJob,
+            {
+              prompt: optionPromptWithRoles,
+              aspectRatio: promptPackage.aspectRatio
+            },
+            filteredRefs
+          );
 
-            if (optionJobUpdateError) {
-              const serialized = await failJobSubmission(jobId, optionJobUpdateError);
-              return {
-                status: "failed" as const,
-                id: jobId,
-                variationId,
-                variationTitle,
-                requestId: null,
-                error: serialized
-              };
-            }
+          const { error: optionJobUpdateError } = await supabaseAdmin
+            .from("creative_jobs")
+            .update({
+              provider_request_id: requestInfo?.request_id ?? null,
+              status: "processing",
+              submitted_at: new Date().toISOString()
+            })
+            .eq("id", jobId);
 
-            return {
-              status: "accepted" as const,
-              id: jobId,
-              variationId,
-              variationTitle,
-              requestId: requestInfo?.request_id ?? null
-            };
-          } catch (submissionError) {
-            const serialized = await failJobSubmission(jobId, submissionError);
-            return {
-              status: "failed" as const,
+          if (optionJobUpdateError) {
+            const serialized = await failJobSubmission(jobId, optionJobUpdateError);
+            submissionResults.push({
+              status: "failed",
               id: jobId,
               variationId,
               variationTitle,
               requestId: null,
               error: serialized
-            };
+            });
+            continue;
           }
-        })
-      );
+
+          submissionResults.push({
+            status: "accepted",
+            id: jobId,
+            variationId,
+            variationTitle,
+            requestId: requestInfo?.request_id ?? null
+          });
+        } catch (submissionError) {
+          const serialized = await failJobSubmission(jobId, submissionError);
+          submissionResults.push({
+            status: "failed",
+            id: jobId,
+            variationId,
+            variationTitle,
+            requestId: null,
+            error: serialized
+          });
+        }
+      }
 
       jobs.push(
         ...submissionResults.map(({ id, variationId, variationTitle, requestId }) => ({
@@ -1616,7 +1636,10 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       promptPackageId: promptPackage.id,
       jobs
     };
-  });
+  };
+
+  app.post("/api/creative/options", { preHandler: app.authenticate }, handleGenerateOptions);
+  app.post("/api/creative/style-seeds-v2", { preHandler: app.authenticate }, handleGenerateOptions);
 
   app.post("/api/creative/style-seeds", { preHandler: app.authenticate }, async (request, reply) => {
     const viewer = request.viewer;
@@ -1719,9 +1742,9 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const seedPromptWithRoles =
       seedReferenceCount > 0
         ? isV2PromptPackage(promptPackage)
-          ? buildV2RoleAwarePrompt(promptPackage.seedPrompt, referencePlan, "seed", getPostTypeCode(promptPackage))
-          : buildRoleAwarePrompt(promptPackage.seedPrompt, referencePlan, "seed")
-        : promptPackage.seedPrompt;
+          ? buildV2RoleAwarePrompt(promptPackage.finalPrompt, referencePlan, "seed", getPostTypeCode(promptPackage))
+          : buildRoleAwarePrompt(promptPackage.finalPrompt, referencePlan, "seed")
+        : promptPackage.finalPrompt;
     const seedProvider = resolveImageGenerationProvider();
     const seedProviderModel = getStyleSeedProviderModel(seedReferenceCount);
     const jobId = randomId();
@@ -2820,8 +2843,32 @@ function buildV2RoleAwarePrompt(
   postTypeCode?: string
 ) {
   const roleLines: string[] = [];
-  
-  const heroRef = getHeroReferenceForPostType(plan, postTypeCode ?? "default");
+  const resolvedPostTypeCode = postTypeCode ?? "default";
+  const activeReferencePaths = new Set(
+    filterReferenceStoragePathsForPrompt(plan, basePrompt, resolvedPostTypeCode)
+  );
+  const hasActivePrimaryAnchor =
+    typeof plan.primaryAnchor?.storagePath === "string" &&
+    activeReferencePaths.has(plan.primaryAnchor.storagePath);
+  const hasActiveAmenityAnchor =
+    typeof plan.amenityAnchor?.storagePath === "string" &&
+    activeReferencePaths.has(plan.amenityAnchor.storagePath);
+  const hasActiveProjectAnchor =
+    typeof plan.projectAnchor?.storagePath === "string" &&
+    activeReferencePaths.has(plan.projectAnchor.storagePath);
+  const hasActiveBrandLogo =
+    typeof plan.brandLogo?.storagePath === "string" &&
+    activeReferencePaths.has(plan.brandLogo.storagePath);
+  const hasActiveComplianceQr =
+    typeof plan.complianceQr?.storagePath === "string" &&
+    activeReferencePaths.has(plan.complianceQr.storagePath);
+  const activeSecondaryReferences = plan.references.filter((reference) =>
+    activeReferencePaths.has(reference.storagePath)
+  );
+
+  const heroRef = getHeroReferenceForPostType(plan, resolvedPostTypeCode).filter((storagePath) =>
+    activeReferencePaths.has(storagePath)
+  );
   const firstHeroRef = heroRef[0];
   const heroAsset = firstHeroRef ? getAssetForPath(plan, firstHeroRef) : null;
 
@@ -2846,46 +2893,52 @@ function buildV2RoleAwarePrompt(
     }
   }
 
-  if (plan.primaryAnchor?.role === "template") {
+  if (hasActivePrimaryAnchor && plan.primaryAnchor?.role === "template") {
     roleLines.push(
       `Use the template reference (${plan.primaryAnchor.label}) for layout rhythm, safe-zone planning, overlay discipline, spacing, and footer structure only. Do not copy its literal text, brand names, or placeholder content.`
     );
-  } else if (plan.primaryAnchor?.role === "source_post") {
+  } else if (hasActivePrimaryAnchor && plan.primaryAnchor?.role === "source_post") {
     roleLines.push(
       `Use the source-post reference (${plan.primaryAnchor.label}) only for framing intent and compositional structure. Do not copy its literal text or branding.`
     );
   }
 
-  if (postTypeCode === "amenity-spotlight" && !plan.amenityAnchor && plan.projectAnchor) {
+  if (resolvedPostTypeCode === "amenity-spotlight" && !hasActiveAmenityAnchor) {
     roleLines.push(
       "No exact amenity reference image was supplied for the requested facility. Generate the amenity scene without using a mismatched amenity or building image as the hero reference."
     );
     roleLines.push(
       "Do not substitute a different amenity, facility, park, lawn, pool, plaza, or building facade from any reference image."
     );
-  } else if (plan.projectAnchor && plan.amenityAnchor) {
+  } else if (hasActiveProjectAnchor && hasActiveAmenityAnchor) {
     roleLines.push(
       "Use the amenity reference for the hero subject and use the project reference only for brand-truth context."
     );
-  } else if (plan.projectAnchor && !heroAsset) {
+  } else if (hasActiveProjectAnchor && !heroAsset) {
     roleLines.push(
-      `Use the project building reference (${plan.projectAnchor.label}) for project identity and architectural context.`
+      `Use the project building reference (${plan.projectAnchor?.label ?? "project reference"}) for project identity and architectural context.`
     );
   }
 
-  if (plan.brandLogo) {
+  if (hasActiveAmenityAnchor && resolvedPostTypeCode === "amenity-spotlight") {
     roleLines.push(
-      `Use the brand logo (${plan.brandLogo.label}) as a small integrated footer/signature element. Match the exact lockup, shape, colors, and spacing. Blend it into a quiet designed logo zone with proper margin, scale, and tonal harmony so it feels built into the layout, never pasted on top.`
+      "Treat the chosen amenity reference as the sole visual truth anchor for the scene. Do not let generic building, lawn, clubhouse, or project-context imagery replace or dominate it."
     );
   }
 
-  if (plan.complianceQr) {
+  if (hasActiveBrandLogo) {
     roleLines.push(
-      `Use the RERA QR (${plan.complianceQr.label}) as a small compliance element if needed.`
+      `Use the brand logo (${plan.brandLogo?.label ?? "brand logo"}) as a small integrated footer/signature element. Match the exact lockup, shape, colors, and spacing. Blend it into a quiet designed logo zone with proper margin, scale, and tonal harmony so it feels built into the layout, never pasted on top.`
     );
   }
 
-  if (plan.references.length > 0) {
+  if (hasActiveComplianceQr) {
+    roleLines.push(
+      `Use the RERA QR (${plan.complianceQr?.label ?? "RERA QR"}) as a small compliance element if needed.`
+    );
+  }
+
+  if (activeSecondaryReferences.length > 0) {
     roleLines.push(
       "If an additional style or context reference is supplied, use it only for layout rhythm, overlay discipline, material language, atmosphere, or premium finishing detail. It must never override the hero subject."
     );
@@ -2897,7 +2950,7 @@ function buildV2RoleAwarePrompt(
       : "One finished design only; keep text minimal, clean, and legible."
   );
 
-  if (plan.projectAnchor) {
+  if (hasActiveProjectAnchor) {
     roleLines.push("Do not replace the supplied project with a different generic building.");
   }
 
@@ -2963,7 +3016,6 @@ function filterReferenceStoragePathsForPrompt(
     if (plan.amenityAnchor?.storagePath) {
       heroReference.push(plan.amenityAnchor.storagePath);
     }
-    pushSecondary(plan.projectAnchor?.storagePath);
   } else if (postTypeCode === "construction-update" || postTypeCode === "project-launch") {
     if (plan.projectAnchor?.storagePath) {
       heroReference.push(plan.projectAnchor.storagePath);
@@ -3182,7 +3234,34 @@ function getPromptPackageProjectImageAssetIds(promptPackage: { resolvedConstrain
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0) : [];
 }
 
-function getPromptPackageAmenityImageAssetIds(promptPackage: { resolvedConstraints?: Record<string, unknown> | null | undefined }) {
+function getPromptPackageAmenityResolutionSummary(
+  promptPackage: { compilerTrace?: Record<string, unknown> | null | undefined }
+) {
+  const compilerTrace =
+    promptPackage.compilerTrace && typeof promptPackage.compilerTrace === "object"
+      ? promptPackage.compilerTrace
+      : {};
+  const value = compilerTrace.amenityResolutionSummary;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function getPromptPackageAmenityImageAssetIds(
+  promptPackage: {
+    resolvedConstraints?: Record<string, unknown> | null | undefined;
+    compilerTrace?: Record<string, unknown> | null | undefined;
+  }
+) {
+  const amenityResolutionSummary = getPromptPackageAmenityResolutionSummary(promptPackage);
+  const tracedValue = amenityResolutionSummary?.selectedAssetIds;
+  if (Array.isArray(tracedValue)) {
+    const parsed = tracedValue.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+
   const resolvedConstraints =
     promptPackage.resolvedConstraints && typeof promptPackage.resolvedConstraints === "object"
       ? promptPackage.resolvedConstraints
@@ -3230,7 +3309,17 @@ function getPromptPackagePostTypeCode(promptPackage: { resolvedConstraints?: Rec
   return typeof postTypeGuidance?.code === "string" && postTypeGuidance.code.length > 0 ? postTypeGuidance.code : null;
 }
 
-function getPromptPackageAmenityFocus(promptPackage: { resolvedConstraints?: Record<string, unknown> | null | undefined }) {
+function getPromptPackageAmenityFocus(
+  promptPackage: {
+    resolvedConstraints?: Record<string, unknown> | null | undefined;
+    compilerTrace?: Record<string, unknown> | null | undefined;
+  }
+) {
+  const amenityResolutionSummary = getPromptPackageAmenityResolutionSummary(promptPackage);
+  if (typeof amenityResolutionSummary?.selectedAmenity === "string" && amenityResolutionSummary.selectedAmenity.trim().length > 0) {
+    return amenityResolutionSummary.selectedAmenity.trim();
+  }
+
   const postTypeGuidance = getPromptPackagePostTypeGuidance(promptPackage);
   return typeof postTypeGuidance?.amenityFocus === "string" && postTypeGuidance.amenityFocus.trim().length > 0
     ? postTypeGuidance.amenityFocus.trim()
@@ -3327,18 +3416,17 @@ function normalizeAsyncTemplateType(templateType: unknown) {
 function normalizeAsyncVariations(
   value: unknown,
   fallback: {
-    seedPrompt: string;
     finalPrompt: string;
-    referenceStrategy: "generated-template" | "uploaded-references" | "hybrid";
   }
 ) {
   const rows = Array.isArray(value) ? value : [];
   const normalized = rows
     .map((row, index) => {
       const record = asObject(row);
-      const seedPrompt = asOptionalString(record.seedPrompt);
-      const finalPrompt = asOptionalString(record.finalPrompt);
-      if (!seedPrompt || !finalPrompt) {
+      const finalPrompt =
+        asOptionalString(record.finalPrompt) ??
+        asOptionalString(record.seedPrompt);
+      if (!finalPrompt) {
         return null;
       }
 
@@ -3346,10 +3434,7 @@ function normalizeAsyncVariations(
         id: asOptionalString(record.id) ?? `variation_${index + 1}`,
         title: asOptionalString(record.title) ?? `Variation ${index + 1}`,
         strategy: asOptionalString(record.strategy) ?? "Distinct creative route",
-        seedPrompt,
         finalPrompt,
-        referenceStrategy: normalizeAsyncReferenceStrategy(record.referenceStrategy, []),
-        differenceFromOthers: asOptionalString(record.differenceFromOthers),
         resolvedConstraints: asObject(record.resolvedConstraints),
         compilerTrace: asObject(record.compilerTrace)
       };
@@ -3365,10 +3450,7 @@ function normalizeAsyncVariations(
       id: "variation_1",
       title: "Primary route",
       strategy: "Primary route",
-      seedPrompt: fallback.seedPrompt,
       finalPrompt: fallback.finalPrompt,
-      referenceStrategy: fallback.referenceStrategy,
-      differenceFromOthers: undefined,
       resolvedConstraints: {},
       compilerTrace: {}
     }
@@ -3435,10 +3517,12 @@ async function buildAsyncV2PromptPackage(params: {
       : null;
 
   const referenceStrategy = normalizeAsyncReferenceStrategy(rawCompiled.referenceStrategy, referenceAssetIds);
-  const seedPrompt = asOptionalString(rawCompiled.seedPrompt) ?? asOptionalString(rawCompiled.finalPrompt) ?? "";
-  const finalPrompt = asOptionalString(rawCompiled.finalPrompt) ?? seedPrompt;
-  if (!seedPrompt || !finalPrompt) {
-    throw new Error("Async compile result is missing prompts");
+  const finalPrompt =
+    asOptionalString(rawCompiled.finalPrompt) ??
+    asOptionalString(rawCompiled.seedPrompt) ??
+    "";
+  if (!finalPrompt) {
+    throw new Error("Async compile result is missing finalPrompt");
   }
 
   return PromptPackageSchema.parse({
@@ -3453,7 +3537,6 @@ async function buildAsyncV2PromptPackage(params: {
     creativeRequestId: params.compileJob.id,
     brandProfileVersionId: persistedBrandProfileVersionId ?? brandProfileVersion!.id,
     promptSummary: asOptionalString(rawCompiled.promptSummary) ?? "Compiled prompt package",
-    seedPrompt,
     finalPrompt,
     aspectRatio: asOptionalString(rawCompiled.aspectRatio) ?? "1:1",
     chosenModel: asOptionalString(rawCompiled.chosenModel) ?? "unknown",
@@ -3461,9 +3544,7 @@ async function buildAsyncV2PromptPackage(params: {
     referenceStrategy,
     referenceAssetIds,
     variations: normalizeAsyncVariations(rawCompiled.variations, {
-      seedPrompt,
-      finalPrompt,
-      referenceStrategy
+      finalPrompt
     }),
     resolvedConstraints: {
       ...rawResolvedConstraints,

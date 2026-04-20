@@ -215,23 +215,36 @@ def get_effective_llm_runtime() -> dict[str, Any]:
 
 
 def runtime_diagnostics(agent: Any | None = None) -> dict[str, Any]:
-    skill_names = (
-        CREATIVE_DIRECTOR.list_local_skill_names()
-        if hasattr(CREATIVE_DIRECTOR, "list_local_skill_names")
-        else [
-            path.name
-            for path in SKILLS_DIR.iterdir()
-            if path.is_dir() and (path / "SKILL.md").is_file()
-        ]
+    skill_runtime_error = None
+    try:
+        if hasattr(CREATIVE_DIRECTOR, "get_registered_skill_names"):
+            skill_names = CREATIVE_DIRECTOR.get_registered_skill_names()
+        elif hasattr(CREATIVE_DIRECTOR, "list_local_skill_names"):
+            skill_names = CREATIVE_DIRECTOR.list_local_skill_names()
+        else:
+            skill_names = [
+                path.name
+                for path in SKILLS_DIR.iterdir()
+                if path.is_dir() and (path / "SKILL.md").is_file()
+            ]
+    except Exception as exc:  # pragma: no cover - diagnostics only
+        skill_names = []
+        skill_runtime_error = str(exc)
+
+    tool_names = (
+        ["get_skill_instructions", "get_skill_reference", "get_skill_script"]
+        if skill_names
+        else []
     )
-    tool_names = ["get_skill_instructions"] if skill_names else []
-    skills_runtime_available = SKILLS_DIR.exists()
+    skills_runtime_available = bool(skill_names)
     supabase_url = os.getenv("SUPABASE_URL", "").strip()
     supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
     llm_runtime = get_effective_llm_runtime()
 
     return {
         "skillsRuntimeAvailable": skills_runtime_available,
+        "skillsRuntimeSource": "agno-skills" if skill_names else None,
+        "skillsRuntimeError": skill_runtime_error,
         "workflowAvailable": (
             CREATIVE_DIRECTOR.workflow_supported()
             if hasattr(CREATIVE_DIRECTOR, "workflow_supported")

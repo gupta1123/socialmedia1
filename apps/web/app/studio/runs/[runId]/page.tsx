@@ -470,8 +470,8 @@ export default function RunDetailPage() {
                 <strong>{formatCreativeTypeLabel(detail.run.templateType)}</strong>
               </div>
               <div className="property-item">
-                <span>Directions count</span>
-                <strong>{detail.seedTemplates.length}</strong>
+                <span>Options count</span>
+                <strong>{detail.promptPackage.variations.length || detail.run.optionCount}</strong>
               </div>
               <div className="property-item">
                 <span>Awaiting review</span>
@@ -499,8 +499,10 @@ export default function RunDetailPage() {
           <article className="sidebar-panel">
             <h3>Generation logic</h3>
             <div className="property-list">
-              <PromptSection label={isV2Run ? "First option prompt" : "Direction prompt"} content={detail.promptPackage.seedPrompt} />
-              <PromptSection label="Final production prompt" content={detail.promptPackage.finalPrompt} />
+              <PromptSection
+                label={isV2Run ? "Primary option prompt" : "Final production prompt"}
+                content={detail.promptPackage.finalPrompt}
+              />
             </div>
           </article>
 

@@ -7,18 +7,17 @@ import {
 
 function makePromptPackage(overrides: Partial<PromptPackage> = {}): PromptPackage {
   return {
-    id: "prompt-package-1",
-    workspaceId: "workspace-1",
-    brandId: "brand-1",
+    id: "11111111-1111-4111-8111-111111111111",
+    workspaceId: "22222222-2222-4222-8222-222222222222",
+    brandId: "33333333-3333-4333-8333-333333333333",
     deliverableId: null,
-    projectId: "project-1",
-    postTypeId: "post-type-1",
+    projectId: "44444444-4444-4444-8444-444444444444",
+    postTypeId: "55555555-5555-4555-8555-555555555555",
     creativeTemplateId: null,
     calendarItemId: null,
-    creativeRequestId: "request-1",
-    brandProfileVersionId: "brand-profile-1",
+    creativeRequestId: "66666666-6666-4666-8666-666666666666",
+    brandProfileVersionId: "77777777-7777-4777-8777-777777777777",
     promptSummary: "Compiled prompt package",
-    seedPrompt: "Seed prompt",
     finalPrompt: "Final prompt",
     aspectRatio: "4:5",
     chosenModel: "test-model",
@@ -30,9 +29,7 @@ function makePromptPackage(overrides: Partial<PromptPackage> = {}): PromptPackag
         id: "variation_1",
         title: "Primary route",
         strategy: "Primary route",
-        seedPrompt: "Seed prompt",
         finalPrompt: "Final prompt",
-        referenceStrategy: "generated-template",
         resolvedConstraints: {},
         compilerTrace: {}
       }
@@ -40,10 +37,10 @@ function makePromptPackage(overrides: Partial<PromptPackage> = {}): PromptPackag
     resolvedConstraints: {},
     compilerTrace: {
       sourceBrief: {
-        brandId: "brand-1",
+        brandId: "33333333-3333-4333-8333-333333333333",
         createMode: "post",
-        projectId: "project-1",
-        postTypeId: "post-type-1",
+        projectId: "44444444-4444-4444-8444-444444444444",
+        postTypeId: "55555555-5555-4555-8555-555555555555",
         channel: "instagram-feed",
         format: "portrait",
         goal: "Launch the project",
@@ -116,13 +113,13 @@ describe("creative brief fingerprint helpers", () => {
 
     expect(getPromptPackageBriefFingerprint(promptPackage, "v2")).toBe(
       buildCreativeBriefFingerprint({
-        activeBrandId: "brand-1",
+        activeBrandId: "33333333-3333-4333-8333-333333333333",
         creativeFlowVersion: "v2",
         styleVariationCount: 1,
         brief: {
           createMode: "post",
-          projectId: "project-1",
-          postTypeId: "post-type-1",
+          projectId: "44444444-4444-4444-8444-444444444444",
+          postTypeId: "55555555-5555-4555-8555-555555555555",
           channel: "instagram-feed",
           format: "portrait",
           templateType: "announcement",

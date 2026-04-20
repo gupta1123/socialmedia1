@@ -692,10 +692,7 @@ export const PromptVariationSchema = z.object({
   id: z.string(),
   title: z.string(),
   strategy: z.string(),
-  seedPrompt: z.string(),
   finalPrompt: z.string(),
-  referenceStrategy: z.enum(["generated-template", "uploaded-references", "hybrid"]).optional(),
-  differenceFromOthers: z.string().optional(),
   resolvedConstraints: z.record(z.string(), z.unknown()).default({}),
   compilerTrace: z.record(z.string(), z.unknown()).default({})
 });
@@ -712,7 +709,6 @@ export const PromptPackageSchema = z.object({
   creativeRequestId: z.string().uuid(),
   brandProfileVersionId: z.string().uuid(),
   promptSummary: z.string(),
-  seedPrompt: z.string(),
   finalPrompt: z.string(),
   aspectRatio: z.string(),
   chosenModel: z.string(),
@@ -1465,9 +1461,8 @@ export const CreativeRunSummarySchema = z.object({
   createdAt: z.string(),
   status: JobStatusSchema,
   latestJobId: z.string().uuid().nullable(),
-  seedJobCount: z.number().int(),
+  optionCount: z.number().int(),
   finalJobCount: z.number().int(),
-  seedTemplateCount: z.number().int(),
   finalOutputCount: z.number().int()
 });
 

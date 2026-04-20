@@ -52,8 +52,6 @@ async function main() {
   console.log(JSON.stringify(payload, null, 2));
   console.log("\nPROMPT_SUMMARY");
   console.log(compiled.promptSummary);
-  console.log("\nSEED_PROMPT");
-  console.log(compiled.seedPrompt);
   console.log("\nFINAL_PROMPT");
   console.log(compiled.finalPrompt);
   console.log("\nVARIATIONS");
@@ -61,11 +59,6 @@ async function main() {
   for (const variation of variations) {
     console.log(`\n[${variation.id}] ${variation.title}`);
     console.log(`Strategy: ${variation.strategy}`);
-    if (variation.differenceFromOthers) {
-      console.log(`Difference: ${variation.differenceFromOthers}`);
-    }
-    console.log(`Seed (${variation.seedPrompt.length} chars):`);
-    console.log(variation.seedPrompt);
     console.log(`Final (${variation.finalPrompt.length} chars):`);
     console.log(variation.finalPrompt);
   }

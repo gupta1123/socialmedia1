@@ -54,7 +54,7 @@ def decorate_trace(result: dict[str, Any], trace: dict[str, Any]) -> dict[str, A
             "pipeline": trace.get("pipeline", compiler_trace.get("pipeline", "v2-notebook")),
             "runtimeEvents": {
                 "available": bool(trace.get("eventCount")),
-                "reason": "V2 captures deterministic notebook context tool calls. Agno streaming runtime events are still best-effort.",
+                "reason": "V2 captures Agno workflow executor tool calls from WorkflowRunOutput.step_executor_runs.",
             },
         }
     )

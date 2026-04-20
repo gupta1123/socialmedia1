@@ -108,13 +108,13 @@ function selectReraQrAssetForProject(
 
 type CompilerResult = {
   promptSummary: string;
-  seedPrompt: string;
-  finalPrompt: string;
-  aspectRatio: string;
-  chosenModel: string;
-  resolvedConstraints: Record<string, unknown>;
-  compilerTrace: Record<string, unknown>;
-  referenceStrategy: (typeof ALLOWED_REFERENCE_STRATEGIES)[number];
+  seedPrompt?: string;
+  finalPrompt?: string;
+  aspectRatio?: string;
+  chosenModel?: string;
+  resolvedConstraints?: Record<string, unknown>;
+  compilerTrace?: Record<string, unknown>;
+  referenceStrategy?: (typeof ALLOWED_REFERENCE_STRATEGIES)[number];
   templateType: ((typeof ALLOWED_TEMPLATE_TYPES)[number]) | undefined;
   variations?: PromptVariationResult[];
   selectedAmenity?: string | null;
@@ -122,11 +122,11 @@ type CompilerResult = {
 };
 
 type PromptVariationResult = {
-  id: string;
-  title: string;
-  strategy: string;
-  seedPrompt: string;
-  finalPrompt: string;
+  id?: string;
+  title?: string;
+  strategy?: string;
+  seedPrompt?: string;
+  finalPrompt?: string;
   referenceStrategy?: (typeof ALLOWED_REFERENCE_STRATEGIES)[number];
   differenceFromOthers?: string | null;
   resolvedConstraints?: Record<string, unknown>;
@@ -929,8 +929,16 @@ function buildV2MockResult(input: Input): CompilerResult {
   const truthBundle = buildV2CreativeTruthBundle(input);
   const variations = buildMockVariations(result, variationCount).map((variation) => ({
     ...variation,
-    seedPrompt: refineV2PromptForPostType(variation.seedPrompt, input, truthBundle),
-    finalPrompt: refineV2PromptForPostType(variation.finalPrompt, input, truthBundle),
+    seedPrompt: refineV2PromptForPostType(
+      variation.seedPrompt ?? variation.finalPrompt ?? result.finalPrompt ?? "",
+      input,
+      truthBundle
+    ),
+    finalPrompt: refineV2PromptForPostType(
+      variation.finalPrompt ?? variation.seedPrompt ?? result.finalPrompt ?? "",
+      input,
+      truthBundle
+    ),
   }));
   const amenityResolutionSummary = truthBundle.amenityResolution
     ? {
@@ -1056,7 +1064,7 @@ function buildMockVariations(result: CompilerResult, variationCount: number): Pr
       strategy: route.strategy,
       seedPrompt: prompt,
       finalPrompt: prompt,
-      referenceStrategy: result.referenceStrategy,
+      referenceStrategy: result.referenceStrategy ?? "generated-template",
       differenceFromOthers: route.differenceFromOthers,
       resolvedConstraints: {
         variationIndex: index + 1
@@ -1087,7 +1095,7 @@ function normalizeCompilerVariations(
       seedPrompt: raw.seedPrompt,
       finalPrompt: raw.finalPrompt,
       referenceStrategy: raw.referenceStrategy,
-      differenceFromOthers: null,
+      differenceFromOthers: undefined,
       resolvedConstraints: {},
       compilerTrace: { fallbackVariation: rawVariations.length === 0 }
     }
@@ -1096,8 +1104,16 @@ function normalizeCompilerVariations(
   const normalized: PromptVariationResult[] = [];
 
   for (const [index, variation] of candidates.slice(0, requestedCount).entries()) {
-    const seedPrompt = typeof variation.seedPrompt === "string" ? variation.seedPrompt.trim() : "";
-    const finalPrompt = typeof variation.finalPrompt === "string" ? variation.finalPrompt.trim() : "";
+    const finalPrompt = typeof variation.finalPrompt === "string"
+      ? variation.finalPrompt.trim()
+      : typeof variation.seedPrompt === "string"
+        ? variation.seedPrompt.trim()
+        : typeof raw.finalPrompt === "string"
+          ? raw.finalPrompt.trim()
+          : typeof raw.seedPrompt === "string"
+            ? raw.seedPrompt.trim()
+            : "";
+    const seedPrompt = finalPrompt;
 
     if (!seedPrompt || !finalPrompt) {
       continue;
@@ -1108,7 +1124,7 @@ function normalizeCompilerVariations(
       ? (rawReferenceStrategy as (typeof ALLOWED_REFERENCE_STRATEGIES)[number])
       : options.referenceStrategy;
 
-    normalized.push({
+    const item: PromptVariationResult = {
       id: typeof variation.id === "string" && variation.id.trim() ? variation.id.trim() : `variation_${index + 1}`,
       title: typeof variation.title === "string" && variation.title.trim() ? variation.title.trim() : `Variation ${index + 1}`,
       strategy:
@@ -1118,10 +1134,6 @@ function normalizeCompilerVariations(
       seedPrompt: seedPrompt,
       finalPrompt: finalPrompt,
       referenceStrategy,
-      differenceFromOthers:
-        typeof variation.differenceFromOthers === "string" && variation.differenceFromOthers.trim()
-          ? variation.differenceFromOthers.trim()
-          : null,
       resolvedConstraints:
         variation.resolvedConstraints && typeof variation.resolvedConstraints === "object"
           ? {
@@ -1131,7 +1143,13 @@ function normalizeCompilerVariations(
           : { variationIndex: index + 1 },
       compilerTrace:
         variation.compilerTrace && typeof variation.compilerTrace === "object" ? variation.compilerTrace : {}
-    });
+    };
+
+    if (typeof variation.differenceFromOthers === "string" && variation.differenceFromOthers.trim()) {
+      item.differenceFromOthers = variation.differenceFromOthers.trim();
+    }
+
+    normalized.push(item);
   }
 
   return normalized;
@@ -1168,8 +1186,16 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
     referenceStrategy
   }).map((variation) => ({
     ...variation,
-    seedPrompt: refineV2PromptForPostType(variation.seedPrompt, input, truthBundle),
-    finalPrompt: refineV2PromptForPostType(variation.finalPrompt, input, truthBundle),
+    seedPrompt: refineV2PromptForPostType(
+      variation.seedPrompt ?? variation.finalPrompt ?? raw.finalPrompt ?? raw.seedPrompt ?? "",
+      input,
+      truthBundle
+    ),
+    finalPrompt: refineV2PromptForPostType(
+      variation.finalPrompt ?? variation.seedPrompt ?? raw.finalPrompt ?? raw.seedPrompt ?? "",
+      input,
+      truthBundle
+    ),
   }));
   const firstVariation = variations[0];
 
@@ -1193,8 +1219,8 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
 
   return {
     ...raw,
-    seedPrompt: firstVariation?.seedPrompt ?? raw.seedPrompt,
-    finalPrompt: firstVariation?.finalPrompt ?? raw.finalPrompt,
+    seedPrompt: firstVariation?.seedPrompt ?? firstVariation?.finalPrompt ?? raw.seedPrompt ?? raw.finalPrompt ?? "",
+    finalPrompt: firstVariation?.finalPrompt ?? firstVariation?.seedPrompt ?? raw.finalPrompt ?? raw.seedPrompt ?? "",
     aspectRatio,
     chosenModel:
       typeof raw.chosenModel === "string" && raw.chosenModel.trim().length > 0
@@ -1314,8 +1340,12 @@ function normalizeAgnoResult(raw: CompilerResult, input: Input): CompilerResult 
     referenceStrategy
   });
 
-  const seedPrompt = variations[0]?.seedPrompt ?? appendMissingPromptClauses(raw.seedPrompt, seedClauses);
-  const finalPrompt = variations[0]?.finalPrompt ?? appendMissingPromptClauses(raw.finalPrompt, finalClauses);
+  const seedPrompt =
+    variations[0]?.seedPrompt ??
+    appendMissingPromptClauses(raw.seedPrompt ?? raw.finalPrompt ?? "", seedClauses);
+  const finalPrompt =
+    variations[0]?.finalPrompt ??
+    appendMissingPromptClauses(raw.finalPrompt ?? raw.seedPrompt ?? "", finalClauses);
 
   return {
     ...raw,
@@ -1430,7 +1460,7 @@ function buildPromptGuardrailClauses(input: Input) {
   };
 }
 
-function normalizeAspectRatio(aspectRatio: string, input: Input) {
+function normalizeAspectRatio(aspectRatio: string | undefined, input: Input) {
   if (typeof aspectRatio === "string" && /^\d+:\d+$/.test(aspectRatio.trim())) {
     return aspectRatio.trim();
   }
@@ -1438,7 +1468,7 @@ function normalizeAspectRatio(aspectRatio: string, input: Input) {
   return deriveAspectRatio(input.brief.format);
 }
 
-function normalizeReferenceStrategy(referenceStrategy: string, input: Input) {
+function normalizeReferenceStrategy(referenceStrategy: string | undefined, input: Input) {
   if (ALLOWED_REFERENCE_STRATEGIES.includes(referenceStrategy as (typeof ALLOWED_REFERENCE_STRATEGIES)[number])) {
     return referenceStrategy as (typeof ALLOWED_REFERENCE_STRATEGIES)[number];
   }
@@ -2233,7 +2263,8 @@ function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: Cr
       `Create a premium ${aspectRatio} amenity spotlight poster for social media, not a generic lifestyle mood shot.`,
       "Use a single-amenity poster structure: small brand/header area, one clear amenity headline zone, one short support line zone, the amenity hero occupying the lower half to two-thirds, and one restrained footer/signature treatment.",
       "Focus on one amenity only. The amenity must dominate at thumbnail size with generous negative space and calm poster hierarchy.",
-      "If a project reference is also present, use it only as secondary project-truth context. It must never replace the amenity as the hero subject or turn the output into a launch poster.",
+      "Do not let generic project-building, clubhouse, lawn, or landscape context replace the selected amenity as the hero subject.",
+      "If there is no exact amenity image, generate the requested facility from the brief alone rather than switching to a different amenity or using a mismatched building image as the hero.",
       "Use refined overlay language: one soft framed text box or quiet gradient support zone, at most one compact badge or location line, and no multi-panel amenity boards.",
       "Keep text sparse and premium. Prioritize the amenity headline, one support line, and optionally one project/locality cue.",
       "Negative prompt: multi-amenity collage, resort brochure clutter, fake hospitality ad, generic stock lifestyle scene, too many bullets, logo sticker, overpowering project tower, watermark, garbled text."
@@ -2286,7 +2317,7 @@ function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: Cr
     ]);
   }
 
-  if (exactProjectAnchor && postTypeCode !== "construction-update") {
+  if (exactProjectAnchor && postTypeCode !== "construction-update" && postTypeCode !== "amenity-spotlight") {
     next = appendMissingPromptClauses(next, [
       "Preserve the supplied project reference as the source of building truth."
     ]);

@@ -193,11 +193,11 @@ describe("compilePromptPackageV2", () => {
     expect(output.variations?.[0]?.seedPrompt).toBe(output.seedPrompt);
     expect(output.variations?.[0]?.seedPrompt).toBe(output.variations?.[0]?.finalPrompt);
     expect(new Set(output.variations?.map((variation) => variation.strategy))).toHaveLength(3);
-    expect(output.compilerTrace.requestedVariationCount).toBe(3);
-    expect(output.compilerTrace.returnedVariationCount).toBe(3);
-    expect(output.compilerTrace.pipeline).toBe("v2-mock");
+    expect(output.compilerTrace?.requestedVariationCount).toBe(3);
+    expect(output.compilerTrace?.returnedVariationCount).toBe(3);
+    expect(output.compilerTrace?.pipeline).toBe("v2-mock");
     expect(getTruthBundleSummary(output).postTypeCode).toBe("project-launch");
-    expect(output.resolvedConstraints.compilerMode).toBe("v2-mock");
+    expect(output.resolvedConstraints?.compilerMode).toBe("v2-mock");
   });
 
   it("keeps foreign project assets out of a selected project's candidate bundle", async () => {
@@ -505,7 +505,7 @@ describe("compilePromptPackageV2", () => {
     expect(truthBundleSummary.candidateAssetIds).toContain(poolAssetId);
     expect(truthBundleSummary.candidateAssetIds).toContain(projectExteriorAssetId);
     expect(truthBundleSummary.candidateAssetIds).not.toContain(parkAssetId);
-    expect(output.compilerTrace.postTypeGuidanceManifest).toMatchObject({
+    expect(output.compilerTrace?.postTypeGuidanceManifest).toMatchObject({
       code: "amenity-spotlight",
       amenityFocus: "Swimming Pool",
       amenitySelectionSource: "explicit"
@@ -713,12 +713,12 @@ describe("compilePromptPackageV2", () => {
     expect(output.seedPrompt).toBeTruthy();
     expect(output.finalPrompt).toBeTruthy();
     const imageRefPattern = /(?:Image \d+ is [^.]+\.(?:jpg|jpeg|png|webp)[^,]*(?:,|and)|filename.*(?:jpg|jpeg|png|webp).*Image \d+)/i;
-    const hasActualImageRefs = imageRefPattern.test(output.finalPrompt);
+    const hasActualImageRefs = imageRefPattern.test(output.finalPrompt ?? "");
     expect(hasActualImageRefs).toBe(false);
     expect(output.finalPrompt).toContain("Create a premium 4:5 amenity spotlight poster for social media");
     expect(output.finalPrompt).toContain("Poster structure:");
     expect(output.finalPrompt).toContain("Negative prompt:");
-    expect(output.compilerTrace.promptDetailMode).toBe("poster-spec");
+    expect(output.compilerTrace?.promptDetailMode).toBe("poster-spec");
   });
 
   it("strips inherited CTA and exact text when copy mode is auto", async () => {
@@ -768,8 +768,8 @@ describe("compilePromptPackageV2", () => {
 
     expect(output.finalPrompt).not.toContain("Visit the Experience Centre");
     expect(output.finalPrompt).not.toContain("Book your site visit");
-    expect(output.compilerTrace.autoCopySanitized).toBe(true);
-    expect(output.resolvedConstraints.promptDetailMode).toBe("poster-spec");
+    expect(output.compilerTrace?.autoCopySanitized).toBe(true);
+    expect(output.resolvedConstraints?.promptDetailMode).toBe("poster-spec");
   });
 
   it("filters references correctly for amenity spotlight", async () => {

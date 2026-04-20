@@ -1,6 +1,6 @@
 ---
 name: composition-planner
-description: Plan the image structure: subject dominance, crop, angle, overlay system, and safe zones for the chosen post strategy.
+description: "Plan the image structure: subject dominance, crop, angle, overlay system, and safe zones for the chosen post strategy."
 ---
 
 # Composition Planner
@@ -22,6 +22,7 @@ Use this skill before prompt assembly.
 - Match the crop and hierarchy to the selected playbook, not a generic poster template.
 - For text-bearing post types, explicitly plan the poster zones: header/brand strip, headline-safe zone, short support/CTA zone, hero area, and footer/signature zone.
 - Keep overlay count low: usually one soft support overlay/card plus an optional compact badge or divider system.
+- If a logo or QR zone is needed, integrate it into the existing footer/signature system or a quiet tonal edge zone. Do not float it inside a separate white card, chip, pill, badge, or sticker-like block.
 - For `festival-post-playbook`, do not default to a centered emblem on a flat dark field. Consider asymmetrical band movement, off-center emblem balance, invitation-style framing, layered color fields, or contained symbolic layouts that still preserve calm hierarchy.
 - For construction updates, default to medium-wide or full-building framing so the construction/progress state and project identity are both legible.
 - For construction updates, avoid close-up/detail framing unless the brief explicitly asks for a close-up progress detail.
