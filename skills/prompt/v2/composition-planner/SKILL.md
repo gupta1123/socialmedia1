@@ -1,6 +1,6 @@
 ---
 name: composition-planner
-description: Plan the image structure: subject dominance, crop, angle, overlay system, and safe zones for the chosen post strategy.
+description: "Plan the image structure: subject dominance, crop, angle, overlay system, and safe zones for the chosen post strategy."
 ---
 
 # Composition Planner

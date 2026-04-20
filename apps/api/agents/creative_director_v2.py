@@ -25,7 +25,7 @@ def decorate_result(result: dict[str, Any]) -> dict[str, Any]:
 
     compiler_trace.update(
         {
-            "pipeline": "v2-notebook-two-agent",
+            "pipeline": compiler_trace.get("pipeline", "v2-notebook"),
             "skillsAvailable": skills_available,
             "loadedSkillNames": loaded_skill_names,
             "runtimeEvents": compiler_trace.get(
@@ -51,7 +51,7 @@ def decorate_trace(result: dict[str, Any], trace: dict[str, Any]) -> dict[str, A
     compiler_trace.update(
         {
             **trace,
-            "pipeline": "v2-notebook-two-agent",
+            "pipeline": trace.get("pipeline", compiler_trace.get("pipeline", "v2-notebook")),
             "runtimeEvents": {
                 "available": bool(trace.get("eventCount")),
                 "reason": "V2 captures deterministic notebook context tool calls. Agno streaming runtime events are still best-effort.",

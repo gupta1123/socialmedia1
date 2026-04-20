@@ -1207,7 +1207,10 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
     variations,
     compilerTrace: {
       ...compilerTrace,
-      pipeline: "v2-notebook-two-agent",
+      pipeline:
+        typeof compilerTrace.pipeline === "string" && compilerTrace.pipeline.length > 0
+          ? compilerTrace.pipeline
+          : "v2-notebook-two-agent",
       requestedVariationCount: clampVariationCount(input.variationCount),
       returnedVariationCount: variations.length,
       compactPromptMode: false,

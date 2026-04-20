@@ -232,6 +232,12 @@ def runtime_diagnostics(agent: Any | None = None) -> dict[str, Any]:
 
     return {
         "skillsRuntimeAvailable": skills_runtime_available,
+        "workflowAvailable": (
+            CREATIVE_DIRECTOR.workflow_supported()
+            if hasattr(CREATIVE_DIRECTOR, "workflow_supported")
+            else False
+        ),
+        "workflowImportError": getattr(CREATIVE_DIRECTOR, "WORKFLOW_IMPORT_ERROR", None),
         "pythonExecutable": sys.executable,
         "agnoVersion": getattr(__import__("agno"), "__version__", "unknown"),
         "skillsDirectory": str(SKILLS_DIR),
@@ -1210,7 +1216,11 @@ class PromptLabHandler(BaseHTTPRequestHandler):
                 **trace,
                 "runtime": runtime,
                 "requestContract": {"mode": contract_mode},
-                "pipeline": "v2-notebook-two-agent",
+                "runtimeEvents": {
+                    "available": bool(trace.get("eventCount")),
+                    "reason": "V2 captures Agno workflow executor tool calls from WorkflowRunOutput.step_executor_runs.",
+                },
+                "pipeline": trace.get("pipeline", compiler_trace.get("pipeline", "v2-notebook")),
                 "pythonServer": {
                     "url": f"http://{HOST}:{PORT}",
                     "agentScript": os.getenv("AGNO_PROMPT_LAB_AGENT_SCRIPT", os.getenv("AGNO_AGENT_V2_SCRIPT")),

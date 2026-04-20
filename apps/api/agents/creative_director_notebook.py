@@ -2,18 +2,16 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
-import time
-from contextvars import ContextVar
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 try:
     from agno.agent import Agent
     from agno.models.openai import OpenAIResponses
+    from agno.run import RunContext
     from agno.tools import tool
 except ImportError as exc:  # pragma: no cover - exercised only when deps missing
     raise SystemExit(f"Agno dependencies are missing: {exc}") from exc
@@ -26,6 +24,18 @@ except (
     LocalSkills = None
     Skills = None
 
+try:
+    from agno.workflow import Step, Workflow
+    from agno.workflow.types import StepInput, StepOutput as WorkflowStepOutput
+except ImportError as exc:  # pragma: no cover - exercised when workflow extras are unavailable
+    Step = None
+    Workflow = None
+    StepInput = Any
+    WorkflowStepOutput = Any
+    WORKFLOW_IMPORT_ERROR = str(exc)
+else:
+    WORKFLOW_IMPORT_ERROR = None
+
 
 SKILLS_DIR = Path(
     os.getenv(
@@ -33,6 +43,12 @@ SKILLS_DIR = Path(
         Path(__file__).resolve().parents[3] / "skills" / "prompt" / "v2",
     )
 )
+PIPELINE_WORKFLOW = "agno-sequential-workflow-v2"
+PIPELINE_MANUAL = "notebook-style-two-agent"
+WORKFLOW_NAME = "Prompt Lab v2 Sequential Workflow"
+ANALYST_STEP_NAME = "brief_analysis"
+CRAFTER_INPUT_STEP_NAME = "prepare_crafter_input"
+CRAFTER_STEP_NAME = "prompt_crafting"
 
 
 class PromptVariationOutput(BaseModel):
@@ -45,7 +61,9 @@ class PromptVariationOutput(BaseModel):
     finalPrompt: str = Field(
         ..., description="Single-image prompt for a finished post option."
     )
-    referenceStrategy: Optional[str] = Field(default=None)
+    referenceStrategy: Optional[
+        Literal["generated-template", "uploaded-references", "hybrid"]
+    ] = Field(default=None)
     differenceFromOthers: Optional[str] = Field(default=None)
     resolvedConstraints: dict[str, Any] = Field(default_factory=dict)
     compilerTrace: dict[str, Any] = Field(default_factory=dict)
@@ -67,47 +85,12 @@ class PromptPackageOutput(BaseModel):
     )
     chosenModel: str = Field(..., description="Recommended image model id.")
     templateType: Optional[str] = Field(default=None)
-    referenceStrategy: str = Field(..., description="How references should be used.")
-    variations: list[PromptVariationOutput] = Field(default_factory=list)
+    referenceStrategy: Literal["generated-template", "uploaded-references", "hybrid"] = Field(
+        ..., description="How references should be used."
+    )
+    variations: list[PromptVariationOutput] = Field(default_factory=list, min_length=1)
     resolvedConstraints: dict[str, Any] = Field(default_factory=dict)
     compilerTrace: dict[str, Any] = Field(default_factory=dict)
-
-
-CURRENT_PAYLOAD: ContextVar[dict[str, Any] | None] = ContextVar(
-    "current_payload", default=None
-)
-CURRENT_TOOL_CALLS: ContextVar[list[dict[str, Any]] | None] = ContextVar(
-    "current_tool_calls", default=None
-)
-
-OUTPUT_FORMAT_INSTRUCTION = """
-Return only valid JSON with this exact shape:
-{
-  "promptSummary": string,
-  "seedPrompt": string,
-  "finalPrompt": string,
-  "aspectRatio": string,
-  "chosenModel": string,
-  "templateType": string or null,
-  "referenceStrategy": "generated-template" | "uploaded-references" | "hybrid",
-  "variations": [
-    {
-      "id": "variation_1",
-      "title": string,
-      "strategy": string,
-      "seedPrompt": string,
-      "finalPrompt": string,
-      "referenceStrategy": "generated-template" | "uploaded-references" | "hybrid",
-      "differenceFromOthers": string,
-      "resolvedConstraints": object,
-      "compilerTrace": object
-    }
-  ],
-  "resolvedConstraints": object,
-  "compilerTrace": object
-}
-Do not wrap the JSON in markdown fences.
-""".strip()
 
 ANALYST_OUTPUT_INSTRUCTION = """
 Produce a concise working brief for the prompt crafter.
@@ -182,16 +165,14 @@ Example of INCORRECT prompt (NEVER write this):
 """.strip()
 
 SKILL_WORKFLOW_INSTRUCTION = """
-Use the provided Loaded Skills packet as your skill context.
+Use Agno Skills tools directly for guidance.
 
-- Treat every listed skill as already loaded.
-- Do not call, fetch, or request skill instructions again.
+- Load only the skill instructions you need using skill tools (for example `get_skill_instructions`).
+- Always load the playbook skill named by `postTypeContract.playbookKey` before writing final prompts.
+- Load additional relevant skills for composition, copy, references, and verification as needed.
 - Do not invent skill names.
-- Do not use a different post-type playbook than postTypeContract.playbookKey.
 - Do not paste raw skill text or raw tool output into the final JSON.
 """.strip()
-
-AGENTS: tuple[Agent, Agent] | None = None
 
 
 def list_local_skill_names() -> list[str]:
@@ -204,46 +185,8 @@ def list_local_skill_names() -> list[str]:
         if path.is_dir() and (path / "SKILL.md").is_file()
     )
 
-
-def load_skill_text(skill_name: str) -> str:
-    available = set(list_local_skill_names())
-    normalized = skill_name.strip()
-    if normalized not in available:
-        raise ValueError(
-            f"Unknown skill '{skill_name}'. Available skills: {', '.join(sorted(available))}"
-        )
-
-    return (SKILLS_DIR / normalized / "SKILL.md").read_text(encoding="utf-8")
-
-
-def current_payload() -> dict[str, Any]:
-    payload = CURRENT_PAYLOAD.get()
-    if payload is None:
-        raise RuntimeError("No active request payload is bound for tool usage")
-    return payload
-
-
 def compact_json(value: Any) -> str:
     return json.dumps(value, indent=2, ensure_ascii=False)
-
-
-def record_tool_call(
-    name: str, result: str, tool_args: dict[str, Any] | None = None
-) -> None:
-    tool_calls = CURRENT_TOOL_CALLS.get()
-    if tool_calls is None:
-        return
-
-    item: dict[str, Any] = {
-        "event": "ToolCallCompleted",
-        "toolName": name,
-        "toolResult": result,
-        "createdAt": time.time(),
-    }
-    if tool_args:
-        item["toolArgs"] = tool_args
-
-    tool_calls.append(item)
 
 
 def take_top(values: list[str] | None, count: int) -> list[str]:
@@ -314,15 +257,34 @@ def build_playbook_override(payload: dict[str, Any]) -> str:
     )
 
 
-def truth_bundle() -> dict[str, Any]:
-    bundle = current_payload().get("truthBundle")
+def truth_bundle_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    bundle = payload.get("truthBundle")
     if not isinstance(bundle, dict):
         raise RuntimeError("No truth bundle is bound for the current request")
     return bundle
 
 
+def truth_bundle_from_context(run_context: RunContext) -> dict[str, Any]:
+    dependencies = run_context.dependencies or {}
+    bundle = dependencies.get("truthBundle")
+    if not isinstance(bundle, dict):
+        raise RuntimeError("No truthBundle in run_context.dependencies")
+    return bundle
+
+
+def normalize_external_truth_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Normalize incoming truth bundles to a dictionary payload.
+
+    The Prompt Lab sends the internal truthBundle shape, so this is an identity
+    normalizer plus a type guard used by helper utilities.
+    """
+    if not isinstance(bundle, dict):
+        return {}
+    return bundle
+
+
 def resolve_variation_count(payload: dict[str, Any]) -> int:
-    request_context = truth_bundle().get("requestContext") or {}
+    request_context = truth_bundle_from_payload(payload).get("requestContext") or {}
     raw = request_context.get("variationCount", 3)
     try:
         count = int(raw)
@@ -332,7 +294,7 @@ def resolve_variation_count(payload: dict[str, Any]) -> int:
 
 
 def resolve_reference_strategy(payload: dict[str, Any]) -> str:
-    bundle = truth_bundle()
+    bundle = truth_bundle_from_payload(payload)
     has_template = bundle.get("templateTruth") is not None
     candidate_assets = bundle.get("candidateAssets") or []
     exact_asset_contract = bundle.get("exactAssetContract") or {}
@@ -354,7 +316,7 @@ def resolve_reference_strategy(payload: dict[str, Any]) -> str:
 
 
 def resolve_template_type(payload: dict[str, Any]) -> Optional[str]:
-    bundle = truth_bundle()
+    bundle = truth_bundle_from_payload(payload)
     request_context = bundle.get("requestContext") or {}
     template_truth = bundle.get("templateTruth") or {}
     template_type = request_context.get("templateType")
@@ -374,66 +336,64 @@ def resolve_template_type(payload: dict[str, Any]) -> Optional[str]:
 
 
 @tool()
-def get_request_brief() -> str:
-    result = compact_json(truth_bundle().get("requestContext") or {})
-    record_tool_call("get_request_brief", result)
+def get_request_brief(run_context: RunContext) -> str:
+    result = compact_json(truth_bundle_from_context(run_context).get("requestContext") or {})
     return result
 
 
 @tool()
-def get_brand_truth() -> str:
-    result = compact_json(truth_bundle().get("brandTruth") or {})
-    record_tool_call("get_brand_truth", result)
+def get_brand_truth(run_context: RunContext) -> str:
+    result = compact_json(truth_bundle_from_context(run_context).get("brandTruth") or {})
     return result
 
 
 @tool()
-def get_project_truth() -> str:
-    result = compact_json((truth_bundle().get("projectTruth") or {"project": None}))
-    record_tool_call("get_project_truth", result)
-    return result
-
-
-@tool()
-def get_post_type_contract() -> str:
-    result = compact_json(truth_bundle().get("postTypeContract") or {})
-    record_tool_call("get_post_type_contract", result)
-    return result
-
-
-@tool()
-def get_festival_truth() -> str:
-    result = compact_json((truth_bundle().get("festivalTruth") or {"festival": None}))
-    record_tool_call("get_festival_truth", result)
-    return result
-
-
-@tool()
-def get_template_truth() -> str:
-    result = compact_json((truth_bundle().get("templateTruth") or {"template": None}))
-    record_tool_call("get_template_truth", result)
-    return result
-
-
-@tool()
-def list_candidate_assets() -> str:
-    result = compact_json(truth_bundle().get("candidateAssets") or [])
-    record_tool_call("list_candidate_assets", result)
-    return result
-
-
-@tool()
-def get_available_project_amenities() -> str:
+def get_project_truth(run_context: RunContext) -> str:
     result = compact_json(
-        (truth_bundle().get("amenityResolution") or {}).get("availableAmenities") or []
+        (truth_bundle_from_context(run_context).get("projectTruth") or {"project": None})
     )
-    record_tool_call("get_available_project_amenities", result)
     return result
 
 
 @tool()
-def get_assets_for_amenity(amenity_name: str) -> str:
-    bundle = truth_bundle()
+def get_post_type_contract(run_context: RunContext) -> str:
+    result = compact_json(truth_bundle_from_context(run_context).get("postTypeContract") or {})
+    return result
+
+
+@tool()
+def get_festival_truth(run_context: RunContext) -> str:
+    result = compact_json(
+        (truth_bundle_from_context(run_context).get("festivalTruth") or {"festival": None})
+    )
+    return result
+
+
+@tool()
+def get_template_truth(run_context: RunContext) -> str:
+    result = compact_json(
+        (truth_bundle_from_context(run_context).get("templateTruth") or {"template": None})
+    )
+    return result
+
+
+@tool()
+def list_candidate_assets(run_context: RunContext) -> str:
+    result = compact_json(truth_bundle_from_context(run_context).get("candidateAssets") or [])
+    return result
+
+
+@tool()
+def get_available_project_amenities(run_context: RunContext) -> str:
+    result = compact_json(
+        (truth_bundle_from_context(run_context).get("amenityResolution") or {}).get("availableAmenities") or []
+    )
+    return result
+
+
+@tool()
+def get_assets_for_amenity(amenity_name: str, run_context: RunContext) -> str:
+    bundle = truth_bundle_from_context(run_context)
     resolution = bundle.get("amenityResolution") or {}
     available = resolution.get("availableAmenities") or []
     all_assets = bundle.get("candidateAssets") or []
@@ -457,21 +417,11 @@ def get_assets_for_amenity(amenity_name: str) -> str:
         "hasExactAssetMatch": bool(assets),
     }
 
-    if selected_option and asset_ids:
-        resolution["selectedAmenity"] = selected_option.get("name")
-        resolution["selectedAssetIds"] = asset_ids
-        resolution["hasExactAssetMatch"] = bool(assets)
-
-    record_tool_call(
-        "get_assets_for_amenity",
-        compact_json(result),
-        {"amenity_name": amenity_name},
-    )
     return compact_json(result)
 
 
 @tool()
-def get_assets_for_post_type(post_type_code: str) -> str:
+def get_assets_for_post_type(post_type_code: str, run_context: RunContext) -> str:
     """
     Get the most relevant asset for a specific post type based on its subjectType.
 
@@ -485,7 +435,7 @@ def get_assets_for_post_type(post_type_code: str) -> str:
 
     Returns the single best matching asset with its metadata for use in prompt.
     """
-    bundle = truth_bundle()
+    bundle = truth_bundle_from_context(run_context)
     all_assets = bundle.get("candidateAssets") or []
     post_type_contract = bundle.get("postTypeContract") or {}
     amenity_focus = post_type_contract.get("amenityFocus")
@@ -589,119 +539,22 @@ def get_assets_for_post_type(post_type_code: str) -> str:
         "availableAssetCount": len(scored_assets),
     }
 
-    record_tool_call(
-        "get_assets_for_post_type",
-        compact_json(result),
-        {"post_type_code": post_type_code},
-    )
     return compact_json(result)
 
 
 @tool()
-def get_exact_asset_contract() -> str:
-    result = compact_json(truth_bundle().get("exactAssetContract") or {})
-    record_tool_call("get_exact_asset_contract", result)
+def get_exact_asset_contract(run_context: RunContext) -> str:
+    result = compact_json(truth_bundle_from_context(run_context).get("exactAssetContract") or {})
     return result
 
 
 @tool()
-def get_generation_contract() -> str:
-    result = compact_json(truth_bundle().get("generationContract") or {})
-    record_tool_call("get_generation_contract", result)
+def get_generation_contract(run_context: RunContext) -> str:
+    result = compact_json(truth_bundle_from_context(run_context).get("generationContract") or {})
     return result
-
-
-@tool()
-def get_skill_instructions(skill_name: str) -> str:
-    """Load one local prompt skill by exact directory name."""
-    text = load_skill_text(skill_name)
-    record_tool_call(
-        "get_skill_instructions",
-        compact_json({"skillName": skill_name, "characters": len(text)}),
-        {"skill_name": skill_name},
-    )
-    return text
-
-
-def append_unique(values: list[str], value: str) -> None:
-    if value and value not in values:
-        values.append(value)
-
-
-def required_skill_names(payload: dict[str, Any]) -> list[str]:
-    bundle = payload.get("truthBundle") or {}
-    candidate_assets = bundle.get("candidateAssets") or []
-    exact_asset_contract = bundle.get("exactAssetContract") or {}
-    post_type_contract = bundle.get("postTypeContract") or {}
-    project_truth = bundle.get("projectTruth")
-    playbook_key = post_type_contract.get("playbookKey")
-
-    names: list[str] = []
-    for name in [
-        "brief-interpreter",
-        "brand-compliance-interpreter",
-        "composition-planner",
-        "copy-typography-planner",
-        "variation-planner",
-        "prompt-assembler",
-        "prompt-verifier",
-    ]:
-        append_unique(names, name)
-
-    if candidate_assets:
-        append_unique(names, "asset-ranker")
-
-    if (
-        exact_asset_contract.get("requiredProjectAnchorAssetId")
-        or exact_asset_contract.get("logoAssetId")
-        or exact_asset_contract.get("reraQrAssetId")
-    ):
-        append_unique(names, "reference-preservation-planner")
-
-    if isinstance(project_truth, dict) and project_truth:
-        append_unique(names, "project-truth-synthesizer")
-
-    weak_assets = not candidate_assets or all(
-        ((asset.get("normalizedMetadata") or {}).get("qualityTier") == "weak")
-        for asset in candidate_assets
-        if isinstance(asset, dict)
-    )
-    if weak_assets:
-        append_unique(names, "missing-asset-handler")
-
-    if isinstance(playbook_key, str) and playbook_key:
-        append_unique(names, playbook_key)
-
-    available = set(list_local_skill_names())
-    return [name for name in names if name in available]
-
-
-def build_skill_packet(payload: dict[str, Any]) -> tuple[list[str], str]:
-    names = required_skill_names(payload)
-    sections: list[str] = []
-    for name in names:
-        text = load_skill_text(name)
-        record_tool_call(
-            "get_skill_instructions",
-            compact_json(
-                {
-                    "skillName": name,
-                    "characters": len(text),
-                    "loadedBy": "deterministic-preload",
-                }
-            ),
-            {"skill_name": name},
-        )
-        sections.append(f"## {name}\n{text.strip()}")
-
-    return names, "\n\n".join(sections)
 
 
 def build_agents() -> tuple[Agent, Agent]:
-    global AGENTS
-    if AGENTS is not None:
-        return AGENTS
-
     llm_provider, llm_model = resolve_llm_config()
     base_url = os.getenv("OPENAI_BASE_URL")
     model_kwargs: dict[str, Any] = {
@@ -714,8 +567,21 @@ def build_agents() -> tuple[Agent, Agent]:
         model_kwargs["base_url"] = os.getenv(
             "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
         )
+        openrouter_api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv(
+            "OPENAI_API_KEY"
+        )
+        if openrouter_api_key:
+            model_kwargs["api_key"] = openrouter_api_key
     elif base_url:
         model_kwargs["base_url"] = base_url
+
+    skills_runtime = None
+    skills_runtime_error: Optional[str] = None
+    if LocalSkills is not None and Skills is not None and SKILLS_DIR.exists():
+        try:
+            skills_runtime = Skills(loaders=[LocalSkills(str(SKILLS_DIR))])
+        except Exception as exc:  # pragma: no cover - skill runtime fallback
+            skills_runtime_error = str(exc)
 
     brief_analyst = Agent(
         name="Brief Analyst",
@@ -764,25 +630,29 @@ def build_agents() -> tuple[Agent, Agent]:
         "model": OpenAIResponses(**model_kwargs),
         "instructions": [
             "You are an expert image prompt crafter for a real-estate social image lab.",
-            "Work exactly like a prompt specialist: use the preloaded skills, synthesize, then write detailed poster-spec prompts.",
+            "Work exactly like a prompt specialist: use available skills, synthesize, then write detailed poster-spec prompts.",
             "Keep output focused on what the image model needs, not everything you know, but be specific about composition, layout zones, typography-safe areas, overlays, and negative constraints when they affect output quality.",
             "Every variation is a finished post option. Do not create exploratory previews or draft style boards.",
             "Keep seedPrompt as a compatibility alias for the same finished option intent as finalPrompt.",
             "Each prompt must describe one single complete image only.",
             "Never describe multiple posters, a board, a sheet, a mockup page, or a tiled layout inside one image.",
-            f"Available prompt skills: {', '.join(list_local_skill_names())}.",
             SKILL_WORKFLOW_INSTRUCTION,
             CRAFTER_OUTPUT_INSTRUCTION,
-            OUTPUT_FORMAT_INSTRUCTION,
         ],
-        "expected_output": CRAFTER_OUTPUT_INSTRUCTION,
+        "output_schema": PromptPackageOutput,
         "markdown": False,
     }
+    if skills_runtime is not None:
+        prompt_crafter_kwargs["skills"] = skills_runtime
+    else:
+        message = "Skill runtime is unavailable; rely on the analyzed brief and request context."
+        if skills_runtime_error:
+            message = f"{message} Error: {skills_runtime_error}"
+        prompt_crafter_kwargs["instructions"].append(message)
 
     prompt_crafter = Agent(**prompt_crafter_kwargs)
 
-    AGENTS = (brief_analyst, prompt_crafter)
-    return AGENTS
+    return (brief_analyst, prompt_crafter)
 
 
 def build_agent() -> Agent:
@@ -882,7 +752,12 @@ def build_crafter_context(payload: dict[str, Any]) -> str:
 
 
 def normalize_prompt_package(
-    result: dict[str, Any], payload: dict[str, Any], analyst_output: str
+    result: dict[str, Any],
+    payload: dict[str, Any],
+    analyst_output: str,
+    *,
+    pipeline: str,
+    orchestration: str,
 ) -> dict[str, Any]:
     variation_count = resolve_variation_count(payload)
     variations = result.get("variations")
@@ -932,7 +807,7 @@ def normalize_prompt_package(
         ]
 
     first_variation = normalized_variations[0]
-    bundle = truth_bundle()
+    bundle = truth_bundle_from_payload(payload)
     request_context = bundle.get("requestContext") or {}
     exact_asset_contract = bundle.get("exactAssetContract") or {}
     result["variations"] = normalized_variations
@@ -979,7 +854,8 @@ def normalize_prompt_package(
         compiler_trace = {}
     compiler_trace.update(
         {
-            "pipeline": "notebook-style-two-agent",
+            "pipeline": pipeline,
+            "orchestration": orchestration,
             "analystAgent": "Brief Analyst",
             "crafterAgent": "Prompt Crafter",
             "analystOutput": analyst_output,
@@ -987,6 +863,8 @@ def normalize_prompt_package(
             "loadedSkillNames": list_local_skill_names(),
             "requestedVariationCount": variation_count,
             "returnedVariationCount": len(normalized_variations),
+            "workflowAvailable": bool(Workflow is not None and Step is not None),
+            "workflowImportError": WORKFLOW_IMPORT_ERROR,
             "truthBundleSummary": {
                 "postTypeCode": (bundle.get("postTypeContract") or {}).get("code"),
                 "playbookKey": (bundle.get("postTypeContract") or {}).get(
@@ -1011,18 +889,6 @@ def normalize_prompt_package(
     return result
 
 
-def extract_json_object(raw: str) -> str:
-    text = raw.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end < start:
-        raise ValueError("No JSON object found in Agno output")
-    return text[start : end + 1]
-
-
 def parse_prompt_package(raw: Any) -> dict[str, Any]:
     def with_alias_prompts(value: dict[str, Any]) -> dict[str, Any]:
         variations = value.get("variations")
@@ -1038,126 +904,404 @@ def parse_prompt_package(raw: Any) -> dict[str, Any]:
                 value["finalPrompt"] = first["finalPrompt"]
         return value
 
-    if isinstance(raw, BaseModel):
+    if isinstance(raw, PromptPackageOutput):
         return raw.model_dump()
+    if isinstance(raw, BaseModel):
+        return PromptPackageOutput.model_validate(with_alias_prompts(raw.model_dump())).model_dump()
     if isinstance(raw, dict):
         return PromptPackageOutput.model_validate(with_alias_prompts(raw)).model_dump()
     if isinstance(raw, str):
-        parsed = json.loads(extract_json_object(raw))
-        return PromptPackageOutput.model_validate(
-            with_alias_prompts(parsed)
-        ).model_dump()
+        return PromptPackageOutput.model_validate_json(raw).model_dump()
     raise TypeError(f"Unexpected Agno output type: {type(raw)!r}")
 
 
-def execute(payload: dict[str, Any]) -> dict[str, Any]:
+def build_run_dependencies(payload: dict[str, Any]) -> dict[str, Any]:
+    return {"truthBundle": payload.get("truthBundle") or {}}
+
+
+def truth_bundle_from_step_input(step_input: StepInput) -> dict[str, Any]:
+    additional_data = getattr(step_input, "additional_data", None)
+    if not isinstance(additional_data, dict):
+        raise RuntimeError("No additional_data payload was provided to workflow step")
+
+    bundle = additional_data.get("truthBundle")
+    if not isinstance(bundle, dict):
+        raise RuntimeError("No truthBundle in StepInput.additional_data")
+    return bundle
+
+
+def build_crafter_input(payload: dict[str, Any], analyst_output: str) -> str:
+    return (
+        "Using the analyzed brief and request truth context below, return the final prompt package JSON.\n"
+        f"Create exactly {resolve_variation_count(payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
+        "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n\n"
+        f"{build_playbook_override(payload)}"
+        "## Request Truth Context\n"
+        f"{build_crafter_context(payload)}\n\n"
+        "## Analyzed Brief\n"
+        f"{analyst_output}\n"
+    )
+
+
+def workflow_supported() -> bool:
+    return Workflow is not None and Step is not None
+
+
+def flatten_step_results(step_results: Any) -> list[Any]:
+    if not isinstance(step_results, list):
+        return []
+
+    flattened: list[Any] = []
+    for step_result in step_results:
+        if isinstance(step_result, list):
+            flattened.extend(flatten_step_results(step_result))
+        else:
+            flattened.append(step_result)
+    return flattened
+
+
+def extract_step_content(step_results: Any, step_name: str) -> str:
+    for step_result in flatten_step_results(step_results):
+        if getattr(step_result, "step_name", None) != step_name:
+            continue
+        content = getattr(step_result, "content", None)
+        return content if isinstance(content, str) else str(content)
+    return ""
+
+
+def build_compiler_workflow(brief_analyst: Agent, prompt_crafter: Agent) -> Any:
+    if not workflow_supported():
+        raise RuntimeError(
+            f"Agno workflow support is unavailable. Import error: {WORKFLOW_IMPORT_ERROR}"
+        )
+
+    def prepare_crafter_input(step_input: StepInput) -> WorkflowStepOutput:
+        analyst_output = step_input.get_step_content(ANALYST_STEP_NAME)
+        if analyst_output is None:
+            analyst_output = step_input.get_last_step_content()
+        analyst_output_text = (
+            analyst_output if isinstance(analyst_output, str) else str(analyst_output or "")
+        )
+        payload = {"truthBundle": truth_bundle_from_step_input(step_input)}
+        return WorkflowStepOutput(
+            content=build_crafter_input(payload, analyst_output_text)
+        )
+
+    return Workflow(
+        name=WORKFLOW_NAME,
+        description="Deterministic brief analysis then prompt crafting.",
+        steps=[
+            Step(name=ANALYST_STEP_NAME, agent=brief_analyst),
+            Step(name=CRAFTER_INPUT_STEP_NAME, executor=prepare_crafter_input),
+            Step(name=CRAFTER_STEP_NAME, agent=prompt_crafter),
+        ],
+    )
+
+
+def serialize_tool_call(tool_execution: Any, source_agent: str) -> dict[str, Any]:
+    tool_name = getattr(tool_execution, "tool_name", None)
+    tool_args = getattr(tool_execution, "tool_args", None)
+    tool_error = getattr(tool_execution, "tool_call_error", None)
+    tool_result = getattr(tool_execution, "result", None)
+    created_at = getattr(tool_execution, "created_at", None)
+    return {
+        "event": "ToolCallCompleted",
+        "toolName": tool_name,
+        "toolArgs": tool_args if isinstance(tool_args, dict) else None,
+        "toolError": tool_error,
+        "toolResult": tool_result,
+        "createdAt": created_at,
+        "sourceAgent": source_agent,
+    }
+
+
+def serialize_tool_event(event: Any) -> Optional[dict[str, Any]]:
+    event_name = getattr(event, "event", None)
+    if event_name not in {"ToolCallCompleted", "ToolCallError"}:
+        return None
+
+    tool_execution = getattr(event, "tool", None)
+    if tool_execution is None:
+        return None
+
+    source_agent = (
+        getattr(event, "agent_name", None)
+        or getattr(event, "step_name", None)
+        or "agent"
+    )
+    item = serialize_tool_call(tool_execution, str(source_agent))
+    item["event"] = event_name
+    explicit_error = getattr(event, "error", None)
+    if explicit_error:
+        item["toolError"] = explicit_error
+    return item
+
+
+def run_agent_with_trace(
+    agent: Agent,
+    *,
+    agent_input: str,
+    dependencies: dict[str, Any],
+    add_dependencies_to_context: bool,
+) -> dict[str, Any]:
+    events_count = 0
+    tool_calls: list[dict[str, Any]] = []
+    final_content: Any = None
+    model: Optional[str] = None
+    model_provider: Optional[str] = None
+    run_id: Optional[str] = None
+    session_id: Optional[str] = None
+
+    stream = agent.run(
+        input=agent_input,
+        dependencies=dependencies,
+        add_dependencies_to_context=add_dependencies_to_context,
+        stream=True,
+        stream_events=True,
+    )
+
+    for event in stream:
+        events_count += 1
+        event_name = getattr(event, "event", None)
+        if event_name == "RunStarted":
+            model = getattr(event, "model", None) or model
+            model_provider = getattr(event, "model_provider", None) or model_provider
+            run_id = getattr(event, "run_id", None) or run_id
+            session_id = getattr(event, "session_id", None) or session_id
+        elif event_name == "RunCompleted":
+            final_content = getattr(event, "content", None)
+            run_id = getattr(event, "run_id", None) or run_id
+            session_id = getattr(event, "session_id", None) or session_id
+
+        tool_call = serialize_tool_event(event)
+        if tool_call is not None:
+            tool_calls.append(tool_call)
+
+    if final_content is None:
+        raise RuntimeError("Agent stream ended without RunCompleted content")
+
+    return {
+        "content": final_content,
+        "toolCalls": tool_calls,
+        "eventCount": events_count,
+        "runId": run_id,
+        "sessionId": session_id,
+        "model": model,
+        "modelProvider": model_provider,
+    }
+
+
+def run_workflow_with_trace(
+    workflow: Any,
+    normalized_payload: dict[str, Any],
+    dependencies: dict[str, Any],
+) -> dict[str, Any]:
+    workflow_run = workflow.run(
+        input=build_request_summary(normalized_payload),
+        dependencies=dependencies,
+        additional_data={"truthBundle": dependencies["truthBundle"]},
+        add_dependencies_to_context=False,
+    )
+
+    analyst_output = extract_step_content(workflow_run.step_results, ANALYST_STEP_NAME)
+    tool_calls: list[dict[str, Any]] = []
+    model: Optional[str] = None
+    model_provider: Optional[str] = None
+    crafter_run_id: Optional[str] = None
+    crafter_session_id: Optional[str] = None
+    workflow_executor_runs = getattr(workflow_run, "step_executor_runs", None)
+    if isinstance(workflow_executor_runs, list):
+        for executor_run in workflow_executor_runs:
+            source_agent = getattr(executor_run, "agent_name", None) or "workflow-step"
+            tools = getattr(executor_run, "tools", None)
+            if isinstance(tools, list):
+                for tool_execution in tools:
+                    tool_calls.append(serialize_tool_call(tool_execution, str(source_agent)))
+
+            if source_agent == "Prompt Crafter":
+                model = getattr(executor_run, "model", None) or model
+                model_provider = getattr(executor_run, "model_provider", None) or model_provider
+                crafter_run_id = getattr(executor_run, "run_id", None) or crafter_run_id
+                crafter_session_id = getattr(executor_run, "session_id", None) or crafter_session_id
+
+    return {
+        "parsed": parse_prompt_package(workflow_run.content),
+        "analystOutput": analyst_output,
+        "toolCalls": tool_calls,
+        "eventCount": len(tool_calls),
+        "workflowName": getattr(workflow_run, "workflow_name", None),
+        "workflowRunId": getattr(workflow_run, "run_id", None),
+        "runId": crafter_run_id or getattr(workflow_run, "run_id", None),
+        "sessionId": crafter_session_id or getattr(workflow_run, "session_id", None),
+        "model": model,
+        "modelProvider": model_provider,
+    }
+
+
+def collect_used_skill_names(skill_tool_calls: list[dict[str, Any]]) -> list[str]:
+    used: list[str] = []
+    for call in skill_tool_calls:
+        args = call.get("toolArgs")
+        skill_name = None
+        if isinstance(args, dict):
+            skill_name = args.get("skill_name") or args.get("skillName") or args.get("name")
+        if isinstance(skill_name, str) and skill_name and skill_name not in used:
+            used.append(skill_name)
+    return used
+
+
+def execute_pipeline(payload: dict[str, Any]) -> dict[str, Any]:
     brief_analyst, prompt_crafter = build_agents()
-    raw_payload = payload
-    token = CURRENT_PAYLOAD.set(raw_payload)
-    try:
-        raw_bundle = raw_payload.get("truthBundle") or {}
-        normalized_bundle = normalize_external_truth_bundle(raw_bundle)
-        normalized_payload = {**raw_payload, "truthBundle": normalized_bundle}
-        CURRENT_PAYLOAD.set(normalized_payload)
+    raw_bundle = payload.get("truthBundle") or {}
+    normalized_bundle = normalize_external_truth_bundle(raw_bundle)
+    normalized_payload = {**payload, "truthBundle": normalized_bundle}
+    dependencies = build_run_dependencies(normalized_payload)
 
-        analyst_run = brief_analyst.run(build_request_summary(normalized_payload))
-        analyst_output = (
-            analyst_run.content
-            if isinstance(analyst_run.content, str)
-            else str(analyst_run.content)
+    if workflow_supported():
+        workflow = build_compiler_workflow(brief_analyst, prompt_crafter)
+        workflow_run = workflow.run(
+            input=build_request_summary(normalized_payload),
+            dependencies=dependencies,
+            additional_data={"truthBundle": dependencies["truthBundle"]},
+            add_dependencies_to_context=False,
         )
-        skill_names, skill_packet = build_skill_packet(normalized_payload)
+        analyst_output = extract_step_content(workflow_run.step_results, ANALYST_STEP_NAME)
 
-        crafter_input = (
-            "Using the analyzed brief and preloaded skills below, return the final prompt package JSON.\n"
-            f"Create exactly {resolve_variation_count(normalized_payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
-            "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n\n"
-            f"{build_playbook_override(normalized_payload)}"
-            "## Loaded Skills\n"
-            f"{skill_packet}\n\n"
-            "## Request Truth Context\n"
-            f"{build_crafter_context(normalized_payload)}\n\n"
-            "## Analyzed Brief\n"
-            f"{analyst_output}\n"
-        )
-        crafter_run = prompt_crafter.run(crafter_input)
-        parsed = parse_prompt_package(crafter_run.content)
-        return normalize_prompt_package(parsed, normalized_payload, analyst_output)
-    finally:
-        CURRENT_PAYLOAD.reset(token)
+        return {
+            "parsed": parse_prompt_package(workflow_run.content),
+            "normalizedPayload": normalized_payload,
+            "analystOutput": analyst_output,
+            "pipeline": PIPELINE_WORKFLOW,
+            "orchestration": "workflow",
+        }
+
+    analyst_run = brief_analyst.run(
+        input=build_request_summary(normalized_payload),
+        dependencies=dependencies,
+        add_dependencies_to_context=False,
+    )
+    analyst_output = (
+        analyst_run.content
+        if isinstance(analyst_run.content, str)
+        else str(analyst_run.content)
+    )
+    crafter_run = prompt_crafter.run(
+        input=build_crafter_input(normalized_payload, analyst_output),
+        dependencies=dependencies,
+        add_dependencies_to_context=False,
+    )
+    return {
+        "parsed": parse_prompt_package(crafter_run.content),
+        "normalizedPayload": normalized_payload,
+        "analystOutput": analyst_output,
+        "pipeline": PIPELINE_MANUAL,
+        "orchestration": "manual-chain",
+    }
+
+
+def execute(payload: dict[str, Any]) -> dict[str, Any]:
+    pipeline_result = execute_pipeline(payload)
+    return normalize_prompt_package(
+        pipeline_result["parsed"],
+        pipeline_result["normalizedPayload"],
+        pipeline_result["analystOutput"],
+        pipeline=pipeline_result["pipeline"],
+        orchestration=pipeline_result["orchestration"],
+    )
 
 
 def execute_with_trace(
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     brief_analyst, prompt_crafter = build_agents()
-    raw_payload = payload
-    token = CURRENT_PAYLOAD.set(raw_payload)
-    tool_calls: list[dict[str, Any]] = []
-    tool_token = CURRENT_TOOL_CALLS.set(tool_calls)
-    try:
-        raw_bundle = raw_payload.get("truthBundle") or {}
-        normalized_bundle = normalize_external_truth_bundle(raw_bundle)
-        normalized_payload = {**raw_payload, "truthBundle": normalized_bundle}
-        CURRENT_PAYLOAD.set(normalized_payload)
+    raw_bundle = payload.get("truthBundle") or {}
+    normalized_bundle = normalize_external_truth_bundle(raw_bundle)
+    normalized_payload = {**payload, "truthBundle": normalized_bundle}
+    dependencies = build_run_dependencies(normalized_payload)
 
-        analyst_run = brief_analyst.run(build_request_summary(normalized_payload))
+    if workflow_supported():
+        workflow = build_compiler_workflow(brief_analyst, prompt_crafter)
+        traced = run_workflow_with_trace(workflow, normalized_payload, dependencies)
+        pipeline = PIPELINE_WORKFLOW
+        orchestration = "workflow"
+    else:
+        analyst_traced = run_agent_with_trace(
+            brief_analyst,
+            agent_input=build_request_summary(normalized_payload),
+            dependencies=dependencies,
+            add_dependencies_to_context=False,
+        )
         analyst_output = (
-            analyst_run.content
-            if isinstance(analyst_run.content, str)
-            else str(analyst_run.content)
+            analyst_traced["content"]
+            if isinstance(analyst_traced["content"], str)
+            else str(analyst_traced["content"])
         )
-        skill_names, skill_packet = build_skill_packet(normalized_payload)
-
-        crafter_input = (
-            "Using the analyzed brief and preloaded skills below, return the final prompt package JSON.\n"
-            f"Create exactly {resolve_variation_count(normalized_payload)} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
-            "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n\n"
-            f"{build_playbook_override(normalized_payload)}"
-            "## Loaded Skills\n"
-            f"{skill_packet}\n\n"
-            "## Request Truth Context\n"
-            f"{build_crafter_context(normalized_payload)}\n\n"
-            "## Analyzed Brief\n"
-            f"{analyst_output}\n"
+        crafter_traced = run_agent_with_trace(
+            prompt_crafter,
+            agent_input=build_crafter_input(normalized_payload, analyst_output),
+            dependencies=dependencies,
+            add_dependencies_to_context=False,
         )
-        crafter_run = prompt_crafter.run(crafter_input)
-        parsed = parse_prompt_package(crafter_run.content)
-        normalized = normalize_prompt_package(
-            parsed, normalized_payload, analyst_output
-        )
-
-        loaded_skill_names = list_local_skill_names()
-        skill_tool_calls = [
-            call
-            for call in tool_calls
-            if call.get("toolName") == "get_skill_instructions"
-        ]
-
-        llm_provider, llm_model = resolve_llm_config()
-        trace = {
-            "eventCount": len(tool_calls),
-            "toolCallCount": len(tool_calls),
-            "skillToolCallCount": len(skill_tool_calls),
-            "events": tool_calls,
-            "toolCalls": tool_calls,
-            "skillToolCalls": skill_tool_calls,
-            "runId": None,
-            "sessionId": None,
-            "model": llm_model,
-            "modelProvider": llm_provider,
+        traced = {
+            "parsed": parse_prompt_package(crafter_traced["content"]),
             "analystOutput": analyst_output,
-            "loadedSkillNames": loaded_skill_names,
-            "loadedSkillCount": len(loaded_skill_names),
-            "usedSkillNames": skill_names,
-            "deterministicSkillLoading": True,
-            "skillsRuntimeAvailable": SKILLS_DIR.exists(),
-            "pipeline": "notebook-style-two-agent",
+            "toolCalls": [
+                *analyst_traced["toolCalls"],
+                *crafter_traced["toolCalls"],
+            ],
+            "eventCount": analyst_traced["eventCount"] + crafter_traced["eventCount"],
+            "workflowName": None,
+            "workflowRunId": None,
+            "runId": crafter_traced["runId"],
+            "sessionId": crafter_traced["sessionId"],
+            "model": crafter_traced["model"],
+            "modelProvider": crafter_traced["modelProvider"],
         }
-        return normalized, trace
-    finally:
-        CURRENT_TOOL_CALLS.reset(tool_token)
-        CURRENT_PAYLOAD.reset(token)
+        pipeline = PIPELINE_MANUAL
+        orchestration = "manual-chain"
+
+    normalized = normalize_prompt_package(
+        traced["parsed"],
+        normalized_payload,
+        traced["analystOutput"],
+        pipeline=pipeline,
+        orchestration=orchestration,
+    )
+
+    tool_calls = traced["toolCalls"]
+    skill_tool_calls = [
+        call
+        for call in tool_calls
+        if str(call.get("toolName", "")).startswith("get_skill_")
+    ]
+    used_skill_names = collect_used_skill_names(skill_tool_calls)
+    loaded_skill_names = list_local_skill_names()
+
+    trace = {
+        "eventCount": traced["eventCount"],
+        "toolCallCount": len(tool_calls),
+        "skillToolCallCount": len(skill_tool_calls),
+        "events": tool_calls,
+        "toolCalls": tool_calls,
+        "skillToolCalls": skill_tool_calls,
+        "runId": traced["runId"],
+        "sessionId": traced["sessionId"],
+        "model": traced["model"],
+        "modelProvider": traced["modelProvider"],
+        "workflowName": traced["workflowName"],
+        "workflowRunId": traced["workflowRunId"],
+        "analystOutput": traced["analystOutput"],
+        "loadedSkillNames": loaded_skill_names,
+        "loadedSkillCount": len(loaded_skill_names),
+        "usedSkillNames": used_skill_names,
+        "deterministicSkillLoading": False,
+        "skillsRuntimeAvailable": SKILLS_DIR.exists(),
+        "pipeline": pipeline,
+        "orchestration": orchestration,
+        "workflowAvailable": workflow_supported(),
+        "workflowImportError": WORKFLOW_IMPORT_ERROR,
+    }
+    return normalized, trace
 
 
 def summarize_exception(exc: Exception) -> str:

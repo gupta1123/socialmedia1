@@ -2807,6 +2807,7 @@ function isV2PromptPackage(promptPackage: { compilerTrace?: Record<string, unkno
   return (
     trace.endpoint === "/api/creative/compile-v2" ||
     trace.pipeline === "v2-notebook-two-agent" ||
+    trace.pipeline === "agno-sequential-workflow-v2" ||
     trace.v2PostOptionGeneration === true ||
     trace.v2StyleSeedGeneration === true
   );
