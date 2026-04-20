@@ -100,6 +100,9 @@ const defaultCreateFormat: CreativeFormat = "portrait";
 const defaultSeriesSlideCount = 5;
 const MIN_PROMPT_LENGTH = 10;
 const MAX_REFERENCE_SELECTION = 2;
+// Temporarily hidden from Create while reference/template routing is being cleaned up.
+const SHOW_CREATE_TEMPLATE_CONTROLS = false;
+const SHOW_CREATE_REFERENCE_CONTROLS = false;
 const POST_TYPE_BRIEF_STARTERS: Record<string, string> = {
   "project-launch": "Introduce the project with a premium hero visual and a strong first-impression feel.",
   "site-visit-invite": "Invite buyers to visit the project soon. Keep it premium, welcoming, and action-led.",
@@ -319,6 +322,34 @@ export default function CreatePage() {
     setPostTaskStatusFilter("all");
     setPostTaskProjectFilter("all");
   }, [activePicker]);
+
+  useEffect(() => {
+    if (
+      (!SHOW_CREATE_TEMPLATE_CONTROLS && activePicker === "template") ||
+      (!SHOW_CREATE_REFERENCE_CONTROLS && activePicker === "references")
+    ) {
+      setActivePicker(null);
+    }
+  }, [activePicker]);
+
+  useEffect(() => {
+    setBriefForm((state) => {
+      const nextCreativeTemplateId = SHOW_CREATE_TEMPLATE_CONTROLS ? state.creativeTemplateId : undefined;
+      const nextSelectedReferenceAssetIds = SHOW_CREATE_REFERENCE_CONTROLS ? state.selectedReferenceAssetIds : [];
+      if (
+        state.creativeTemplateId === nextCreativeTemplateId &&
+        state.selectedReferenceAssetIds.length === nextSelectedReferenceAssetIds.length
+      ) {
+        return state;
+      }
+
+      return {
+        ...state,
+        creativeTemplateId: nextCreativeTemplateId,
+        selectedReferenceAssetIds: nextSelectedReferenceAssetIds
+      };
+    });
+  }, [briefForm.creativeTemplateId, briefForm.selectedReferenceAssetIds.length, setBriefForm]);
 
   useEffect(() => {
     if (routeMode !== "ad-hoc") {
@@ -1119,9 +1150,9 @@ export default function CreatePage() {
     ? seedTemplateLabelById.get(latestSelectedStyleId) ?? null
     : null;
 
-  const canCreateOptionsFromReferences = briefForm.selectedReferenceAssetIds.length > 0;
+  const canCreateOptionsFromReferences = SHOW_CREATE_REFERENCE_CONTROLS && briefForm.selectedReferenceAssetIds.length > 0;
   const canCreateOptionsFromSourceOutput = Boolean(briefForm.sourceOutputId);
-  const canCreateOptionsFromTemplateFamily = Boolean(selectedReusableTemplate);
+  const canCreateOptionsFromTemplateFamily = SHOW_CREATE_TEMPLATE_CONTROLS && Boolean(selectedReusableTemplate);
   const hasFreshSelectedStyle = Boolean(latestSelectedStyleId) && !isCompiledStale;
   const hasVisibleSelectedStyle = Boolean(latestSelectedStyleId);
   const hasFestivalSelection = !isFestiveGreeting || Boolean(selectedFestival);
@@ -1313,7 +1344,7 @@ export default function CreatePage() {
                     ? "Pick a source post"
                     : isFestiveGreeting
                       ? "Explore styles to create a festive poster"
-                      : "Choose a template, references, or explore styles",
+                      : "Explore styles to create options",
       done: styleSourceReady
     }
   ], [
@@ -1408,7 +1439,7 @@ export default function CreatePage() {
       !briefForm.sourceOutputId &&
       !selectedTemplateId
     ) {
-      setMessage("Choose a template family, select references, choose a style, or pick a source post before creating options.");
+      setMessage("Choose a style or pick a source post before creating options.");
       return;
     }
 
@@ -2642,107 +2673,112 @@ export default function CreatePage() {
 
           {sidebarSections.style && (
             <div className="create-section-body">
-              <SelectionRow
-                actionLabel={
-                  locksTemplate
-                    ? selectedReusableTemplate
-                      ? "Inherited"
-                      : "Locked"
-                    : selectedReusableTemplate
-                      ? "Change"
-                      : "Choose"
-                }
-                actionDisabled={locksTemplate}
-                emptyLabel="None"
-                {...(templateSelectionHelper ? { helper: templateSelectionHelper } : {})}
-                label={isSeriesEpisodeMode ? "Template family" : "Template"}
-                mediaSrc={selectedReusableTemplate?.previewUrl || ""}
-                onAction={() => setActivePicker("template")}
-                onClear={
-                  !locksTemplate && selectedReusableTemplate
-                    ? clearSelectedTemplate
-                    : undefined
-                }
-                value={selectedReusableTemplate?.name ?? null}
-              />
+              {/* Template picker hidden temporarily. Restore by setting SHOW_CREATE_TEMPLATE_CONTROLS to true. */}
+              {SHOW_CREATE_TEMPLATE_CONTROLS ? (
+                <SelectionRow
+                  actionLabel={
+                    locksTemplate
+                      ? selectedReusableTemplate
+                        ? "Inherited"
+                        : "Locked"
+                      : selectedReusableTemplate
+                        ? "Change"
+                        : "Choose"
+                  }
+                  actionDisabled={locksTemplate}
+                  emptyLabel="None"
+                  {...(templateSelectionHelper ? { helper: templateSelectionHelper } : {})}
+                  label={isSeriesEpisodeMode ? "Template family" : "Template"}
+                  mediaSrc={selectedReusableTemplate?.previewUrl || ""}
+                  onAction={() => setActivePicker("template")}
+                  onClear={
+                    !locksTemplate && selectedReusableTemplate
+                      ? clearSelectedTemplate
+                      : undefined
+                  }
+                  value={selectedReusableTemplate?.name ?? null}
+                />
+              ) : null}
 
-              {/* Reference assets */}
-              <div className="create-references-section">
-                {referenceEligibleAssets.length === 0 ? (
-                  <>
-                    <div className="create-picker-summary create-picker-summary-card">
-                      <div className="create-picker-summary-main">
-                        <div>
-                          <p className="create-picker-summary-label">Reference images</p>
-                          <strong>No references selected.</strong>
-                          <p className="create-hint">No supporting reference assets uploaded yet.</p>
+              {/* Reference picker hidden temporarily. Restore by setting SHOW_CREATE_REFERENCE_CONTROLS to true. */}
+              {SHOW_CREATE_REFERENCE_CONTROLS ? (
+                <div className="create-references-section">
+                  {referenceEligibleAssets.length === 0 ? (
+                    <>
+                      <div className="create-picker-summary create-picker-summary-card">
+                        <div className="create-picker-summary-main">
+                          <div>
+                            <p className="create-picker-summary-label">Reference images</p>
+                            <strong>No references selected.</strong>
+                            <p className="create-hint">No supporting reference assets uploaded yet.</p>
+                          </div>
+                        </div>
+                        <div className="create-picker-summary-actions">
+                          <button className="create-inline-action" disabled type="button">
+                            Choose
+                          </button>
                         </div>
                       </div>
-                      <div className="create-picker-summary-actions">
-                        <button className="create-inline-action" disabled type="button">
-                          Choose
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="create-reference-selection create-picker-summary create-picker-summary-card">
-                      <div className="create-picker-summary-main">
-                        <div>
-                          <p className="create-picker-summary-label">
-                            Reference images
-                            {briefForm.selectedReferenceAssetIds.length > 0 ? (
-                              <span className="create-references-count">
-                                {briefForm.selectedReferenceAssetIds.length} selected
-                              </span>
-                            ) : null}
-                          </p>
-                          <strong>{selectedReferenceAssets.length > 0 ? "References selected" : "No references selected."}</strong>
-                          <p className="create-hint">
-                            {briefForm.sourceOutputId
-                              ? "Using source post as reference."
-                              : isFestiveGreeting
-                                ? "Add up to 2 references if needed."
-                                : "Add up to 2 supporting references."}
-                          </p>
-                          {selectedReferenceAssets.length > 0 ? (
-                            <div className="create-reference-selection-row">
-                              {selectedReferenceAssets.slice(0, MAX_REFERENCE_SELECTION).map((asset) => (
-                                <button
-                                  key={asset.id}
-                                  className="create-reference-pill"
-                                  onClick={() => setActivePicker("references")}
-                                  type="button"
-                                >
-                                  {asset.thumbnailUrl ?? asset.previewUrl ? (
-                                    <img alt={asset.label} src={asset.thumbnailUrl ?? asset.previewUrl} />
-                                  ) : (
-                                    <span>{getInitials(asset.label)}</span>
-                                  )}
-                                </button>
-                              ))}
-                              {selectedReferenceAssets.length > MAX_REFERENCE_SELECTION ? (
-                                <span className="create-reference-overflow">+{selectedReferenceAssets.length - MAX_REFERENCE_SELECTION}</span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="create-reference-selection create-picker-summary create-picker-summary-card">
+                        <div className="create-picker-summary-main">
+                          <div>
+                            <p className="create-picker-summary-label">
+                              Reference images
+                              {briefForm.selectedReferenceAssetIds.length > 0 ? (
+                                <span className="create-references-count">
+                                  {briefForm.selectedReferenceAssetIds.length} selected
+                                </span>
                               ) : null}
-                            </div>
+                            </p>
+                            <strong>{selectedReferenceAssets.length > 0 ? "References selected" : "No references selected."}</strong>
+                            <p className="create-hint">
+                              {briefForm.sourceOutputId
+                                ? "Using source post as reference."
+                                : isFestiveGreeting
+                                  ? "Add up to 2 references if needed."
+                                  : "Add up to 2 supporting references."}
+                            </p>
+                            {selectedReferenceAssets.length > 0 ? (
+                              <div className="create-reference-selection-row">
+                                {selectedReferenceAssets.slice(0, MAX_REFERENCE_SELECTION).map((asset) => (
+                                  <button
+                                    key={asset.id}
+                                    className="create-reference-pill"
+                                    onClick={() => setActivePicker("references")}
+                                    type="button"
+                                  >
+                                    {asset.thumbnailUrl ?? asset.previewUrl ? (
+                                      <img alt={asset.label} src={asset.thumbnailUrl ?? asset.previewUrl} />
+                                    ) : (
+                                      <span>{getInitials(asset.label)}</span>
+                                    )}
+                                  </button>
+                                ))}
+                                {selectedReferenceAssets.length > MAX_REFERENCE_SELECTION ? (
+                                  <span className="create-reference-overflow">+{selectedReferenceAssets.length - MAX_REFERENCE_SELECTION}</span>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="create-picker-summary-actions">
+                          <button className="create-inline-action" onClick={() => setActivePicker("references")} type="button">
+                            {selectedReferenceAssets.length > 0 ? "Change" : "Choose"}
+                          </button>
+                          {selectedReferenceAssets.length > 0 ? (
+                            <button className="create-inline-action subtle" onClick={clearSelectedReferences} type="button">
+                              Clear
+                            </button>
                           ) : null}
                         </div>
                       </div>
-                      <div className="create-picker-summary-actions">
-                        <button className="create-inline-action" onClick={() => setActivePicker("references")} type="button">
-                          {selectedReferenceAssets.length > 0 ? "Change" : "Choose"}
-                        </button>
-                        {selectedReferenceAssets.length > 0 ? (
-                          <button className="create-inline-action subtle" onClick={clearSelectedReferences} type="button">
-                            Clear
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
+                    </>
+                  )}
+                </div>
+              ) : null}
 
               {logoAssets.length > 0 ? (
                 <div className="create-references-section">
@@ -3499,7 +3535,7 @@ export default function CreatePage() {
                     placeholder={getPickerPlaceholder(activePicker)}
                     value={pickerQuery}
                   />
-                  {activePicker === "references" && selectedReferenceAssets.length > 0 ? (
+                  {SHOW_CREATE_REFERENCE_CONTROLS && activePicker === "references" && selectedReferenceAssets.length > 0 ? (
                     <button className="button button-ghost" onClick={clearSelectedReferences} type="button">
                       Clear selected
                     </button>
@@ -3821,7 +3857,8 @@ export default function CreatePage() {
                   </div>
                 ) : null}
 
-                {activePicker === "template" ? (
+                {/* Template picker hidden temporarily. Restore by setting SHOW_CREATE_TEMPLATE_CONTROLS to true. */}
+                {SHOW_CREATE_TEMPLATE_CONTROLS && activePicker === "template" ? (
                   <div className="create-picker-gallery">
                     <button
                       className={`create-gallery-card create-gallery-card-empty ${!selectedReusableTemplate ? "is-selected" : ""}`}
@@ -3918,7 +3955,8 @@ export default function CreatePage() {
                   </div>
                 ) : null}
 
-                {activePicker === "references" ? (
+                {/* Reference picker hidden temporarily. Restore by setting SHOW_CREATE_REFERENCE_CONTROLS to true. */}
+                {SHOW_CREATE_REFERENCE_CONTROLS && activePicker === "references" ? (
                   <div className="create-picker-gallery">
                     {filteredReferenceAssets.map((asset) => {
                       const selected = briefForm.selectedReferenceAssetIds.includes(asset.id);
@@ -3952,7 +3990,7 @@ export default function CreatePage() {
                 ) : null}
               </div>
               <div className="drawer-footer create-picker-footer">
-                {activePicker === "references" ? (
+                {SHOW_CREATE_REFERENCE_CONTROLS && activePicker === "references" ? (
                   <p className="create-hint">
                     {selectedReferenceAssets.length === 0
                       ? `No references selected. Add up to ${MAX_REFERENCE_SELECTION}.`
