@@ -1,6 +1,6 @@
 ---
 name: prompt-verifier
-description: Verify that the assembled prompt matches project truth, post intent, asset roles, compliance, and composition coherence before output.
+description: Verify that the assembled prompt matches truth, asset roles, and post intent while staying concise, scene-first, and free of compiler/meta leakage.
 ---
 
 # Prompt Verifier
@@ -8,38 +8,37 @@ description: Verify that the assembled prompt matches project truth, post intent
 Use this skill last.
 
 ## Checkpoints
-- Correct project or intentionally project-free
-- Correct post type strategy
+- Correct project, amenity, or intentionally project-free route
+- Correct post-type strategy
 - No unsupported claims
 - No conflicting asset roles
 - No composition contradictions
-- No multi-poster or contact-sheet language
+- No compiler/meta leakage
 
 ## Rules
 - Resolve conflicts in this order: exact asset contract, exact required text, compliance and factual bans, selected playbook, project or festival truth, brand hard rules, brand soft preferences, variation styling.
-- Reject prompts that violate that precedence order or let soft brand styling override hard truth.
-- Reject wrong project facts, wrong amenities, and wrong landmark leakage.
-- Reject prompts where the logo becomes the main subject unless the brief explicitly requires that.
-- Reject prompts that mention a logo, brand mark, monogram, emblem, or brand-signature asset when no exact logo asset is supplied.
+- Reject prompts that let soft brand styling override hard truth.
+- Reject wrong project facts, wrong amenities, wrong landmarks, and wrong stage cues.
+- Reject prompts that mention a logo, QR, brand mark, monogram, or signature asset when no exact asset is supplied.
 - Reject prompts that place the logo on a hard white or solid backing card, badge, chip, pill, banner, floating tile, or sticker-like plate.
-- Reject prompts that describe the logo as a pasted footer card instead of an integrated signature/sign-off treatment.
-- Reject prompts that mention reference assets the bundle did not provide.
-- Reject prompts that use a font family name such as Gotham, Gotham Book, or Gotham Bold as literal visible headline/support text instead of as typography styling.
-- Reject prompts that contradict the selected playbook.
-- Reject prompts that use a different post-type playbook than the selected postTypeContract.
-- Reject prompts where the chosen amenity image does not match the selected amenity focus, or where one amenity image is used to represent a different facility.
-- Reject prompts that are so generic they do not describe a finished poster structure.
-- Reject prompts for text-bearing post types that do not provide a clear text hierarchy and a readable reserved text region.
-- Reject prompts that over-describe copy but under-specify subject dominance, spatial hierarchy, and image structure.
-- Reject prompts that slip into UI, template-editor, dashboard, multi-column, or wireframe language.
-- For construction updates, reject generic architectural beauty shots unless they include a clear but minimal update/progress overlay.
-- For construction updates, reject prompts where the building/property is not the dominant visual subject.
-- For construction updates, reject prompts that preserve a completed-looking or launch-like building state when the brief asks for visible progress.
-- For construction updates, reject prompts that fail to say the supplied project image is identity truth while the brief controls the construction stage.
-- For construction updates, reject prompts that drift into a generic construction site which no longer preserves the recognizable supplied project silhouette, massing, and facade character.
-- For construction updates, when the brief provides a stage cue such as 50%, reject prompts that ignore that cue or fail to translate it into believable visible progress logic.
-- For construction updates, reject software UI/dashboard/app-screen language, including cards, chips, task rows, browser chrome, form fields, or wireframe language.
-- For construction updates, reject generic orange sunset/golden-hour styling unless explicitly requested or clearly aligned with the saved brand palette.
-- For construction updates, reject invented dates, exact percentages, milestone claims, possession claims, prices, or RERA facts not present in the brief or project truth.
-- For construction updates, allow generic visual construction cues such as organized scaffolding, unfinished facade areas, safety netting, tiny human scale, or distant site equipment only when they are used as plausible visual atmosphere and not as factual claims.
+- Reject prompts that use font-family names or palette hex values as visible prompt text.
+- Reject prompts that mention raw asset IDs, filenames, reference lists, “Image 1 / Image 2”, truth-bundle language, playbook names, or other compiler-internal phrasing.
+- Reject prompts that are mostly layout scaffolding and too weak on subject, scene, and preserved truth.
+- Reject prompts that invent slogans or long support lines when no exact text or factual cue supports them.
+- For text-bearing posts, allow a reserved readable area instead of forcing fully written copy when exact wording is not supplied.
 - Prefer a shorter verified prompt over a longer noisy prompt.
+
+## Post-type checks
+- `project-launch`: reject bland architecture descriptions that lose launch energy or drift into generic skyline fantasy.
+- `construction-update`: reject generic beauty shots, completed launch-state buildings, unsupported percentages or milestone claims, and generic stock construction sites that no longer preserve the same project identity.
+- `amenity-spotlight`: reject prompts where the selected amenity is not the dominant subject or where another facility stands in for the chosen amenity.
+- `site-visit-invite`: reject event-flyer behavior, fake crowds, invented schedules, or invitation routes that stop feeling project-led.
+- `location-advantage`: reject map-screenshot logic, dense travel-time lists, or invented connectivity claims.
+- `testimonial`: reject fake review badges, platform UI, long fabricated quotes, or overpowering background imagery.
+- `festival-post-playbook`: reject project-ad drift unless the brief explicitly requests project linkage.
+
+## Must not leak
+- Dashboard/UI language
+- Template-editor phrasing
+- Contact-sheet or multi-poster wording
+- Asset-id or filename references

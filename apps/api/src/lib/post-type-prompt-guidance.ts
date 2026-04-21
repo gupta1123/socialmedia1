@@ -178,7 +178,7 @@ function buildConstructionUpdateGuidance(
     : `If no real project image is supplied, still write the prompt as a realistic construction-stage hero image with truthful structure, cranes, and site detail rather than a finished fantasy tower.`;
 
   const variableCopyLine =
-    "Do not repeat one fixed stock headline, date, or progress percentage on every run. Keep the same premium construction-update structure, but adapt the headline wording, support line, metric labels, and date badge to the brief and available project facts.";
+    "Do not default to one canned update headline, date, or percentage treatment on every run. Vary the visual route, framing, and whether any neutral update text is used at all. Keep any copy short, factual, and grounded in the brief or project truth.";
 
   return {
     seedClauses: compactStrings([
@@ -189,9 +189,9 @@ function buildConstructionUpdateGuidance(
       `Typography rule: ${recipe.typography}`,
       `Progress panel rule: ${recipe.supportingSystem}`,
       `Footer rule: ${recipe.footer}`,
-      `Poster-spec rule: This must feel like a finished premium progress poster with one compact header/information row, one restrained headline-safe zone, one short support/status area, and a dominant hero construction image rather than a plain site photo.`,
+      `Prompt-shape rule: Keep this scene-first. The recognizable project and believable construction stage should lead; if any text is used, reserve only a small readable area.`,
       `Style and mood: ${recipe.styleMood}`,
-      `Generate materially different progress directions by varying overlay treatment, metric-panel styling, and headline pacing while keeping the project image central.`,
+      `Generate materially different progress directions by varying stage interpretation, framing, environmental mood, and text usage while keeping the same project identity central.`,
       variableCopyLine,
       `Negative prompt cues: ${recipe.negativePrompt}`,
       `If truth references are supplied, refer to them only in plain language by role. Never say "Image 1", "Image 2", "first image", or list filenames. Keep the prompt single-scene and single-output.`
@@ -205,7 +205,7 @@ function buildConstructionUpdateGuidance(
       `Typography system: ${recipe.typography}`,
       `Progress panel treatment: ${recipe.supportingSystem}`,
       `Footer treatment: ${recipe.footer}`,
-      `Poster structure: Use a clear poster system with a refined top brand/status strip, one bold update headline zone, one short supporting/status block, one dominant hero construction visual, and one restrained footer or proof strip. Keep graphic framing sparse and premium.`,
+      `Prompt-shape rule: Make the same project identity and visible progress do the work. Use only a minimal readable reserve or one neutral update label if needed; avoid template-like update systems.`,
       `Style and mood: ${recipe.styleMood}`,
       variableCopyLine,
       input.brief.exactText
@@ -237,7 +237,7 @@ function buildAmenitySpotlightGuidance(
         hero:
           "Build the image around one clear amenity hero, not a collage of the clubhouse, pool, garden, gym, and kids zone all at once. The chosen amenity should dominate the frame and feel aspirational, premium, and believable.",
         layout:
-          "Use a clean editorial composition with one primary visual subject, a refined headline stack, generous negative space, and a clear text-safe zone. If a project image is also supplied, use it only as supporting brand-truth context, not as a competing second hero.",
+          "Use a clean editorial composition with one primary visual subject and calm negative space. If a project image is also supplied, use it only as supporting brand-truth context, not as a competing second hero.",
         typography:
           "Keep the copy hierarchy light and premium: one amenity title, one short supporting line, and optionally one small project or locality cue.",
         supportingSystem:
@@ -255,7 +255,7 @@ function buildAmenitySpotlightGuidance(
         hero:
           "Choose one amenity and make it the singular focal subject. The chosen amenity should feel immersive and premium, with believable lighting, materials, and real-estate lifestyle cues rather than generic stock imagery.",
         layout:
-          "Balance one amenity hero visual with a clean left or upper text zone. Keep composition airy and disciplined. Avoid splitting the frame into multiple amenity cards or brochure-style blocks.",
+          "Balance one amenity hero visual with calm breathing room and disciplined composition. Avoid splitting the frame into multiple amenity cards or brochure-style blocks.",
         typography:
           "Use a crisp premium hierarchy with one amenity-led headline, a short support line, and restrained copy density.",
         supportingSystem:
@@ -294,7 +294,7 @@ function buildAmenitySpotlightGuidance(
       `Typography rule: ${recipe.typography}`,
       `Supporting-system rule: ${recipe.supportingSystem}`,
       `Footer rule: ${recipe.footer}`,
-      `Poster-spec rule: This should feel like a finished amenity poster with a small brand/header area, one bold amenity headline zone, one short support line zone, one dominant amenity hero occupying the lower half to two-thirds, and one restrained footer/signature treatment.`,
+      `Prompt-shape rule: Keep the selected amenity as the unmistakable hero. If text is used, reserve only a small readable area and keep supporting copy minimal.`,
       `Style and mood: ${recipe.styleMood}`,
       `If the project profile contains many amenities, treat them as the choice pool, not as a checklist to show all at once.`,
       `Negative prompt cues: ${recipe.negativePrompt}`,
@@ -310,7 +310,7 @@ function buildAmenitySpotlightGuidance(
       `Typography system: ${recipe.typography}`,
       `Supporting treatment: ${recipe.supportingSystem}`,
       `Footer treatment: ${recipe.footer}`,
-      `Poster structure: Use a clear amenity-poster hierarchy with a small top brand/header area, one clean headline-safe zone, one short supporting line zone, one dominant amenity hero, and a restrained footer or signature strip. At most one compact badge or location cue.`,
+      `Prompt-shape rule: The image must read as one amenity-led scene, not a template. At most one short supporting cue is allowed if it materially helps.`,
       `Style and mood: ${recipe.styleMood}`,
       `Keep the output focused on one amenity per image. Do not merge the pool, gym, clubhouse, and garden into one crowded layout unless the brief explicitly asks for a multi-amenity collage.`,
       `Negative prompt: ${recipe.negativePrompt}`,
@@ -356,7 +356,7 @@ function buildProjectLaunchGuidance(
         hero:
           "Use the actual project building image as the hero visual when available. Favor a polished premium facade or tower view, truthful materials, crisp skyline, and warm light that makes the property feel aspirational and real.",
         layout:
-          "Let the building dominate the center and right side of the frame. Reserve the upper-left or left-center for headline hierarchy with one elegant dark or warm translucent overlay for readability and clean negative space.",
+          "Let the building dominate the frame. Preserve one calm readable reserve only where text is necessary, with clean negative space and no brochure-grid behavior.",
         typography:
           "Use a premium launch hierarchy with a small kicker, a strong uppercase or editorial-serif project title area, and one short support line. Keep text restrained and hero-led.",
         supportingSystem:
@@ -374,7 +374,7 @@ function buildProjectLaunchGuidance(
         hero:
           "Use the project tower or facade photo/render as the hero element. Keep the architecture dominant and premium, with believable proportions, crisp edges, and soft premium light.",
         layout:
-          "Open up negative space in the upper third or left side for a refined title stack. Use a subtle gradient or shadowed overlay only where copy needs support; the building must remain visible and impressive with a clear footer-safe zone.",
+          "Open up calm negative space in the upper third or left side only if text needs support. The building must remain visible, impressive, and dominant.",
         typography:
           "Treat the project name like the star. Use one refined heading system and a short supporting sentence. Avoid multiple competing text blocks.",
         supportingSystem:
@@ -424,7 +424,7 @@ function buildProjectLaunchGuidance(
       `Typography rule: ${recipe.typography}`,
       `Supporting-zone rule: ${recipe.supportingSystem}`,
       `Footer rule: ${recipe.footer}`,
-      `Poster-spec rule: This should feel like a finished launch poster with a refined top brand/header strip, a clean headline-safe panel or sky zone, one compact support line or locality cue, a dominant tower hero, and a quiet footer/signature strip.`,
+      `Prompt-shape rule: Keep this building-led and scene-first. If text is used, it should sit in one calm readable reserve with minimal supporting copy.`,
       `Style and mood: ${recipe.styleMood}`,
       `Explore launch directions by varying the negative space, overlay treatment, and title pacing while keeping the project image as the primary hero.`,
       variableCopyLine,
@@ -440,7 +440,7 @@ function buildProjectLaunchGuidance(
       `Typography system: ${recipe.typography}`,
       `Supporting zone treatment: ${recipe.supportingSystem}`,
       `Footer treatment: ${recipe.footer}`,
-      `Poster structure: Use a launch-poster hierarchy with a small top brand/header line, one strong headline-safe negative-space zone, one restrained support or location line, the project building as the hero subject, and a calm footer/signature treatment. No brochure-grid clutter.`,
+      `Prompt-shape rule: The building is the hero subject. Use only one readable reserve and one short supporting cue at most; avoid brochure-grid clutter.`,
       `Style and mood: ${recipe.styleMood}`,
       variableCopyLine,
       input.brief.exactText
@@ -519,7 +519,7 @@ function buildSiteVisitInviteGuidance(
       `Typography rule: ${recipe.typography}`,
       `Supporting-system rule: ${recipe.supportingSystem}`,
       `Footer rule: ${recipe.footer}`,
-      `Poster-spec rule: This should feel like a finished visit-invite poster with one headline-safe invitation zone, one short support line, one protected CTA-safe area, one dominant project hero, and one restrained footer/signature treatment.`,
+      `Prompt-shape rule: Keep the real project image dominant and invitation-led. Use a small readable reserve only if text or CTA is truly needed.`,
       `Style and mood: ${recipe.styleMood}`,
       `Generate materially different invite directions by varying the CTA-band treatment, overlay density, and headline placement while keeping the project image central.`,
       `Negative prompt cues: ${recipe.negativePrompt}`
@@ -533,7 +533,7 @@ function buildSiteVisitInviteGuidance(
       `Typography system: ${recipe.typography}`,
       `Supporting treatment: ${recipe.supportingSystem}`,
       `Footer treatment: ${recipe.footer}`,
-      `Poster structure: Use a trust-led invitation poster with a small top brand/header area, one invitation headline zone, one short support or locality line, one clearly protected CTA-safe area, the real project image as the hero, and a quiet footer/signature strip.`,
+      `Prompt-shape rule: Let the invite read cleanly from one dominant project scene with one protected readable reserve at most.`,
       `Style and mood: ${recipe.styleMood}`,
       input.brief.copyMode === "auto"
         ? `If copy mode is auto, the model may decide whether a headline or CTA is needed at all. Keep any copy sparse, premium, and booking-safe.`
@@ -610,7 +610,7 @@ function buildLocationAdvantageGuidance(
       `Typography rule: ${recipe.typography}`,
       `Supporting-system rule: ${recipe.supportingSystem}`,
       `Footer rule: ${recipe.footer}`,
-      `Poster-spec rule: This should feel like a finished location poster with one dominant hero image, one headline-safe zone, one short context/support line, and one restrained footer/signature strip.`,
+      `Prompt-shape rule: Keep one dominant project/context image and let any location cue stay short, sparse, and secondary.`,
       `Style and mood: ${recipe.styleMood}`,
       `Negative prompt cues: ${recipe.negativePrompt}`
     ]),
@@ -623,7 +623,7 @@ function buildLocationAdvantageGuidance(
       `Typography system: ${recipe.typography}`,
       `Supporting treatment: ${recipe.supportingSystem}`,
       `Footer treatment: ${recipe.footer}`,
-      `Poster structure: Use one dominant project/context image, one clean headline-safe zone, one short support or connectivity line, one compact location cue at most, and a quiet footer/signature strip.`,
+      `Prompt-shape rule: Keep this context-led and image-first. At most one compact location cue and one short supporting line are allowed if they materially help clarity.`,
       `Do not invent landmarks, travel times, metro claims, or directional facts that are not present in the brief or project truth.`,
       `Style and mood: ${recipe.styleMood}`,
       `Negative prompt: ${recipe.negativePrompt}`,
@@ -694,7 +694,7 @@ function buildTestimonialGuidance(
       `Typography rule: ${recipe.typography}`,
       `Supporting-system rule: ${recipe.supportingSystem}`,
       `Footer rule: ${recipe.footer}`,
-      `Poster-spec rule: This should feel like a finished testimonial poster with a dominant quote zone, one attribution-safe area, calm negative space, and one quiet footer/signature strip.`,
+      `Prompt-shape rule: Keep the testimonial readable and calm. The quote should lead, with only minimal supporting structure around it.`,
       `Style and mood: ${recipe.styleMood}`,
       `Negative prompt cues: ${recipe.negativePrompt}`
     ]),
@@ -706,7 +706,7 @@ function buildTestimonialGuidance(
       `Typography system: ${recipe.typography}`,
       `Supporting treatment: ${recipe.supportingSystem}`,
       `Footer treatment: ${recipe.footer}`,
-      `Poster structure: Use one dominant quote block, one clean attribution area, optional quiet portrait/interior support only if helpful, and a restrained footer/signature strip.`,
+      `Prompt-shape rule: Use one readable quote block with one clean attribution area and only subtle supporting imagery if it helps warmth or credibility.`,
       input.brief.exactText
         ? `Preserve the supplied quote text exactly and build the hierarchy around its readability.`
         : `Keep testimonial copy sparse and readable. Do not invent extra proof copy, review badges, or rating language.`,
@@ -778,7 +778,7 @@ function buildFestiveGreetingGuidance(
       `Typography rule: ${recipe.typography}`,
       `Supporting-system rule: ${recipe.supportingSystem}`,
       `Footer rule: ${recipe.footer}`,
-      `Poster-spec rule: This should feel like a premium greeting poster with one symbolic focal arrangement, one clear blessing-safe text zone, and generous negative space. Keep it project-free unless the brief explicitly asks otherwise.`,
+      `Prompt-shape rule: Keep one symbolic focal arrangement, one clean readable blessing area, and generous negative space. Keep it project-free unless the brief explicitly asks otherwise.`,
       `Style and mood: ${recipe.styleMood}`,
       `Negative prompt cues: ${recipe.negativePrompt}`
     ]),
@@ -790,7 +790,7 @@ function buildFestiveGreetingGuidance(
       `Typography system: ${recipe.typography}`,
       `Supporting treatment: ${recipe.supportingSystem}`,
       `Footer treatment: ${recipe.footer}`,
-      `Poster structure: Use one calm symbolic focal arrangement, one clear greeting-safe text zone, and only tiny brand/footer presence if enabled. Keep the composition project-free unless the brief explicitly requests project linkage.`,
+      `Prompt-shape rule: Use one calm symbolic focal arrangement and one clean greeting area, with only tiny brand presence if enabled. Keep the composition project-free unless the brief explicitly requests project linkage.`,
       `Style and mood: ${recipe.styleMood}`,
       `Negative prompt: ${recipe.negativePrompt}`
     ]),

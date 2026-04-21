@@ -1,6 +1,6 @@
 ---
 name: amenity-spotlight-playbook
-description: Playbook for one-amenity creatives that sell lived experience while keeping the project association credible and uncluttered.
+description: Playbook for one-amenity creatives that make the chosen facility unmistakable, desirable, and visually dominant.
 ---
 
 # Amenity Spotlight Playbook
@@ -8,25 +8,37 @@ description: Playbook for one-amenity creatives that sell lived experience while
 Use this playbook for `amenity-spotlight`.
 
 ## Core job
-Make one amenity desirable and clearly legible.
+Make one named amenity desirable and unmistakable while keeping the post premium, calm, and uncluttered.
 
-## Asset rules
+## Truth rules
 - Focus on one amenity only.
-- Keep project association clear without turning the frame into a many-amenity board.
+- The chosen amenity must match the requested amenity focus exactly.
+- If an exact amenity image exists, preserve that amenity’s identity, spatial cues, materials, and use-case.
+- If no exact amenity image exists, generate the requested amenity from the brief and project truth only. Do not substitute a different facility.
+- Any building, township, or landscape context must remain secondary and never replace the amenity as the hero.
 
-## Composition families
-- Hospitality-led amenity hero
-- Quiet luxury detail crop
-- Amenity experience frame with clear headline zone
+## Amenity families
+- Water amenity: pool surface, deck edge, waterline, reflections, loungers only if truthful and restrained
+- Fitness / sports amenity: court geometry, equipment, markings, active-use cues that still keep the facility readable
+- Lounge / cowork / pantry amenity: furniture grouping, interior materials, circulation clarity, hospitality finish
+- Wellness / landscape amenity: deck, lawn, planting edge, seating, pathway, calm experiential atmosphere
+
+## Scene families
+- Amenity-as-hero full frame
+- Experience-led amenity use with subtle human presence
+- Material/detail-led amenity frame that still keeps the facility unmistakable
+- Amenity plus quiet project context
 
 ## Required prompt behavior
-- Write it as a finished amenity poster, not a generic lifestyle mood shot.
-- Use a clear poster hierarchy: small brand/header area, one amenity headline zone, one short support line zone, one dominant amenity hero, and a restrained footer/signature treatment.
-- Keep the chosen amenity dominant at thumbnail size and preserve generous negative space for typography.
-- If project context is needed, keep it secondary and quiet. It must never replace the amenity as the hero subject.
-- Use at most one compact badge, location cue, or lifestyle-benefit note.
+- The named amenity must dominate at thumbnail size.
+- Keep the scene specific to the chosen facility. Do not drift into generic clubhouse, lawn, or tower imagery.
+- If exact text is not supplied, use at most the amenity name or a clean reserve area. Do not invent resort slogans.
+- Keep the mood aspirational and credible rather than stock-lifestyle generic.
+- Use project context only to support identity or setting, never as the main subject.
 
 ## Must not leak
 - Multi-amenity collage
-- Stock-lifestyle ambiguity
+- Wrong facility substitution
 - Project-launch hero logic
+- Resort brochure clutter
+- Generic stock lifestyle ambiguity

@@ -1,262 +1,45 @@
 ---
 name: construction-update-playbook
-description: Playbook for construction updates that prioritizes visible progress, trust, realism, and disciplined proof systems.
+description: Playbook for construction updates that preserve project identity while showing believable visible progress and trust-led realism.
 ---
 
-# SKILL.md — Premium Construction Update Prompting
+# Construction Update Playbook
 
-## Purpose
+Use this playbook for `construction-update`.
 
-Use this skill to generate prompts for **premium real-estate construction update social posts**.
-
-The goal is to create prompts that produce images which feel:
-- photoreal
-- truth-led
-- premium
-- builder-grade
-- social-media-ready
-- designed like a polished post, not a raw site photo
-
-This skill is **not** for festive posters, illustrations, dashboards, or brochure clutter.
-
----
-
-## Core objective
-
-A good construction-update prompt should create:
-
-**real project truth + visible progress + premium poster treatment**
-
-The image should:
-- preserve the actual building identity
-- show believable construction progress
-- feel like a designed social post
-- remain clean, credible, and restrained
+## Core job
+Show visible progress on the same recognizable project and make the update feel credible, premium, and trust-building.
 
 ## Identity versus completion truth
-- For `construction-update`, the supplied project image is identity truth, not completion truth.
-- Preserve the same recognizable building: tower silhouette, massing, crown/profile, facade rhythm, balcony language, podium proportions, and overall project character.
-- If the supplied image looks fully completed, do not keep that completion state when the brief asks for progress. Reinterpret the same building as an active construction-stage version of itself.
-- The prompt must make it clear that this is the same project re-shown in a believable under-construction state, not a different generic construction site.
+- For construction updates, the supplied project image is identity truth, not completion truth.
+- Preserve the same recognizable building: tower silhouette, massing, profile, facade rhythm, balcony language, podium proportions, and overall character.
+- If the anchor looks finished, reinterpret that same building into a believable under-construction state instead of keeping a polished launch-state facade.
+- The image must still read as the same project, not a generic stock construction site.
 
----
+## Stage logic
+- Early stage: exposed structure, rebar, slab logic, heavy incompletion.
+- Mid stage: recognizable massing with partial facade, partial glazing, scaffolding or temporary edges.
+- Late stage: nearly assembled building with visible finishing work, incomplete site edges, or active facade completion.
+- If the brief provides a stage cue such as `50%`, translate it into visible construction logic. Do not state unsupported percentages unless exact text explicitly requires it.
+- If no stage cue is given, use generic visible-progress behavior only.
 
-## Non-negotiable rules
+## Scene families
+- Medium-wide site progress hero
+- Full-building progress read
+- Podium-and-structure progress frame
+- Near-completion facade finishing route
 
-1. **Use the real project image as truth anchor**
-2. **Preserve exact building identity**
-3. **Keep the building as the hero**
-4. **Use photoreal construction imagery**
-5. **Add poster-like design treatment**
-6. **Do not turn it into a dashboard**
-7. **Do not invent claims, percentages, dates, or milestones**
-8. **Do not overdramatize the site**
-
----
-
-## What good outputs should feel like
-
-- premium construction update poster
-- polished Instagram / social media creative
-- real site progress with tasteful hierarchy
-- builder-brand quality
-- modern, restrained, trustworthy
-
-They should **not** feel like:
-- raw construction photo
-- infographic sheet
-- sales flyer
-- fake stock construction image
-- orange cinematic drama
-- noisy machinery spectacle
-
----
-
-## Asset rules
-- Use the supplied project image as the identity reference: preserve tower silhouette, massing, podium shape, balcony language, facade rhythm, and recognizable proportions.
-- If the supplied image visibly shows construction or incomplete work, preserve that visible progress state and elevate it into a premium progress update.
-- If the supplied image is a final render or completed-looking exterior, treat it as project identity truth, not construction-state truth. Reinterpret the same project as a believable under-construction/progress scene only when the brief or project truth says this is a construction update.
-- If the brief gives a progress cue such as "50% construction done", visually suggest that approximate stage through partially completed structure, unfinished facade portions, temporary site edges, exposed concrete frame, scaffolding/safety netting, partial glazing, material stacks, or exposed floors where believable.
-- Do not invent exact dates, percentages, workers, cranes, machinery, milestone labels, or handover claims unless provided in the brief or project truth.
-- If no progress level is provided, use generic visible progress language rather than a precise completion claim.
-
-## Stage interpretation guide
-- Early stage: foundation/slab/column logic, heavy rebar visibility, incomplete floor plates, very limited facade completion.
-- Mid stage or around 40-60%: clearly recognizable tower massing, substantial structural frame, incomplete facade coverage, partial glazing, active site edges, believable scaffolding or temporary construction elements.
-- Late stage or around 70-90%: most of the building form is recognizable and largely assembled, but facade finishing, glazing completion, podium/site finishing, and site activity still show active progress.
-- Near completion: almost-finished building with visible finishing work, incomplete site edges, or active handover-preparation cues, while still avoiding possession/completion claims unless given.
-- Use these stage cues as visual logic only. Do not state an exact percentage in text unless the brief explicitly provides it.
-
----
-
-## Prompting workflow
-
-### 1. Lock the truth
-Always mention:
-- supplied project image / reference
-- preserve exact identity
-- preserve silhouette, massing, facade rhythm, podium proportions, progress state
-- if the anchor looks finished, reinterpret the same building into a believable requested construction stage
-
-### 2. Define framing
-Choose one:
-- full-building hero
-- medium-wide progress view
-- close-to-medium facade progress
-- podium / structure stage
-- finishing-stage view
-
-### 3. Define design treatment
-The image should read as:
-- designed social poster
-- premium construction update post
-- polished template-like composition
-- refined graphic layer over real image
-
-But do **not** ask for:
-- data-heavy layout
-- charts
-- icons everywhere
-- dashboard UI
-
-### 4. Define mood
-Prefer:
-- neutral daylight
-- soft overcast
-- realistic premium light
-- architectural clarity
-- restrained contrast
-
-Avoid:
-- dramatic sunset glow
-- fantasy lighting
-- hyper-sharpened site drama
-
----
-
-## Strong positive directions
-
-Use phrases like:
-- premium construction update social poster
-- use supplied project image as truth anchor
-- preserve exact building identity
-- photoreal and credible
-- visible real progress
-- same building reinterpreted into a believable construction stage
-- designed social-media-ready composition
-- refined graphic treatment
-- premium hierarchy
-- restrained branded presentation
-- builder-grade quality
-- clean architectural feel
-- modern and trustworthy
-
----
-
-## Strong negative directions
-
-Use when needed:
-- avoid infographic overload
-- avoid dashboard UI
-- avoid fake percentages
-- avoid fake milestone claims
-- avoid possession messaging unless provided
-- avoid orange cinematic glow
-- avoid excessive workers or machinery
-- avoid generic stock construction imagery
-- avoid flyer clutter
-- avoid distortion of project identity
-- avoid keeping a polished completed facade when the brief asks for construction progress
-- avoid generic unrelated construction sites that do not preserve the same project identity
-
----
-
-## Brand Colors & Typography (MANDATORY)
-- Apply the brand palette (primary, secondary, accent, neutrals) to typography, overlay elements, divider lines, and small accents.
-- Use the brand's exact headline font family only as typography styling metadata for branded text and headlines.
-- Typography must feel premium and integrated with the construction imagery - NOT like a sticker on top.
-- Brand colors should unify the construction scene with the text overlays.
-- Do not use the font family name itself as visible poster text. Describe the style as clean, bold, contemporary sans-serif unless exact copy is provided.
-
----
-
-## Text / Messaging Rules (MANDATORY)
-
-Construction update posts MUST have multiple layers of text for good poster design:
-
-**CRITICAL: Never use single-line text. Always include BOTH headline AND support line.**
-
-**REQUIRED text hierarchy:**
-1. **Headline** (main focal text) - Bold, prominent. Examples: "Construction Update", "Site Progress", "Work in Progress"
-2. **Support line** (descriptive subtitle BELOW headline) - CRITICAL! Examples:
-   - "Structures taking shape,梦想 at Level 15"
-   - "Progress rising steadily towards completion"
-   - "Modern living taking form floor by floor"
-   - "Excellence under construction"
-3. **Footer** (optional small element) - logo or brand name
-
-**Bad (reject):** "Construction Update" alone
-**Good (accept):** "Construction Update" + "Structures rising at Level 15"
-
-The support line must describe WHAT is visible in the image - the progress, the stage, what can be seen.
-
-**Good examples:**
-- Headline: "Construction Update" + Support: "Structure taking shape at Level 12"
-- Headline: "Site Progress" + Support: "Modern living comes to life"  
-- Headline: "Work In Progress" + Support: "Excellence rising floor by floor"
-
-Do NOT use only: "Construction Update"
-
-Do not invent:
-- percentages
-- milestone dates
-- possession claims
-- completion claims
-- phase names not provided
-- tower numbers not provided
-- legal or sales messaging not provided
-
-If no brief text is given, keep messaging generic and credible, for example:
-- Construction Update
-- Visible progress taking shape
-- Progress on site continues
-- Work moving ahead steadily
-- On-site progress update
-
----
-
-## Logo Integration (when enabled)
-- Logo must integrate seamlessly with the construction imagery - NOT look like a sticker on top.
-- Never place logo on a white/solid background - use transparent logo that blends naturally with the scene.
-- Position subtly in a footer corner or signature zone where it contrasts naturally with the image.
-- The logo should feel like part of the scene, not an afterthought.
-
----
-
-## Default prompt template
-
-```text
-Create a premium real-estate construction update social poster.
-
-MUST include TWO lines of text on the image:
-1. HEADLINE in bold: Something like "Construction Update", "Site Progress", or "Work In Progress"
-2. SUPPORT LINE below headline: Describe what can be seen, like "Structures rising at Level 12", "Modern living taking form", "Progressing steadily towards completion"
-
-Example format on image:
-- Top area: "CONSTRUCTION UPDATE" (bold, large)
-- Below it: "Structures taking shape,梦想 at Level 12" (smaller, descriptive)
-- Bottom corner: small logo or "Pride Group"
-
-Use the project image as truth anchor. Add refined graphic design treatment. Keep building as hero. Use clean bold sans-serif typography styled from the brand font family. Use brand colors for accents.
-```
+## Required prompt behavior
+- The project must dominate the frame.
+- Default to medium-wide or full-building framing so both identity and progress remain legible.
+- Use minimal update treatment: one quiet readable area or one restrained status cue when needed.
+- If exact copy is not provided, do not invent slogan-writing. A neutral update label or clean reserve area is enough.
+- Prefer project-identity-preserving progress cues over cranes, machinery, or worker spectacle.
+- Keep the atmosphere realistic, clear, and restrained rather than orange, cinematic, or dramatic.
 
 ## Must not leak
-- Completed lifestyle fantasy scenes with furniture, people enjoying amenities
-- Generic stock construction graphics or stock building photos
-- Exaggerated percentages or unsupported milestone claims
-- Interior lifestyle shots when exterior construction is the brief
-- Finished-possession visuals (furnished rooms, happy families) when construction progress is the ask
-- Dashboard-style overlays, progress meters, infographics, pie charts
-- Software UI, dashboards, app screens, cards, chips, task boards
-- Text that doesn't match brand typography style
-- Logo that looks pasted on top of the scene
+- Finished launch-state beauty shots
+- Generic stock construction imagery
+- Unsupported milestone claims, dates, or percentages
+- Dashboard-style overlays, cards, chips, or infographics
+- Lifestyle-family or amenity-led composition unless explicitly requested

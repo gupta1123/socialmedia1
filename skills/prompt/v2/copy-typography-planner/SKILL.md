@@ -1,6 +1,6 @@
 ---
 name: copy-typography-planner
-description: Plan safe on-canvas text, project naming, hierarchy, and typography zones for premium real-estate social creatives.
+description: Plan only the on-canvas text the image genuinely needs, keeping copy sparse, legible, and grounded in supplied truth rather than invented slogan-writing.
 ---
 
 # Copy Typography Planner
@@ -9,27 +9,38 @@ Use this skill after composition planning and before prompt assembly.
 
 ## Required outputs
 - Allowed on-canvas text
-- Text hierarchy
+- Text hierarchy, if any
 - Typography mood
-- Safe zones
+- Reserved readable area, if needed
 - Text that must not appear
 
 ## Rules
-- Keep generated text sparse, legible, and poster-native.
-- For project-led posts, the project name may appear as a controlled identity element when it improves clarity.
+- Keep text sparse, legible, and image-native.
 - If exact user text is provided, preserve it exactly and do not paraphrase it.
-- Do not invent phone numbers, prices, possession dates, launch dates, RERA numbers, progress percentages, discounts, guarantees, or location claims.
-- Prefer short labels over paragraphs.
-- Use saved font family names only as typography styling references. Never make a font name such as Gotham, Gotham Book, or Gotham Bold the visible headline or support copy.
-- For text-bearing poster types, explicitly define a headline-safe zone, support-line zone, CTA-safe zone when relevant, and text that must stay out of the hero image area.
-- Default to one headline, one short support line, and one footer/signature treatment unless the selected playbook clearly needs more.
-- When a logo is included, reserve a restrained signature zone that supports the exact asset without a hard white or solid backing card, chip, pill, badge, banner, or sticker panel.
-- If no exact logo asset is supplied, do not reserve or describe a logo/signature asset zone.
+- If no exact text is provided, prefer a reserved text area or one short neutral label over invented marketing slogans.
+- Do not invent phone numbers, prices, possession dates, launch dates, RERA numbers, progress percentages, discounts, guarantees, travel times, or unsupported claims.
+- Use project name, amenity name, or festival name only when they improve clarity.
+- Never use font-family names such as Gotham, Gotham Book, or Gotham Bold as visible headline or support text.
+- Do not dump palette codes or technical typography notes into the final prompt.
+- If logo is enabled and an exact logo asset exists, reserve only a restrained sign-off area. If no exact logo asset exists, do not reserve a logo zone at all.
 
-## Construction-update text policy
-- Allowed text: project name, "Construction Update", "Progress Update", "Site Progress", exact requested text, and brief/project-truth-provided progress or status cues.
-- If the brief provides a progress cue such as "50% construction done", it may appear as a small real-estate status label or restrained footer note.
-- If no progress cue is provided, use generic status labels only; do not invent a percentage or date.
-- Use a simple hierarchy: small project name, one construction update headline, one short support/status line, optional slim footer/proof line.
-- Keep typography premium and architectural: clean sans-serif, thin divider lines, editorial spacing, disciplined alignment, saved brand colors.
-- Do not describe UI chips, dashboard cards, form fields, task rows, browser tabs, or app-style controls.
+## Default text policy
+- `copyMode=auto` does not mean mandatory slogan-writing.
+- Default to one short label or one label plus one short factual support line only when the post type clearly needs it.
+- If the image works better without explicit rendered copy, prefer clear negative space and describe the reserved readable area instead.
+
+## Post-type guidance
+- `project-launch`: if exact launch copy is missing, a short neutral launch cue is enough. Do not invent luxury-tagline prose.
+- `construction-update`: if exact progress text is missing, use at most one neutral update label and optionally one short factual status cue only when supported by visible/project truth. Do not force a second invented line.
+- `amenity-spotlight`: if exact text is missing, prefer the amenity name or a clean reserve area. Do not invent resort-style slogans.
+- `site-visit-invite`: if exact CTA text is missing, one short invitation cue is enough. Do not invent dates, weekend claims, or event details.
+- `location-advantage`: keep text short and factual. Avoid long connectivity lists or travel-time blocks unless explicitly supplied.
+- `testimonial`: if an exact quote is missing, do not invent a long testimonial. Use a short trust cue or reserve a quote area.
+- `festive-greeting`: keep blessing text brief and occasion-specific. Do not overfill with decorative copy.
+
+## Must not leak
+- Long fabricated support lines
+- Generic luxury slogans
+- Font-family names as visible copy
+- Paragraph copy blocks
+- UI terms such as chips, tabs, cards, or widgets

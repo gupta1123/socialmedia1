@@ -1,6 +1,6 @@
 ---
 name: site-visit-playbook
-description: Playbook for site-visit invites that balances authenticity, trust, and a clear booking-safe CTA zone.
+description: Playbook for site-visit invites that feel welcoming and credible through arrival, access, and project-led invitation energy.
 ---
 
 # Site Visit Playbook
@@ -8,25 +8,30 @@ description: Playbook for site-visit invites that balances authenticity, trust, 
 Use this playbook for `site-visit-invite`.
 
 ## Core job
-Invite action without sounding cheap.
+Invite someone to visit the project in a way that feels premium, approachable, and trust-building rather than event-like or salesy.
 
-## Asset rules
-- Keep the real project image as the trust anchor.
-- Preserve a clean CTA-safe zone.
+## Truth rules
+- If a project image exists, preserve the exact project identity.
+- Favor arrival, access, entrance, or approach cues over generic flyer graphics.
+- Any human presence must support visitability, not become a fake event crowd.
+- Do not invent dates, offers, timings, or event details not supplied in the brief.
 
-## Composition families
-- Project-led invitation poster
-- Warm documentary-style visit invite
-- Editorial invite with quiet proof cues
+## Scene families
+- Entrance or arrival reveal
+- Approach-road / driveway project reveal
+- Welcoming podium or frontage invitation frame
+- Project-led visual with subtle human arrival cues
 
 ## Required prompt behavior
-- Write it as a finished visit-invite poster, not a generic event flyer.
-- Keep the real project image as the dominant trust anchor.
-- Reserve one clearly protected CTA-safe zone and keep invitation copy sparse.
-- Use a small brand/header area, one invitation headline zone, one short support line, and one quiet footer/signature treatment.
-- Avoid crowded offer bars, stacked CTA behavior, and hard-sell sales styling.
+- The project should stay clearly recognizable and central to the invitation.
+- Make the invitation feel real through openness, access, and welcome rather than through loud CTA styling.
+- If exact text is not supplied, one short invitation cue or a reserved readable area is enough.
+- Keep the composition calm and premium. Avoid promotional event energy.
+- Use foreground cues sparingly: path, entry canopy, gate, frontage, lighting, or landscaping that supports visitability.
 
 ## Must not leak
-- Hard-sell discount energy
-- Overcrowded CTA stacks
-- Generic fake property imagery
+- Fake open-house crowds
+- Balloons, confetti, or event-flyer staging
+- Discount-ad energy
+- Generic stock visitors unrelated to the project
+- Dense CTA clutter

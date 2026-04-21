@@ -2075,16 +2075,15 @@ export function buildCanonicalV2AgentPayload(input: CreativeDirectorInput): V2Ag
 }
 
 function buildBrandPaletteClause(input: Input) {
-  const { primary, secondary, accent } = input.brandProfile.palette;
-  return `Use the saved brand palette for graphic elements: primary ${primary}, secondary ${secondary}, accent ${accent}. Apply these to typography, overlays, divider lines, and restrained highlights instead of generic colors.`;
+  void input;
+  return "Use the saved brand palette only as restrained typography, divider, and overlay accents. Avoid unrelated neon, loud gradients, or off-brand color systems.";
 }
 
 function buildBrandTypographyClause(input: Input) {
-  const { typographyMood, headlineFontFamily, bodyFontFamily, typographyNotes } = input.brandProfile.visualSystem;
+  const { typographyMood, typographyNotes } = input.brandProfile.visualSystem;
   const clauses = [
     typographyMood ? `Typography mood should follow this brand direction: ${typographyMood}.` : null,
-    headlineFontFamily ? `Use ${headlineFontFamily} only as the headline font-family styling reference; never render the font family name as visible poster text.` : null,
-    bodyFontFamily ? `Use ${bodyFontFamily} only as the supporting-copy font-family styling reference; never render the font family name as visible poster text.` : null,
+    "Treat saved typography guidance as styling metadata only; never render font-family names as visible poster text.",
     typographyNotes.length > 0 ? `Typography rules: ${typographyNotes.join("; ")}.` : null
   ].filter((value): value is string => Boolean(value));
 
@@ -2143,44 +2142,48 @@ function buildV2CompactGuardrailClauses(input: Input) {
     !isFestivalGreetingInput(input) &&
     Boolean(input.projectProfile?.actualProjectImageIds?.length || input.referenceLabels.length > 0);
   const textGuardrail =
-    postTypeCode === "construction-update"
-      ? [
-          "MUST include TWO separate text elements: (1) Bold HEADLINE text like 'CONSTRUCTION UPDATE' or 'SITE PROGRESS' at top, (2) Smaller SUPPORT LINE below describing visible progress like 'Structures rising at Level 12' or 'Modern living taking form'. Never use only single text.",
-          progressCue ? `The only allowed specific progress cue is: ${progressCue}.` : "Do not invent exact percentages, dates, possession claims, phone numbers, prices, or RERA facts."
-        ].join(" ")
-      : input.brief.copyMode === "auto"
-        ? "MUST include proper headline + support line text hierarchy. For poster-style posts: (1) Bold HEADLINE text at top like 'PROJECT LAUNCH' or 'NOW OPEN', (2) Smaller SUPPORT LINE below with context like 'Premium residences now available' or 'Book your visit today'. Never output only a single word or project name. Keep text premium and sparse - avoid clutter."
-      : exactText && exactText.trim()
-        ? `Use only this requested on-image text: "${exactText}".`
-        : null;
+    exactText && exactText.trim()
+      ? `Use only this requested on-image text: "${exactText}".`
+      : postTypeCode === "construction-update"
+        ? [
+            "If on-image text is used, keep it neutral and minimal: one short update label or one short factual status cue grounded in visible progress.",
+            progressCue ? `The only allowed specific progress cue is: ${progressCue}.` : "Do not invent exact percentages, dates, milestone claims, possession claims, phone numbers, prices, or RERA facts."
+          ].join(" ")
+        : postTypeCode === "testimonial"
+          ? "If no exact quote is supplied, do not invent a long testimonial. Use a short trust cue or reserve a clean readable quote area."
+          : input.brief.copyMode === "auto"
+            ? "If exact wording is not supplied, prefer one short neutral label or a clean reserved text area. Do not invent long slogans or mandatory headline-plus-support-line pairs."
+            : null;
 
   const sharedClauses = [
     "One complete image only.",
-    `This must read like a finished poster-style ${deriveAspectRatio(input.brief.format)} social creative, not a short mood note or generic concept summary.`,
+    `Write this as a single ${deriveAspectRatio(input.brief.format)} social image prompt, not a template-editor spec.`,
     "CRITICAL: The brief is the source of truth. Follow the brief's explicit requirements exactly (mood, lighting, colors, atmosphere, style). Playbook skill rules are defaults that apply only when the brief does NOT specify.",
-    "Describe the image in a practical production order: output type and campaign intent, hero subject truth, poster structure and text-safe zones, graphic system and typography treatment, scene/light direction, then the negative prompt.",
+    "Lead with subject truth and scene logic before typography or overlays.",
+    "Use only the facts that materially affect subject, environment, and required text.",
     "If any supplied reference is an amenity image, use exactly one amenity image as the subject-truth reference for that output. Do not merge multiple amenity references or different facilities into the same scene.",
     buildBrandPaletteClause(input),
     buildBrandTypographyClause(input),
     textGuardrail,
     bannedClaims.length > 0 ? `Avoid unsupported claims: ${bannedClaims.join(", ")}.` : null,
-    projectImageRequired ? "Preserve the supplied project/building reference as subject truth." : null,
+    projectImageRequired ? "Preserve the supplied reference as identity truth for the subject." : null,
     hasExactLogoReference
       ? "Use the supplied logo only as a small exact brand signature, or leave it blank."
       : "Do not invent logo marks, emblems, monograms, or house icons.",
     input.brief.includeReraQr
       ? "Use the supplied RERA QR exactly, or leave the QR area blank."
-      : null
+      : null,
+    "Do not include raw asset IDs, filenames, palette hex codes, or font-family names in the final prompt."
   ].filter((value): value is string => Boolean(value));
 
   return {
     seedClauses: [
       ...sharedClauses,
-      "Vary composition, layout rhythm, and copy-safe zoning across finished post options."
+      "Vary visual route, framing, and scene logic across finished post options."
     ],
     finalClauses: [
       ...sharedClauses,
-      "Keep typography minimal, readable, and poster-native."
+      "Keep text minimal, neutral, and readable unless exact wording is supplied."
     ]
   };
 }
@@ -2237,9 +2240,9 @@ function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: Cr
     const progressCue = extractConstructionProgressCue(input);
 
     next = appendMissingPromptClauses(next, [
-      `Create a premium ${aspectRatio} real-estate construction update poster for social media, not a plain site photo.`,
-      "Use an intentional poster structure: small brand/header zone, compact project or status row, one clean headline-safe area, one short support/status zone, a dominant hero construction image, and a restrained footer or proof strip.",
-      "Keep the property image dominant and let overlays stay sparse, editorial, and premium rather than dashboard-like."
+      `Create a premium ${aspectRatio} construction update social image led by the same recognizable project, not a generic construction graphic.`,
+      "Keep the property image dominant and the progress state believable. If text is used, reserve only a small readable area.",
+      "Avoid template-like update systems, dashboard panels, proof strips, and blocky overlay cards."
     ]);
 
     next = next
@@ -2269,14 +2272,14 @@ function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: Cr
     const hasUpdateSystem = /\b(progress panel|status panel|date badge|status badge|proof strip|update layout|construction update|progress update|milestone band|lower panel)\b/i.test(next);
     if (!hasUpdateSystem) {
       next = appendMissingPromptClauses(next, [
-        "Use a restrained construction-update layout with a headline-safe area and one lower progress/status panel."
+        "If text is used, keep it to one small neutral update label or one short factual cue only."
       ]);
     }
 
     const hasPosterStructure = /\b(full[- ]bleed|property[- ]first|poster|instagram creative|developer creative|headline zone|project name|construction update|progress update|footer strip|proof line|divider lines|brand-colored overlay|editorial whitespace)\b/i.test(next);
     if (!hasPosterStructure) {
       next = appendMissingPromptClauses(next, [
-        "Create a property-first premium real-estate construction update creative: the full-bleed or near full-bleed project/construction image should dominate 75-90% of the frame, with only minimal brand-colored overlay elements such as project name, one construction update headline, one short progress/status line, and an optional slim footer/proof line."
+        "Use a property-first image where the recognizable building and visible progress carry most of the frame."
       ]);
     }
 
@@ -2296,7 +2299,7 @@ function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: Cr
 
     next = appendMissingPromptClauses(next, [
       buildBrandPaletteClause(input),
-      "Use a restrained graphic system with one translucent card or dark overlay only where text needs support. Add thin divider lines or one compact badge only if they improve hierarchy.",
+      "If readability needs support, use only subtle local tonal support rather than hard panels, cards, chips, or badges.",
       "Use realistic daylight or clean overcast premium light by default. Avoid generic orange sunset glow, oversaturated amber grading, and fake dramatic lighting unless explicitly requested.",
       "Do not create software UI, dashboard, app screen, task board, browser chrome, form fields, wireframe, card grid, or chip-based interface."
     ]);
@@ -2314,11 +2317,10 @@ function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: Cr
 
   if (postTypeCode === "project-launch") {
     next = appendMissingPromptClauses(next, [
-      `Create a premium ${aspectRatio} luxury real-estate launch poster for social media, not a plain architecture render.`,
-      "Use an editorial poster structure: one quiet brand/header strip, a strong headline-safe negative-space zone, one compact supporting line or location cue, the project tower as the dominant hero, and a restrained footer/signature zone.",
-      "Let the hero building occupy roughly the right half to two-thirds or a dominant centered frame, while preserving a clean text-safe area with smooth gradient or haze for legibility.",
-      "Keep overlays disciplined: at most one soft translucent card or one thin divider system, no brochure grids, no dense chips, and no many-amenity collage behavior.",
-      "Treat the project name and launch message as a premium hierarchy with minimal copy, clean tracking, and strong editorial spacing.",
+      `Create a premium ${aspectRatio} launch image for social media led by the real project hero, not a plain architecture render.`,
+      "Let the building dominate the frame with only one calm readable reserve if text is needed.",
+      "Keep overlays disciplined and local. Avoid brochure grids, dense chips, multi-panel systems, or many-amenity collage behavior.",
+      "Treat the project name and any launch message as minimal supporting hierarchy, not the main event.",
       "Use believable premium architectural light and material realism. Avoid fake CGI glow, noisy skylines through the text area, traffic clutter, billboards, and random signage.",
       "Negative prompt: cheap brochure, salesy launch flyer, crowded badges, noisy skyline behind text, distorted tower, generic stock luxury tower, fake glow, cluttered amenity collage, watermark, typo-heavy text."
     ]);
@@ -2326,22 +2328,19 @@ function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: Cr
 
   if (postTypeCode === "amenity-spotlight") {
     next = appendMissingPromptClauses(next, [
-      `Create a premium ${aspectRatio} amenity spotlight poster for social media, not a generic lifestyle mood shot.`,
-      "Use a single-amenity poster structure: small brand/header area, one clear amenity headline zone, one short support line zone, the amenity hero occupying the lower half to two-thirds, and one restrained footer/signature treatment.",
-      "Focus on one amenity only. The amenity must dominate at thumbnail size with generous negative space and calm poster hierarchy.",
+      `Create a premium ${aspectRatio} amenity spotlight image for social media, not a generic lifestyle mood shot.`,
+      "Focus on one amenity only. The chosen amenity must dominate the frame and read clearly at thumbnail size.",
       "Do not let generic project-building, clubhouse, lawn, or landscape context replace the selected amenity as the hero subject.",
       "If there is no exact amenity image, generate the requested facility from the brief alone rather than switching to a different amenity or using a mismatched building image as the hero.",
-      "Use refined overlay language: one soft framed text box or quiet gradient support zone, at most one compact badge or location line, and no multi-panel amenity boards.",
-      "Keep text sparse and premium. Prioritize the amenity headline, one support line, and optionally one project/locality cue.",
+      "If text is used, keep it sparse and premium: one small label or one short supporting cue at most. No multi-panel amenity boards.",
       "Negative prompt: multi-amenity collage, resort brochure clutter, fake hospitality ad, generic stock lifestyle scene, too many bullets, logo sticker, overpowering project tower, watermark, garbled text."
     ]);
   }
 
   if (postTypeCode === "site-visit-invite") {
     next = appendMissingPromptClauses(next, [
-      `Create a premium ${aspectRatio} site-visit invitation poster for social media, not a crowded event flyer.`,
-      "Use a trust-led poster structure: small brand/header area, one invitation headline zone, one short benefit or support line zone, a protected CTA-safe area, the real project image as the dominant hero, and a restrained footer/signature zone.",
-      "The project image should carry credibility and occupy most of the frame. Keep the invitation copy in a clear negative-space area with just enough overlay support for readability.",
+      `Create a premium ${aspectRatio} site-visit invitation image for social media, not a crowded event flyer.`,
+      "The real project image should carry credibility and occupy most of the frame. Keep any invitation copy in one protected readable reserve only if needed.",
       "Use at most one compact status chip or locality line. Avoid stacked offer bars, crowded CTA buttons, schedule-table behavior, or hard-sell discount energy.",
       input.brief.copyMode === "auto"
         ? "If text is used at all, let the model choose a concise premium invitation line and one booking-safe CTA. Omit secondary text if it risks clutter or bad rendering."
@@ -2352,8 +2351,8 @@ function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: Cr
 
   if (postTypeCode === "location-advantage") {
     next = appendMissingPromptClauses(next, [
-      `Create a premium ${aspectRatio} location-advantage poster for social media, not a map-heavy flyer or generic skyline image.`,
-      "Use a disciplined location poster structure: project or context hero image, one headline-safe zone, one short connectivity/support zone, one restrained footer/signature strip, and optional one compact landmark or corridor cue.",
+      `Create a premium ${aspectRatio} location-advantage image for social media, not a map-heavy flyer or generic skyline image.`,
+      "Use one dominant project or context hero image and keep any connectivity cue sparse, short, and secondary.",
       "If a real project or context image is supplied, preserve it as place-recognition truth. Use surrounding context only to support premium positioning, not to invent landmarks or travel times.",
       "Keep wayfinding or connectivity cues subtle: thin dividers, one understated location chip, or one editorial callout line. Do not use screenshot-map aesthetics, dense infographics, or route diagrams.",
       "Let the poster communicate context, access, and premium urban positioning through composition, not through long copy blocks.",
@@ -2363,8 +2362,8 @@ function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: Cr
 
   if (postTypeCode === "testimonial") {
     next = appendMissingPromptClauses(next, [
-      `Create a premium ${aspectRatio} testimonial poster for social media, not a generic quote card or review widget.`,
-      "Use a quote-first editorial poster structure: small brand/header zone, dominant quote area, clean attribution-safe area, optional quiet portrait or texture support, and a restrained footer/signature strip.",
+      `Create a premium ${aspectRatio} testimonial image for social media, not a generic quote card or review widget.`,
+      "Keep the quote dominant and readable, with only subtle supporting imagery or texture if it helps warmth or credibility.",
       "Prioritize quote readability over decorative imagery. Keep the background supportive and calm, not visually dominant.",
       "If a human or interior reference is supplied, use it only to support warmth and credibility. It must not overpower the quote block or turn into a stock-lifestyle ad.",
       "Do not invent ratings, stars, review badges, customer platform widgets, or testimonial facts that are not present in the brief.",
@@ -2375,8 +2374,8 @@ function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: Cr
 
   if (postTypeCode === "festive-greeting") {
     next = appendMissingPromptClauses(next, [
-      `Create a premium ${aspectRatio} festive greeting poster for social media with restrained ceremonial styling.`,
-      "Use a calm festive poster structure: one clean symbolic focal arrangement or motif, a clear central or upper text-safe zone, small secondary brand presence only if enabled, and generous negative space.",
+      `Create a premium ${aspectRatio} festive greeting image for social media with restrained ceremonial styling.`,
+      "Use one calm symbolic focal arrangement or motif, one clean readable greeting area, and generous negative space.",
       "Keep the poster project-free by default unless the brief explicitly asks for a project-linked greeting. Do not introduce towers, brochures, floor plans, price language, or sales overlays.",
       "Use culturally specific but restrained festive symbolism, clean typography zones, and subtle palette-led ornament instead of festival overload.",
       "Negative prompt: loud kitsch festival flyer, property-ad clutter, heavy sales language, generic holiday clipart, overloaded ornament collage, fake project linkage, watermark, messy text."

@@ -1,28 +1,36 @@
 ---
 name: variation-planner
-description: Create materially different creative routes by changing composition family, hierarchy, mood, and copy treatment rather than rewording one prompt.
+description: "Create materially different creative routes by changing the visual route itself: framing, context, environmental logic, and subject emphasis rather than superficial wording changes."
 ---
 
 # Variation Planner
 
-Use this skill for style exploration and any multi-variation request.
+Use this skill only for true multi-variation requests.
 
 ## Required outputs
 - Distinct route titles
 - Clear difference between routes
-- Different composition families
+- Different scene/composition families
 
 ## Rules
 - Variation changes must be structural, not cosmetic.
-- Change at least composition, hierarchy, and mood across routes.
-- Keep the same truth contract across all variations.
-- Do not create one “safe” route and several near-duplicates.
-- If the brief is narrow, vary framing, pacing, and overlay treatment rather than inventing new facts.
-- Do not vary by inventing unsupported camera sources such as aerial/drone/from-above views.
-- For `festival-post-playbook`, vary inside festival-poster families only: central icon poster, invitation-card poster, motif-frame poster, symbolic silhouette poster, or restrained illustrative composition.
-- For `festival-post-playbook`, vary poster archetype, ornament density, palette mood, icon treatment, and text placement rhythm. Do not vary into interior still-life, luxury lifestyle, architecture-led, or photoreal ceremonial scene routes unless the brief explicitly asks for them.
-- For `festival-post-playbook`, do not let all routes collapse into centered-card logic. At least one route should break center symmetry when the festival allows it.
-- For `festival-post-playbook`, do not reduce every route to dual-tone. Use softened 4-5 color palettes when culturally appropriate.
-- For construction updates, vary the property-first treatment: overlay position, headline placement, footer strip, image crop balance, daylight mood, and brand-color accent usage.
-- For construction updates, do not use close-up/detail crop as a variation route unless the brief explicitly asks for facade detail, material detail, slab work, or close-up progress.
-- For construction updates, do not vary by adding dashboard-like cards, chips, task rows, or UI panels.
+- Keep the same truth contract across all routes.
+- Change the image route first: framing, vantage, context, environmental mood, subject-to-background relationship, and text-reserve behavior.
+- Do not vary mainly by invented slogans, typography buzzwords, or extra overlay language.
+- Do not vary by inventing unsupported camera sources such as aerial/drone views unless the brief explicitly asks for them.
+- If the brief is narrow, vary the visual route, not the facts.
+
+## Post-type guidance
+- `project-launch`: vary between reveal archetypes such as iconic full-facade, arrival-led launch frame, dusk reveal, or calm editorial cutout route when supported.
+- `construction-update`: vary framing, stage emphasis, crop balance, and visible progress cues. Do not vary mainly by graphic strips or invented status copy.
+- `amenity-spotlight`: vary between amenity-only hero, experiential amenity use, quiet project-context support, or material/detail-led route only if the amenity remains unmistakable.
+- `site-visit-invite`: vary between arrival, entrance, approach, or walkthrough invitation routes rather than different CTA banners.
+- `location-advantage`: vary between project-plus-landmark, corridor/context framing, urban movement cue, or mapless place-recognition route.
+- `testimonial`: vary between quote-led editorial, quiet architectural backdrop, or subtle portrait-support route when a portrait actually exists.
+- `festival-post-playbook`: vary poster archetype, symmetry, ornament density, palette mood, and symbolic treatment without drifting into project ads or luxury still-life clichés.
+
+## Must not leak
+- Near-duplicate prompts
+- Copy-only differences
+- Template-density changes passed off as true variation
+- Unsupported views, landmarks, or facts

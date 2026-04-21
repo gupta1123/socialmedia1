@@ -1,6 +1,6 @@
 ---
 name: prompt-assembler
-description: Assemble a compact final prompt from the chosen strategy, truth bundle, asset roles, and composition plan.
+description: Assemble a compact scene-first final prompt from the chosen strategy, truth bundle, and asset roles without leaking internal compiler language.
 ---
 
 # Prompt Assembler
@@ -12,56 +12,51 @@ Use this skill after planning.
 - Explicit single-image instruction
 
 ## Rules
-- Use context internally; do not dump manifests into the prompt.
+- Write for the image model, not for the compiler.
+- Use context internally; do not dump manifests, tool outputs, playbook names, asset IDs, filenames, or reference lists into the final prompt.
 - Resolve conflicts in this order: exact asset contract, exact required text, compliance and factual bans, selected playbook, project or festival truth, brand hard rules, brand soft preferences, variation styling.
-- Put subject, composition, spatial hierarchy, lighting, and required text behavior first.
-- Mention only the facts and asset roles the image model must honor.
-- Keep logo and QR instructions short and exact.
-- Do not make logo placement a headline design decision. If logo is enabled, describe it only as a small supplied footer/corner signature or omit it.
-- If logo is enabled, treat it as an integrated sign-off, not a pasted-on element.
-- Mention logo usage only when an exact supplied logo asset is present. If no exact logo asset is present, do not describe, reserve, or invent any logo, brand mark, monogram, emblem, or branding signature.
-- If a logo is included, prefer transparent-edge placement directly on the composition or within a subtle tonal footer/signature band that already belongs to the poster.
-- Never ask for a hard white or solid rectangular card, badge, chip, pill, banner, floating tile, backing plate, or sticker behind the logo.
-- If clean contrast is not possible, prefer a quiet local contrast zone or clean omission over a forced container.
-- Spatial hierarchy and concise poster-spec language are allowed when they materially affect generation quality: headline region, support-line region, CTA-safe reserve, footer or signature treatment, and negative-space planning.
-- Do not write like a design tool or template editor. Avoid grid instructions, multi-column UI language, dashboard cards, chips, browser chrome, form fields, or wireframe phrasing.
-- Keep brand treatment disciplined. Use brand palette, typography mood, and image treatment as creative controls, not as an excuse to override the brief or selected playbook.
-- Treat font family names as styling metadata only. Never use a font name such as Gotham, Gotham Book, or Gotham Bold as visible headline/support text.
-- For `festival-post-playbook`, let the festival remain the hero. Brand guidance should act mainly as finish quality, palette discipline, typography control, and subtle sign-off treatment.
-- For `construction-update-playbook`, treat the supplied project image as identity truth. Preserve the same building identity, but if the brief asks for progress, describe that same building as a believable under-construction version instead of keeping a finished launch-state appearance.
+- Lead with subject truth and scene logic before text treatment.
+- Mention only the facts the image model must honor.
+- Prefer plain visual language over design-tool jargon.
+- Brand guidance should shape finish, restraint, and overlay taste. It should not drown the prompt in palette codes or font-family metadata.
+- If no exact text is supplied, prefer a reserved readable area or a short neutral label over invented slogan-writing.
+- Keep logo and QR instructions short, exact, and secondary.
+- Mention logo usage only when an exact logo asset is present and enabled.
+- Mention QR usage only when an exact QR asset is present and enabled.
+- If no suitable reference exists, write a truthful generation route from the brief and known project/festival truth. Do not say “no reference image available” in the final prompt.
 
-## Prompt Writing Pattern
+## Prompt writing pattern
 Write the final prompt in this order:
 - Output type and campaign intent
-- Hero subject and any required preserved reference truth
-- Spatial hierarchy and text behavior
-- Lighting, mood, finish quality, and brand treatment
+- Hero subject and preserved identity truth
+- Scene/framing/environmental logic
+- Text behavior only if needed
+- Finish quality, light, and restrained brand influence
 - Negative constraints
 
-For text-bearing prompts:
-- Describe the visible text hierarchy and where readable space is reserved.
+## Text behavior
 - Preserve exact user-provided text exactly.
-- If text is not required, prefer clean negative space over forced typography.
+- If exact text is not provided, keep text guidance minimal.
+- Describe one reserved readable region when that helps generation.
+- Do not force a headline-plus-support-line pair unless the brief or truth clearly requires it.
+- Never use font-family names such as Gotham, Gotham Book, or Gotham Bold as visible text.
 
-For construction-update prompts:
-- Make it explicit that the same recognizable project is being shown in a requested construction/progress stage.
-- If the brief includes a progress cue such as 50%, convert that into believable visual state language instead of generic finished-building language.
-- Prefer project-identity-preserving progress cues over generic construction-stock cues.
-
-For logo and QR handling:
+## Logo and QR handling
 - Treat logo and QR as exact supplied assets only.
-- If the exact logo asset is not supplied, omit logo instructions entirely and do not reserve a fake logo/signature zone.
-- Keep logo treatment subtle and embedded in the overall poster finish unless the brief explicitly makes it prominent.
-- Preserve the exact logo asset proportions and transparent edges where available.
+- Keep them as small embedded sign-off elements unless the brief explicitly makes them prominent.
+- Preserve transparent edges and proportions where relevant.
 - Never invent a white backing plate, sticker treatment, substitute mark, or separate logo card behind the asset.
-- Avoid footer/logo treatments that read like UI tiles, chips, pills, badges, or pasted labels.
 
-## Asset Usage Rules (CRITICAL)
-- ALWAYS use only ONE hero image in the prompt. The Brief Analyst has already selected the best asset via get_assets_for_post_type.
-- If the selected hero image is an amenity reference, it must match the selected amenity focus. Never use a park image for a pool prompt, a clubhouse image for a lounge prompt, or any other facility mismatch.
-- The prompt should reference: "Use the supplied [amenity/project/interior] image as the hero reference."
-- Do NOT mention multiple image files or reference "Image 1", "Image 2", "Image 3", etc.
-- The logo (if enabled) can be mentioned as a secondary reference for brand identity only.
-- A single secondary style/context reference may be used when it materially improves the final image, but never narrate references as "Image 1", "Image 2", or filename lists.
-- Never include uncontrolled supporting references, mood boards, or long reference lists in the prompt.
-- If no suitable asset is available for the post type, say "no reference image available" and generate from the brief alone.
+## Post-type reminders
+- `construction-update`: make it explicit that the same recognizable project is shown in a believable progress stage. Translate any supplied progress cue into visible construction-state logic rather than abstract slogan copy.
+- `amenity-spotlight`: keep the named amenity as the hero. Any project context stays secondary and must never replace or contradict the amenity focus.
+- `site-visit-invite`: make the invitation feel real through arrival, access, and trust, not event-flyer language.
+- `location-advantage`: communicate place through one disciplined context cue, not infographic mapping.
+- `testimonial`: keep the backdrop quiet; do not turn the prompt into a quote-widget spec.
+
+## Must not leak
+- “Use the supplied image (Asset ID: …)”
+- “Image 1 / Image 2”
+- Tool names or playbook names
+- Hex-code dumps
+- Wireframe or dashboard language

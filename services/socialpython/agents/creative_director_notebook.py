@@ -88,6 +88,7 @@ Required sections:
 Keep it compact.
 Retrieve facts through tools instead of hallucinating them.
 Only include facts that materially affect the image.
+Do not restate raw palette hex codes, font-family names, or long brand manifests unless they are strictly necessary for image truth.
 
 CRITICAL: Asset Decision must list ONLY:
 - 1 hero asset id (selected via get_assets_for_post_type tool - this is the PRIMARY reference)
@@ -115,17 +116,19 @@ Return a distilled prompt package, not a manifest dump.
 - variations: create exactly the requested number of distinct finished post options.
 - Each variation must have its own title, strategy, and finalPrompt.
 - finalPrompt: a resolved, production-ready, single-image post option.
-- Variation prompts must differ in composition strategy, visual hierarchy, mood/lighting, and copy treatment.
+- Variation prompts must differ in visual route: framing, scene logic, environmental mood, and text behavior.
 - Do not make variations minor rewordings of the same prompt.
 - Use the analyst output plus loaded skills to synthesize, not restate.
 - If exact text is provided, preserve it exactly.
+- If exact text is not provided, prefer a reserved readable area or one short neutral label over invented slogan copy.
 - If logo or RERA QR toggles are on, require exact supplied assets or clean omission. Never invent placeholders.
 - Font family names are styling references only. Never render a font family name such as Gotham, Gotham Book, or Gotham Bold as visible poster text, headline copy, or support copy.
+- Do not include raw asset ids, filenames, palette hex codes, or internal compiler/reference language in finalPrompt.
 - Mention logo usage only when includeBrandLogo is true and exactAssetContract.logoAssetId is present. If no exact logo asset is present, do not describe, reserve, or invent any logo/brand mark/signature asset.
 - When logo is enabled, integrate the exact supplied logo as a small footer/signature sign-off that belongs to the poster composition. Do not place it on a hard white or solid card, badge, chip, pill, banner, floating tile, or sticker-like backing. If legibility needs help, use only a subtle tonal footer band or quiet local contrast already belonging to the poster.
 - Never describe mood boards, tiled boards, mockup sheets, artboards, multiple posters, or style exploration inside one frame.
 - Resolve conflicts in this order: exact asset contract, exact required text, compliance and factual bans, post-type playbook, project or festival truth, brand hard rules, brand soft preferences, variation styling.
-- Concise poster-spec language is allowed when it materially improves generation quality: subject dominance, headline region, support-line region, CTA-safe reserve, footer or signature treatment, and negative-space planning.
+- Keep prompts scene-first. Concise poster-spec language is allowed only when it materially improves generation quality: subject dominance, one readable reserve area, footer/signature treatment, and negative-space planning.
 - Do not write like a design tool, dashboard, wireframe, or template editor.
 - Do not return compatibility fields such as seedPrompt, chosenModel, aspectRatio, templateType, or referenceStrategy. The server derives those.
 - Let skills own playbook, composition, copy, reference, asset-use, and verification rules; do not rely on hidden generic prompt rules for those decisions.
@@ -803,8 +806,8 @@ def build_agents() -> AgentBundle:
         "instructions": [
             "You are an expert image prompt crafter for a real-estate social image lab.",
             "Work exactly like a prompt specialist: use available skills, synthesize, then write detailed finished-post prompts.",
-            "Keep output focused on what the image model needs, not everything you know, but be specific about composition, spatial hierarchy, text-safe regions, restrained overlays, and negative constraints when they affect output quality.",
-            "Poster-spec language is allowed when it directly improves generation quality, but avoid design-tool, wireframe, dashboard, or template-editor phrasing.",
+            "Keep output focused on what the image model needs, not everything you know. Be specific about subject truth, scene, framing, and atmosphere first. Add text-safe or poster-spec guidance only when it materially improves generation quality.",
+            "Write scene-first prompts, not template specs. Avoid design-tool, wireframe, dashboard, or template-editor phrasing.",
             "If a logo is used, it must read as an integrated footer/signature element within the poster finish, not a pasted-on sticker, white card, badge, or floating logo tile.",
             "For construction updates, preserve the supplied project image as identity truth but let the brief control the construction stage. If the anchor looks complete, rewrite it as the same recognizable building in a believable under-construction state.",
             "Every variation is a finished post option. Do not create exploratory previews or draft style boards.",
@@ -887,14 +890,9 @@ def build_crafter_context(payload: dict[str, Any]) -> str:
 
     context = {
         "brandName": brand.get("name"),
-        "brandPalette": brand.get("palette"),
-        "visualSystem": {
+        "brandStyle": {
             "styleDescriptors": brand.get("styleDescriptors"),
             "typographyMood": (brand.get("visualSystem") or {}).get("typographyMood"),
-            "headlineFontFamily": (brand.get("visualSystem") or {}).get(
-                "headlineFontFamily"
-            ),
-            "bodyFontFamily": (brand.get("visualSystem") or {}).get("bodyFontFamily"),
             "typographyNotes": (brand.get("visualSystem") or {}).get("typographyNotes"),
             "textDensity": (brand.get("visualSystem") or {}).get("textDensity"),
             "realismLevel": (brand.get("visualSystem") or {}).get("realismLevel"),
@@ -910,14 +908,15 @@ def build_crafter_context(payload: dict[str, Any]) -> str:
             if isinstance(option, dict) and option.get("name")
         ],
         "selectedAmenity": amenity_resolution.get("selectedAmenity"),
-        "selectedAmenityAssetIds": amenity_resolution.get("selectedAssetIds") or [],
         "amenityHasExactAssetMatch": amenity_resolution.get("hasExactAssetMatch"),
         "briefPrompt": brief.get("prompt"),
         "exactText": brief.get("exactText"),
         "offer": brief.get("offer"),
         "aspectRatio": generation.get("aspectRatio"),
         "variationCount": resolve_variation_count(payload),
-        "projectAnchorAssetId": exact_assets.get("requiredProjectAnchorAssetId"),
+        "hasProjectAnchorAsset": bool(exact_assets.get("requiredProjectAnchorAssetId")),
+        "hasLogoAsset": bool(exact_assets.get("logoAssetId")),
+        "hasReraQrAsset": bool(exact_assets.get("reraQrAssetId")),
     }
     return compact_json(context)
 
@@ -1107,7 +1106,7 @@ def build_crafter_input(payload: dict[str, Any], analyst_output: str) -> str:
     else:
         variation_instruction = (
             f"Create exactly {variation_count} variations. Each variation must be a separate single-image creative route, not several layouts inside one image.\n"
-            "Make the routes materially different in composition, hierarchy, mood, and copy treatment.\n"
+            "Make the routes materially different in framing, scene logic, environmental mood, and text behavior.\n"
         )
     return (
         "Using the analyzed brief and request truth context below, return the final prompt package JSON.\n"

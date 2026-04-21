@@ -1,6 +1,6 @@
 ---
 name: testimonial-playbook
-description: Playbook for testimonial creatives with readable quote hierarchy, authentic attribution, and warm trust-building tone.
+description: Playbook for testimonial creatives that keep trust, readability, and authenticity ahead of decorative styling.
 ---
 
 # Testimonial Playbook
@@ -8,25 +8,29 @@ description: Playbook for testimonial creatives with readable quote hierarchy, a
 Use this playbook for `testimonial`.
 
 ## Core job
-Make the quote feel believable, readable, and premium.
+Create a trust-led testimonial visual where the quote or reserved quote area is clear, premium, and believable.
 
-## Asset rules
-- Prioritize quote readability over decorative imagery.
-- Keep attribution hierarchy clean and secondary to the message.
+## Truth rules
+- If an exact quote is supplied, preserve it exactly.
+- If no exact quote is supplied, do not invent a long testimonial. Use a short trust cue or a reserved quote area.
+- Keep attribution minimal and truthful. Do not invent roles, names, review badges, or platform UI.
+- Background imagery must remain secondary and supportive.
 
-## Composition families
-- Editorial quote card
-- Warm testimonial portrait layout
-- Premium review poster with quiet brand footer
+## Scene families
+- Quote-led editorial poster
+- Quiet architectural backdrop with reserved quote area
+- Subtle portrait-support route only when a real portrait exists
+- Calm, text-led trust frame
 
 ## Required prompt behavior
-- Write it as a finished testimonial poster, not a generic quote card or review widget.
-- Make the quote the dominant visual element and protect readability first.
-- Use a clear quote zone, a clean attribution-safe area, and a restrained footer/signature strip.
-- If a portrait or interior support image is used, keep it secondary and quiet.
-- Do not invent review badges, star ratings, or customer-platform UI.
+- Prioritize readability and authenticity over decorative styling.
+- Keep the background quiet and the emotional tone warm, grounded, and credible.
+- If no exact quote exists, avoid forcing a long on-image quote.
+- Do not turn the image into a generic quote card widget or review app screenshot.
 
 ## Must not leak
+- Fake star ratings
+- Review platform UI
+- Long fabricated testimonial copy
+- Overpowering background scenes
 - Sales brochure clutter
-- Fake review badges or invented star systems
-- Overpowering background imagery

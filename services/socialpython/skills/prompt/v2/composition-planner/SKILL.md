@@ -1,6 +1,6 @@
 ---
 name: composition-planner
-description: "Plan the image structure: subject dominance, crop, angle, overlay system, and safe zones for the chosen post strategy."
+description: "Plan the image structure with scene-first logic: subject dominance, framing, context, and only the text reserve or sign-off treatment the image actually needs."
 ---
 
 # Composition Planner
@@ -8,23 +8,34 @@ description: "Plan the image structure: subject dominance, crop, angle, overlay 
 Use this skill before prompt assembly.
 
 ## Required outputs
-- Subject hierarchy
-- Camera or crop bias
-- Negative-space plan
-- Overlay or footer treatment
-- Logo / QR zone if needed
+- Hero subject hierarchy
+- Framing and vantage choice
+- Environmental/context logic
+- Negative-space or text-reserve plan only when needed
+- Logo / QR edge treatment only when exact assets are enabled
 
 ## Rules
-- One image, one coherent composition.
-- The hero subject must be obvious at thumbnail size.
-- Reserve safe zones only where needed.
-- Keep overlays disciplined and sparse.
-- Match the crop and hierarchy to the selected playbook, not a generic poster template.
-- For text-bearing post types, explicitly plan the poster zones: header/brand strip, headline-safe zone, short support/CTA zone, hero area, and footer/signature zone.
-- Keep overlay count low: usually one soft support overlay/card plus an optional compact badge or divider system.
-- If a logo or QR zone is needed, integrate it into the existing footer/signature system or a quiet tonal edge zone. Do not float it inside a separate white card, chip, pill, badge, or sticker-like block.
-- For `festival-post-playbook`, do not default to a centered emblem on a flat dark field. Consider asymmetrical band movement, off-center emblem balance, invitation-style framing, layered color fields, or contained symbolic layouts that still preserve calm hierarchy.
-- For construction updates, default to medium-wide or full-building framing so the construction/progress state and project identity are both legible.
-- For construction updates, avoid close-up/detail framing unless the brief explicitly asks for a close-up progress detail.
-- For construction updates, plan a property-first composition: full-bleed or near full-bleed image, minimal overlay, one headline/status zone, and an optional slim footer/proof line.
-- For construction updates, use brand-colored translucent overlays, thin dividers, and quiet typography. Avoid cards, chips, dashboard sections, app-like panels, or multi-column UI.
+- Start with the scene, not the layout.
+- One image, one dominant subject, one coherent composition.
+- The hero subject must stay unmistakable at thumbnail size.
+- Prefer natural negative space already present in the scene over invented graphic boxes.
+- Describe camera bias, crop, depth, and environmental context only when they materially affect the generated image.
+- If text is needed, reserve one clean readable region. Do not design a full template system.
+- If logo or QR is needed, integrate it into an existing quiet edge, footer, or tonal sign-off zone. Never float it inside a white card, chip, pill, badge, banner, or sticker-like block.
+- Avoid layout-editor language such as grid, module, panel stack, browser chrome, dashboard card, or wireframe region.
+
+## Post-type defaults
+- `project-launch`: let the building lead. Use a confident reveal frame with breathable headline space, not brochure density.
+- `construction-update`: use medium-wide or full-building framing so both progress cues and project identity are legible. Favor near full-bleed property imagery with one restrained update zone.
+- `amenity-spotlight`: keep the named amenity dominant. Any building or township context must stay secondary and quiet.
+- `site-visit-invite`: favor arrival, entry, approach, or welcoming project-led framing rather than event-flyer staging.
+- `location-advantage`: use one project/context image and one disciplined place cue rather than infographic mapping.
+- `testimonial`: keep the background quiet and supporting. Do not let decorative imagery compete with the quote or reserved quote area.
+- `festival-post-playbook`: vary the poster archetype. Do not collapse every route into a centered emblem on a dark field.
+
+## Must not leak
+- Generic poster-template scaffolding
+- Multi-card overlays
+- Dashboard sections or app-like panels
+- Dense infographic structure
+- Safe-zone language that overwhelms subject description
