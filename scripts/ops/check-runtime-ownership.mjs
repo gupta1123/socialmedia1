@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const trackedFiles = execFileSync("git", ["ls-files"], {
   cwd: repoRoot,
   encoding: "utf8"
@@ -17,7 +17,12 @@ const forbiddenPatterns = [
   "apps/api/agents",
   "skills/prompt/v1",
   "skills/prompt/v2",
-  "skills/image-edit/v1"
+  "skills/image-edit/v1",
+  "AI_EDIT_DIRECTOR_",
+  "AI_EDIT_FLOW",
+  "/api/image-edit-plan",
+  "/api/creative/image-edit-plan",
+  "/api/creative/image-segment"
 ];
 
 const allowedPrefixes = ["archive/legacy/"];

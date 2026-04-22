@@ -1,10 +1,9 @@
 # Social Python
 
-Tracked Heroku deploy target and local source of truth for Python prompt compilation and image-edit planning.
+Tracked Heroku deploy target and local source of truth for Python prompt compilation.
 
 What it serves:
 - `POST /api/compile-v2`
-- `POST /api/image-edit-plan`
 - `GET /api/health`
 
 Local development:
@@ -13,7 +12,7 @@ Local development:
 pnpm run dev:socialpython
 ```
 
-The API should target this service for both compile and edit planning. Worker mode, when used, should still resolve agent files from this subtree.
+The API should target this service for prompt compile. Worker mode, when used, should still resolve agent files from this subtree.
 
 Deploy flow from the monorepo:
 
@@ -31,8 +30,6 @@ heroku config:set AGNO_OPENAI_TIMEOUT_SEC=15 -a socialpython
 heroku config:set AGNO_OPENAI_MAX_RETRIES=0 -a socialpython
 heroku config:set CREATIVE_DIRECTOR_V2_TRANSPORT=server -a socialapp1
 heroku config:set AGNO_AGENT_V2_SERVER_URL=https://<socialpython-app>.herokuapp.com/api/compile-v2 -a socialapp1
-heroku config:set AI_EDIT_DIRECTOR_TRANSPORT=server -a socialapp1
-heroku config:set AI_EDIT_DIRECTOR_SERVER_URL=https://<socialpython-app>.herokuapp.com/api/image-edit-plan -a socialapp1
 ```
 
 Notes:

@@ -4,7 +4,7 @@ Brand-aware social creation lab for marketing teams. The stack is a `pnpm`-shape
 
 - `apps/web`: Next.js frontend for auth, brand setup, uploads, creative runs, and gallery.
 - `apps/api`: Fastify API for auth-aware orchestration, Supabase access, Fal job submission, and Agno prompt compilation.
-- `services/socialpython`: canonical Python runtime for prompt compilation and image-edit planning.
+- `services/socialpython`: canonical Python runtime for prompt compilation.
 - `packages/contracts`: shared Zod schemas and TypeScript contracts.
 - `supabase`: local database, auth, storage, and RLS policies.
 

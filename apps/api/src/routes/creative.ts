@@ -344,7 +344,6 @@ function buildPreviewV2PromptPackage(
   compiled: any,
   options: {
     endpoint: string;
-    deprecatedAlias?: boolean;
   }
 ) {
   const now = Date.now();
@@ -394,7 +393,6 @@ function buildPreviewV2PromptPackage(
       postTypeCode: context.postType.code,
       promptDetailMode: "poster-spec",
       autoCopySanitized: context.autoCopyStripped,
-      ...(options.deprecatedAlias ? { deprecatedEndpointAlias: true } : {}),
       referenceRolePlan: {
         hasPrimaryAnchor: Boolean(context.reusableTemplate || context.sourceOutput),
         hasAmenityAnchorCandidate: context.inferredReferenceSelection.amenityAssetIds.length > 0,
@@ -682,46 +680,6 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         originalUrl: finalPreviewUrls[index]?.originalUrl
       }))
     });
-  });
-
-  app.post("/api/creative/compile", { preHandler: app.authenticate }, async (request, reply) => {
-    const viewer = request.viewer;
-    if (!viewer) {
-      return reply.unauthorized();
-    }
-
-    request.log.warn({ endpoint: "/api/creative/compile" }, "deprecated creative compile alias invoked");
-
-    const parsedBrief = CreativeCompileV2RequestSchema.parse(request.body);
-    const prepared = await prepareV2CompileContext({
-      parsedBrief,
-      viewer,
-      request,
-      allowedRoles: ["owner", "admin", "editor", "viewer"]
-    });
-    if (!prepared.ok) {
-      return reply.badRequest(prepared.message);
-    }
-
-    const compileInput = buildPreparedV2CompileInput(prepared.context);
-
-    try {
-      const compiled = await compilePromptPackageV2(compileInput);
-      return buildPreviewV2PromptPackage(prepared.context, compiled, {
-        endpoint: "/api/creative/compile",
-        deprecatedAlias: true
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Creative v2 compile failed";
-      request.log.error({ error }, "deprecated creative compile alias failed");
-      return reply.code(503).send({
-        statusCode: 503,
-        error: "Service Unavailable",
-        message: isCompilerConnectionError(message)
-          ? "OpenAI compile v2 service is unavailable right now"
-          : `Prompt compiler v2 failed: ${message}`
-      });
-    }
   });
 
   app.post("/api/creative/compile-v2", { preHandler: app.authenticate }, async (request, reply) => {

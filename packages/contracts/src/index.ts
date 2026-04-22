@@ -744,46 +744,6 @@ export const FeedbackResultSchema = z.object({
   postVersionId: z.string().uuid()
 });
 
-export const ImageEditIntentSchema = z.enum([
-  "remove",
-  "replace",
-  "recolor",
-  "cleanup",
-  "insert",
-  "background-change",
-  "other"
-]);
-
-export const ImageEditSegmentationHintsSchema = z.object({
-  requiresPointSelection: z.boolean().default(false),
-  suggestedTargetPointLabel: z.string().nullable().default(null),
-  notes: z.array(z.string()).default([])
-});
-
-export const ImageEditPlanResponseSchema = z.object({
-  targetObject: z.string(),
-  editIntent: ImageEditIntentSchema,
-  rewrittenPrompt: z.string(),
-  segmentationHints: ImageEditSegmentationHintsSchema,
-  ambiguityNotes: z.array(z.string()).default([]),
-  plannerTrace: z.record(z.unknown()).default({})
-});
-
-export const AiSegmentationResponseSchema = z.object({
-  maskUrl: z.string(),
-  maskDataUrl: z.string().optional(),
-  model: z.string(),
-  path: z.string().optional(),
-  bbox: z
-    .object({
-      xMin: z.number(),
-      yMin: z.number(),
-      xMax: z.number(),
-      yMax: z.number()
-    })
-    .optional()
-});
-
 export const AiImageEditResponseSchema = z.object({
   imageUrl: z.string(),
   imageDataUrl: z.string().optional(),
@@ -1774,19 +1734,12 @@ export const CreativeRunDetailSchema = z.object({
   finalOutputs: z.array(CreativeOutputSchema)
 });
 
-export const AiEditFlowSchema = z.enum(["mask", "direct"]);
-
-export const AiEditConfigSchema = z.object({
-  flow: AiEditFlowSchema
-});
-
 export const BootstrapResponseSchema = z.object({
   viewer: z.object({
     id: z.string().uuid(),
     email: z.string().email().optional(),
     isPlatformAdmin: z.boolean().default(false)
   }),
-  aiEdit: AiEditConfigSchema,
   workspace: WorkspaceSchema.nullable(),
   workspaceComplianceSettings: WorkspaceComplianceSettingsSchema.nullable().default(null),
   brands: z.array(BrandSchema),
@@ -1904,11 +1857,6 @@ export type StyleSeedRequest = z.infer<typeof StyleSeedRequestSchema>;
 export type FinalGenerationRequest = z.infer<typeof FinalGenerationRequestSchema>;
 export type FeedbackRequest = z.infer<typeof FeedbackRequestSchema>;
 export type FeedbackResult = z.infer<typeof FeedbackResultSchema>;
-export type AiEditFlow = z.infer<typeof AiEditFlowSchema>;
-export type AiEditConfig = z.infer<typeof AiEditConfigSchema>;
-export type ImageEditIntent = z.infer<typeof ImageEditIntentSchema>;
-export type ImageEditPlanResponse = z.infer<typeof ImageEditPlanResponseSchema>;
-export type AiSegmentationResponse = z.infer<typeof AiSegmentationResponseSchema>;
 export type AiImageEditResponse = z.infer<typeof AiImageEditResponseSchema>;
 export type ImageEditPromptComposerRequest = z.infer<typeof ImageEditPromptComposerRequestSchema>;
 export type ImageEditPromptComposerResponse = z.infer<typeof ImageEditPromptComposerResponseSchema>;

@@ -7,15 +7,14 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:web": "node scripts/ops/run-pnpm.mjs --filter @image-lab/web dev",
-    "dev:api": "node scripts/ops/run-pnpm.mjs --filter @image-lab/api dev",
+    "dev:web": "node scripts/ops/run-pnpm.mjs --filter @image-lab/contracts build && node scripts/ops/run-pnpm.mjs --filter @image-lab/web dev",
+    "dev:api": "node scripts/ops/run-pnpm.mjs --filter @image-lab/contracts build && node scripts/ops/run-pnpm.mjs --filter @image-lab/api dev",
     "dev:socialpython": "node scripts/ops/run-socialpython.mjs",
     "dev:prompt-lab": "node scripts/ops/run-socialpython.mjs",
     "build": "node scripts/ops/run-pnpm.mjs --filter @image-lab/contracts build && node scripts/ops/run-pnpm.mjs --filter @image-lab/api build && node scripts/ops/run-pnpm.mjs --filter @image-lab/web build",
     "check:runtime-ownership": "node scripts/ops/check-runtime-ownership.mjs",
     "test": "node scripts/ops/run-pnpm.mjs --filter @image-lab/api test && node scripts/ops/run-pnpm.mjs --filter @image-lab/web test",
     "typecheck": "node scripts/ops/run-pnpm.mjs --filter @image-lab/contracts typecheck && node scripts/ops/run-pnpm.mjs --filter @image-lab/api typecheck && node scripts/ops/run-pnpm.mjs --filter @image-lab/web typecheck",
-    "flow:creative": "node scripts/smoke/run-creative-flow.mjs",
     "heroku-postbuild": "node scripts/ops/run-pnpm.mjs --filter @image-lab/contracts build && node scripts/ops/run-pnpm.mjs --filter @image-lab/api build",
     "start": "node scripts/ops/run-pnpm.mjs --filter @image-lab/api start",
     "supabase:start": "supabase start",

@@ -16,7 +16,6 @@ import type {
   WorkspaceCreditLedgerResponse,
   WorkspaceCreditWallet,
   ImageEditPromptComposerResponse,
-  AiSegmentationResponse,
   CampaignDeliverablePlanRecord,
   CampaignRecord,
   BrandDetail,
@@ -52,7 +51,6 @@ import type {
   FeedbackRequest,
   FeedbackResult,
   FinalGenerationRequest,
-  ImageEditPlanResponse,
   CreatePostingWindowInput,
   HomeOverview,
   PlanOverview,
@@ -711,68 +709,6 @@ export function uploadExternalPost(token: string, payload: ExternalPostUploadPay
   });
 }
 
-export function generateAutoMask(
-  token: string,
-  payload: {
-    brandId: string;
-    object: string;
-    targetX?: number;
-    targetY?: number;
-    image: File | Blob;
-    imageFileName?: string;
-  }
-) {
-  const body = new FormData();
-  body.append("brandId", payload.brandId);
-  body.append("object", payload.object);
-
-  if (typeof payload.targetX === "number") {
-    body.append("targetX", String(payload.targetX));
-  }
-
-  if (typeof payload.targetY === "number") {
-    body.append("targetY", String(payload.targetY));
-  }
-
-  body.append("image", payload.image, payload.imageFileName ?? "source.png");
-
-  return request<AiSegmentationResponse>("/api/creative/image-segment", token, {
-    method: "POST",
-    body
-  });
-}
-
-export function planImageEdit(
-  token: string,
-  payload: {
-    brandId: string;
-    prompt: string;
-    width?: number;
-    height?: number;
-    image: File | Blob;
-    imageFileName?: string;
-  }
-) {
-  const body = new FormData();
-  body.append("brandId", payload.brandId);
-  body.append("prompt", payload.prompt);
-
-  if (typeof payload.width === "number") {
-    body.append("width", String(payload.width));
-  }
-
-  if (typeof payload.height === "number") {
-    body.append("height", String(payload.height));
-  }
-
-  body.append("image", payload.image, payload.imageFileName ?? "source.png");
-
-  return request<ImageEditPlanResponse>("/api/creative/image-edit-plan", token, {
-    method: "POST",
-    body
-  });
-}
-
 export function composeImageEditPrompt(
   token: string,
   payload: {
@@ -787,27 +723,20 @@ export function composeImageEditPrompt(
   });
 }
 
-export function applyMaskedImageEdit(
+export function applyImageEdit(
   token: string,
   payload: {
     brandId: string;
     prompt: string;
-    objectLabel?: string;
     width?: number;
     height?: number;
     image: File | Blob;
-    mask?: File | Blob;
     imageFileName?: string;
-    maskFileName?: string;
   }
 ) {
   const body = new FormData();
   body.append("brandId", payload.brandId);
   body.append("prompt", payload.prompt);
-
-  if (payload.objectLabel) {
-    body.append("objectLabel", payload.objectLabel);
-  }
 
   if (typeof payload.width === "number") {
     body.append("width", String(payload.width));
@@ -818,9 +747,6 @@ export function applyMaskedImageEdit(
   }
 
   body.append("image", payload.image, payload.imageFileName ?? "source.png");
-  if (payload.mask) {
-    body.append("mask", payload.mask, payload.maskFileName ?? "mask.png");
-  }
 
   return request<AiImageEditResponse>("/api/creative/image-edit", token, {
     method: "POST",
@@ -1399,14 +1325,6 @@ export function deleteProjectReraRegistration(token: string, brandId: string, re
 export function deleteBrandAsset(token: string, brandId: string, assetId: string) {
   return request<{ success: boolean }>(`/api/brands/${brandId}/assets/${assetId}`, token, {
     method: "DELETE"
-  });
-}
-
-export function compileCreative(token: string, payload: CreativeBrief) {
-  return request<PromptPackage>("/api/creative/compile-v2", token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
   });
 }
 

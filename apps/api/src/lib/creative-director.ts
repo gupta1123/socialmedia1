@@ -140,17 +140,6 @@ type WorkerResponse = {
   error?: string;
 };
 
-type V1AgentPayload = Input & {
-  brandPromptManifest: ReturnType<typeof buildBrandPromptGuidance>["manifest"];
-  festivalPromptManifest: ReturnType<typeof buildFestivalPromptGuidance>["manifest"];
-  projectPromptManifest: ReturnType<typeof buildProjectPromptGuidance>["manifest"];
-  postTypePromptManifest: ReturnType<typeof buildPostTypePromptGuidance>["manifest"];
-  promptGuardrails: {
-    seedClauses: string[];
-    finalClauses: string[];
-  };
-};
-
 type V2AgentPayload = {
   truthBundle: CreativeTruthBundle;
   projectId?: string | null;
@@ -168,9 +157,7 @@ type WorkerState = {
   stderr: string;
 };
 
-let workerState: WorkerState | null = null;
 let v2WorkerState: WorkerState | null = null;
-let workerRequestCount = 0;
 let v2WorkerRequestCount = 0;
 
 type Input = CreativeDirectorInput & {
@@ -178,11 +165,6 @@ type Input = CreativeDirectorInput & {
     autoCopyStripped: boolean;
   };
 };
-
-export async function compilePromptPackage(input: Input) {
-  console.warn("[compilePromptPackage] deprecated V1 compile path invoked; delegating to compilePromptPackageV2");
-  return compilePromptPackageV2(input);
-}
 
 export async function compilePromptPackageV2(input: Input) {
   const normalizedInput = normalizeCreativeDirectorInput(input);
@@ -198,18 +180,6 @@ export async function compilePromptPackageV2(input: Input) {
     resetV2WorkerState();
     throw error;
   }
-}
-
-function resolveCompilerMode() {
-  if (env.CREATIVE_DIRECTOR_MODE === "mock") {
-    return "mock";
-  }
-
-  if (env.CREATIVE_DIRECTOR_MODE === "agno") {
-    return "agno";
-  }
-
-  return env.OPENAI_API_KEY ? "agno" : "mock";
 }
 
 function resolveCompilerV2Mode() {
@@ -344,19 +314,6 @@ function normalizeRealismLevel(value: unknown): BrandProfile["visualSystem"]["re
     : "elevated_real";
 }
 
-async function runAgnoCreativeDirector(input: Input) {
-  try {
-    return await runAgnoCreativeDirectorPersistent(input);
-  } catch (error) {
-    if (!isTransientAgnoError(error)) {
-      throw error;
-    }
-
-    resetWorkerState();
-    return runAgnoCreativeDirectorOneShot(input);
-  }
-}
-
 async function runAgnoCreativeDirectorV2(input: Input) {
   if (env.CREATIVE_DIRECTOR_V2_TRANSPORT === "server") {
     return runAgnoCreativeDirectorV2Server(input);
@@ -372,26 +329,6 @@ async function runAgnoCreativeDirectorV2(input: Input) {
     resetV2WorkerState();
     return runAgnoCreativeDirectorV2OneShot(input);
   }
-}
-
-async function runAgnoCreativeDirectorPersistent(input: Input) {
-  const state = getWorkerState();
-  const requestId = `req_${Date.now()}_${workerRequestCount++}`;
-  const payload = buildV1AgentPayload(input);
-
-  return new Promise<CompilerResult>((resolve, reject) => {
-    state.pending.set(requestId, {
-      resolve: (value) => resolve(normalizeAgnoResult(value, input)),
-      reject
-    });
-
-    state.child.stdin.write(
-      `${JSON.stringify({
-        request_id: requestId,
-        payload
-      })}\n`
-    );
-  });
 }
 
 async function runAgnoCreativeDirectorV2Persistent(input: Input) {
@@ -411,56 +348,6 @@ async function runAgnoCreativeDirectorV2Persistent(input: Input) {
         payload
       })}\n`
     );
-  });
-}
-
-async function runAgnoCreativeDirectorOneShot(input: Input) {
-  const scriptPath = getWorkerScriptPath();
-  const payload = buildV1AgentPayload(input);
-
-  return new Promise<CompilerResult>((resolve, reject) => {
-    const child = spawn(env.AGNO_PYTHON_BIN, [scriptPath], {
-      cwd: getWorkerCwd(),
-      env: getWorkerEnv(),
-      stdio: ["pipe", "pipe", "pipe"]
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => {
-      stdout += Buffer.from(chunk).toString("utf8");
-    });
-
-    child.stderr.on("data", (chunk) => {
-      const text = Buffer.from(chunk).toString("utf8");
-      stderr += text;
-      if (text.trim().length > 0) {
-        console.error(text.trim());
-      }
-    });
-
-    child.on("error", (error) => {
-      reject(error);
-    });
-
-    child.on("close", (code) => {
-      const parsed = parseWorkerJson(stdout);
-
-      if (code === 0 && parsed) {
-        resolve(normalizeAgnoResult(parsed as CompilerResult, input));
-        return;
-      }
-
-      const detail = stderr.trim() || stdout.trim();
-      reject(
-        new Error(
-          detail || `Agno worker exited with code ${code ?? "unknown"}`
-        )
-      );
-    });
-
-    child.stdin.end(JSON.stringify(payload));
   });
 }
 
@@ -594,105 +481,6 @@ function isAbortError(error: unknown) {
   return error.name === "AbortError" || /aborted/i.test(error.message);
 }
 
-function getWorkerState() {
-  if (workerState && workerState.child.exitCode === null && !workerState.child.killed) {
-    return workerState;
-  }
-
-  const child = spawn(env.AGNO_PYTHON_BIN, [getWorkerScriptPath()], {
-    cwd: getWorkerCwd(),
-    env: {
-      ...getWorkerEnv(),
-      AGNO_PERSISTENT: "1"
-    },
-    stdio: ["pipe", "pipe", "pipe"]
-  });
-
-  workerState = {
-    child,
-    pending: new Map(),
-    buffer: "",
-    stderr: ""
-  };
-
-  child.stdout.on("data", (chunk) => {
-    if (!workerState) {
-      return;
-    }
-
-    workerState.buffer += Buffer.from(chunk).toString("utf8");
-    const lines = workerState.buffer.split("\n");
-    workerState.buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      const raw = line.trim();
-      if (!raw) {
-        continue;
-      }
-
-      if (!raw.startsWith("{")) {
-        workerState.stderr = `${workerState.stderr}\n${raw}`.trim().slice(-4000);
-        continue;
-      }
-
-      let message: WorkerResponse;
-
-      try {
-        message = JSON.parse(raw) as WorkerResponse;
-      } catch (error) {
-        rejectAllPending(new Error(`Agno worker returned invalid JSON: ${raw}`));
-        child.kill();
-        return;
-      }
-
-      const pending = workerState.pending.get(message.request_id);
-      if (!pending) {
-        continue;
-      }
-
-      workerState.pending.delete(message.request_id);
-
-      if (message.ok && message.result) {
-        pending.resolve(message.result);
-      } else {
-        pending.reject(new Error(message.error ?? "Agno worker failed"));
-      }
-    }
-  });
-
-  child.stderr.on("data", (chunk) => {
-    const text = Buffer.from(chunk).toString("utf8").trim();
-    if (text.length > 0) {
-      if (workerState) {
-        workerState.stderr = `${workerState.stderr}\n${text}`.trim().slice(-4000);
-      }
-      console.error(text);
-    }
-  });
-
-  child.on("error", (error) => {
-    rejectAllPending(error);
-    workerState = null;
-  });
-
-  child.on("close", (code) => {
-    const state = workerState;
-    if (code !== 0) {
-      const detail = state?.stderr.trim();
-      rejectAllPending(
-        new Error(
-          detail
-            ? `Agno worker exited with code ${code ?? "unknown"}: ${detail}`
-            : `Agno worker exited with code ${code ?? "unknown"}`
-        )
-      );
-    }
-    workerState = null;
-  });
-
-  return workerState;
-}
-
 function getV2WorkerState() {
   if (v2WorkerState && v2WorkerState.child.exitCode === null && !v2WorkerState.child.killed) {
     return v2WorkerState;
@@ -792,18 +580,6 @@ function getV2WorkerState() {
   return v2WorkerState;
 }
 
-function rejectAllPending(error: unknown) {
-  if (!workerState) {
-    return;
-  }
-
-  for (const pending of workerState.pending.values()) {
-    pending.reject(error);
-  }
-
-  workerState.pending.clear();
-}
-
 function rejectAllV2Pending(error: unknown) {
   if (!v2WorkerState) {
     return;
@@ -816,15 +592,6 @@ function rejectAllV2Pending(error: unknown) {
   v2WorkerState.pending.clear();
 }
 
-function resetWorkerState() {
-  if (!workerState) {
-    return;
-  }
-
-  workerState.child.kill();
-  workerState = null;
-}
-
 function resetV2WorkerState() {
   if (!v2WorkerState) {
     return;
@@ -832,15 +599,6 @@ function resetV2WorkerState() {
 
   v2WorkerState.child.kill();
   v2WorkerState = null;
-}
-
-function getWorkerScriptPath() {
-  return path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "..",
-    "..",
-    env.AGNO_AGENT_SCRIPT
-  );
 }
 
 function getV2WorkerScriptPath() {
@@ -898,28 +656,6 @@ function isTransientAgnoError(error: unknown) {
     message.includes("temporarily unavailable") ||
     message.includes("timed out")
   );
-}
-
-function buildMockFallbackResult(input: Input, error: unknown): CompilerResult {
-  const result = compilePromptPackageMock(input);
-  const fallbackReason = error instanceof Error ? error.message : String(error);
-
-  return {
-    ...result,
-    chosenModel: result.chosenModel,
-    compilerTrace: {
-      ...(result.compilerTrace && typeof result.compilerTrace === "object" ? result.compilerTrace : {}),
-      fallbackCompiler: {
-        from: "agno",
-        to: "mock",
-        reason: fallbackReason
-      }
-    },
-    resolvedConstraints: {
-      ...(result.resolvedConstraints && typeof result.resolvedConstraints === "object" ? result.resolvedConstraints : {}),
-      compilerMode: "mock-fallback"
-    }
-  };
 }
 
 function buildV2MockResult(input: Input): CompilerResult {
@@ -1319,147 +1055,6 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
       compactPromptMode: false,
       promptDetailMode: "poster-spec"
     }
-  };
-}
-
-function normalizeAgnoResult(raw: CompilerResult, input: Input): CompilerResult {
-  const promptGuardrails = buildPromptGuardrailClauses(input);
-  const { brandGuidance, festivalGuidance, projectGuidance, postTypeGuidance, seedClauses, finalClauses } = promptGuardrails;
-  const referenceStrategy = normalizeReferenceStrategy(raw.referenceStrategy, input);
-  const templateType = normalizeTemplateType(raw.templateType, input);
-  const aspectRatio = normalizeAspectRatio(raw.aspectRatio, input);
-  const rawReferenceStrategy = typeof raw.referenceStrategy === "string" ? raw.referenceStrategy : null;
-  const rawTemplateType = typeof raw.templateType === "string" ? raw.templateType : null;
-  const normalizedResolvedConstraints =
-    raw.resolvedConstraints && typeof raw.resolvedConstraints === "object" ? raw.resolvedConstraints : {};
-  const normalizedCompilerTrace =
-    raw.compilerTrace && typeof raw.compilerTrace === "object" ? raw.compilerTrace : {};
-
-  const variations = normalizeCompilerVariations(raw, input, {
-    seedClauses,
-    finalClauses,
-    referenceStrategy
-  });
-
-  const seedPrompt =
-    variations[0]?.seedPrompt ??
-    appendMissingPromptClauses(raw.seedPrompt ?? raw.finalPrompt ?? "", seedClauses);
-  const finalPrompt =
-    variations[0]?.finalPrompt ??
-    appendMissingPromptClauses(raw.finalPrompt ?? raw.seedPrompt ?? "", finalClauses);
-
-  return {
-    ...raw,
-    seedPrompt,
-    finalPrompt,
-    variations,
-    aspectRatio,
-    chosenModel:
-      typeof raw.chosenModel === "string" && raw.chosenModel.trim().length > 0
-        ? raw.chosenModel
-        : env.IMAGE_GENERATION_PROVIDER === "openrouter"
-          ? env.OPENROUTER_FINAL_MODEL
-          : env.IMAGE_GENERATION_PROVIDER === "openai"
-            ? env.OPENAI_FINAL_MODEL
-          : env.FAL_FINAL_MODEL,
-    referenceStrategy,
-    templateType,
-    resolvedConstraints: {
-      ...normalizedResolvedConstraints,
-      palette:
-        "palette" in normalizedResolvedConstraints && normalizedResolvedConstraints.palette
-          ? normalizedResolvedConstraints.palette
-          : input.brandProfile.palette,
-      styleDescriptors:
-        "styleDescriptors" in normalizedResolvedConstraints && Array.isArray(normalizedResolvedConstraints.styleDescriptors)
-          ? normalizedResolvedConstraints.styleDescriptors
-          : brandGuidance.styleDescriptors,
-      brandIdentity:
-        "brandIdentity" in normalizedResolvedConstraints && normalizedResolvedConstraints.brandIdentity
-          ? normalizedResolvedConstraints.brandIdentity
-          : input.brandProfile.identity,
-      approvedVocabulary:
-        "approvedVocabulary" in normalizedResolvedConstraints && Array.isArray(normalizedResolvedConstraints.approvedVocabulary)
-          ? normalizedResolvedConstraints.approvedVocabulary
-          : brandGuidance.approvedVocabulary,
-      banned:
-        "banned" in normalizedResolvedConstraints && Array.isArray(normalizedResolvedConstraints.banned)
-          ? normalizedResolvedConstraints.banned
-          : [...brandGuidance.bannedTerms, ...projectGuidance.manifest.bannedClaims],
-      festival:
-        "festival" in normalizedResolvedConstraints && normalizedResolvedConstraints.festival
-          ? normalizedResolvedConstraints.festival
-          : festivalGuidance.manifest,
-      postTypeGuidance:
-        "postTypeGuidance" in normalizedResolvedConstraints && normalizedResolvedConstraints.postTypeGuidance
-          ? normalizedResolvedConstraints.postTypeGuidance
-          : postTypeGuidance.manifest,
-      includeBrandLogo:
-        "includeBrandLogo" in normalizedResolvedConstraints
-          ? normalizedResolvedConstraints.includeBrandLogo
-          : input.brief.includeBrandLogo,
-      includeReraQr:
-        "includeReraQr" in normalizedResolvedConstraints
-          ? normalizedResolvedConstraints.includeReraQr
-          : input.brief.includeReraQr,
-      variationCount: clampVariationCount(input.variationCount)
-    },
-    compilerTrace: {
-      ...normalizedCompilerTrace,
-      brandGuidanceManifest: brandGuidance.manifest,
-      festivalGuidanceManifest: festivalGuidance.manifest,
-      projectGuidanceManifest: projectGuidance.manifest,
-      postTypeGuidanceManifest: postTypeGuidance.manifest,
-      requestedVariationCount: clampVariationCount(input.variationCount),
-      returnedVariationCount: variations.length,
-      ...(rawReferenceStrategy && !ALLOWED_REFERENCE_STRATEGIES.includes(rawReferenceStrategy as (typeof ALLOWED_REFERENCE_STRATEGIES)[number])
-        ? { rawReferenceStrategy }
-        : {}),
-      ...(rawTemplateType && !ALLOWED_TEMPLATE_TYPES.includes(rawTemplateType as (typeof ALLOWED_TEMPLATE_TYPES)[number])
-        ? { rawTemplateType }
-        : {})
-    }
-  };
-}
-
-function buildPromptGuardrailClauses(input: Input) {
-  const brandGuidance = buildBrandPromptGuidance({
-    brandProfile: input.brandProfile
-  });
-  const festivalGuidance = buildFestivalPromptGuidance(input.festival, input.brandName);
-  const useProjectContext = !isFestivalGreetingInput(input);
-  const projectGuidance = buildProjectPromptGuidance(useProjectContext ? input.projectProfile : null);
-  const postTypeGuidance = buildPostTypePromptGuidance({
-    brandName: input.brandName,
-    brief: input.brief,
-    postType: input.postType,
-    projectName: useProjectContext ? input.projectName : null,
-    projectProfile: useProjectContext ? input.projectProfile : null,
-    brandAssets: input.brandAssets ?? [],
-    projectId: useProjectContext ? input.projectId : null
-  });
-  const seedClauses = [
-    ...brandGuidance.seedClauses,
-    ...festivalGuidance.seedClauses,
-    ...projectGuidance.seedClauses,
-    ...postTypeGuidance.seedClauses,
-    ...buildAssetUsageSeedClauses(input.brief)
-  ];
-  const finalClauses = [
-    ...brandGuidance.finalClauses,
-    ...festivalGuidance.finalClauses,
-    ...projectGuidance.finalClauses,
-    ...postTypeGuidance.finalClauses,
-    ...buildAssetUsageFinalClauses(input.brief)
-  ];
-
-  return {
-    brandGuidance,
-    festivalGuidance,
-    projectGuidance,
-    postTypeGuidance,
-    seedClauses,
-    finalClauses
   };
 }
 
@@ -2023,50 +1618,6 @@ function buildTruthBundleAmenityResolution(
     selectionSource: selection.source,
     selectedAssetIds: selection.amenityAssetIds,
     hasExactAssetMatch: selection.amenityAssetIds.length > 0,
-  };
-}
-
-function buildV1AgentPayload(input: Input): V1AgentPayload {
-  const brandGuidance = buildBrandPromptGuidance({
-    brandProfile: input.brandProfile
-  });
-  const festivalGuidance = buildFestivalPromptGuidance(input.festival, input.brandName);
-  const useProjectContext = !isFestivalGreetingInput(input);
-  const projectGuidance = buildProjectPromptGuidance(useProjectContext ? input.projectProfile : null);
-  const postTypeGuidance = buildPostTypePromptGuidance({
-    brandName: input.brandName,
-    brief: input.brief,
-    postType: input.postType,
-    projectName: useProjectContext ? input.projectName : null,
-    projectProfile: useProjectContext ? input.projectProfile : null,
-    brandAssets: input.brandAssets ?? [],
-    projectId: useProjectContext ? input.projectId : null
-  });
-
-  return {
-    ...input,
-    projectName: useProjectContext ? input.projectName ?? null : null,
-    projectProfile: useProjectContext ? input.projectProfile ?? null : null,
-    brandPromptManifest: brandGuidance.manifest,
-    festivalPromptManifest: festivalGuidance.manifest,
-    projectPromptManifest: projectGuidance.manifest,
-    postTypePromptManifest: postTypeGuidance.manifest,
-    promptGuardrails: {
-      seedClauses: [
-        ...brandGuidance.seedClauses,
-        ...festivalGuidance.seedClauses,
-        ...projectGuidance.seedClauses,
-        ...postTypeGuidance.seedClauses,
-        ...buildAssetUsageSeedClauses(input.brief)
-      ],
-      finalClauses: [
-        ...brandGuidance.finalClauses,
-        ...festivalGuidance.finalClauses,
-        ...projectGuidance.finalClauses,
-        ...postTypeGuidance.finalClauses,
-        ...buildAssetUsageFinalClauses(input.brief)
-      ]
-    }
   };
 }
 

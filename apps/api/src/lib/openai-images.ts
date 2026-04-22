@@ -15,29 +15,6 @@ type OpenAiRequestOptions = {
   referencePaths?: string[];
 };
 
-type OpenAiEditFile = {
-  buffer: Buffer;
-  contentType: string;
-  fileName?: string;
-};
-
-type OpenAiMaskedEditOptions = {
-  prompt: string;
-  image: OpenAiEditFile;
-  mask: OpenAiEditFile;
-  width?: number;
-  height?: number;
-  model?: string;
-};
-
-type OpenAiMaskedEditResult = {
-  imageUrl: string;
-  imageDataUrl?: string;
-  model: string;
-  width?: number;
-  height?: number;
-};
-
 export async function generateOpenAiImages({
   model,
   prompt,
@@ -90,58 +67,6 @@ export async function generateOpenAiImages({
   return {
     request_id: response.headers.get("x-request-id") ?? `openai-image-${Date.now()}`,
     images
-  };
-}
-
-export async function applyOpenAiMaskedEdit({
-  prompt,
-  image,
-  mask,
-  width,
-  height,
-  model = env.AI_EDIT_EXPERIMENTAL_MODEL
-}: OpenAiMaskedEditOptions): Promise<OpenAiMaskedEditResult> {
-  if (!env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is required for GPT image edit fallback");
-  }
-
-  const body = new FormData();
-  body.append("model", model);
-  body.append("prompt", prompt);
-  body.append("image", toBlob(image), image.fileName ?? "source.png");
-  body.append("mask", toBlob(mask), mask.fileName ?? "mask.png");
-
-  const response = await fetch(`${resolveOpenAiBaseUrl()}/images/edits`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`
-    },
-    body
-  });
-
-  const raw = await response.text();
-  const payload = raw.length > 0 ? safeParseJson(raw) : null;
-
-  if (!response.ok) {
-    throw new Error(extractOpenAiErrorMessage(payload) ?? `OpenAI image edit failed (${response.status})`);
-  }
-
-  const firstImage = extractFirstEditedImage(payload);
-  if (!firstImage) {
-    throw new Error("OpenAI image edit returned no edited image");
-  }
-
-  const imageDataUrl = firstImage.b64_json
-    ? `data:${firstImage.mimeType};base64,${firstImage.b64_json}`
-    : undefined;
-  const imageUrl = imageDataUrl ?? firstImage.url;
-
-  return {
-    imageUrl,
-    ...(imageDataUrl ? { imageDataUrl } : {}),
-    model,
-    ...(typeof width === "number" ? { width } : {}),
-    ...(typeof height === "number" ? { height } : {})
   };
 }
 
@@ -226,10 +151,6 @@ function resolveOpenAiBaseUrl() {
   }
 
   return configured.endsWith("/") ? configured.slice(0, -1) : configured;
-}
-
-function toBlob(file: OpenAiEditFile) {
-  return new Blob([Uint8Array.from(file.buffer)], { type: file.contentType || "image/png" });
 }
 
 function safeParseJson(value: string) {

@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, PointerEvent as ReactPointerEvent } from "react";
-import type { BootstrapResponse, ImageEditPlanResponse } from "@image-lab/contracts";
+import type { BootstrapResponse } from "@image-lab/contracts";
 import { useRouter, useSearchParams } from "next/navigation";
-import { applyMaskedImageEdit, composeImageEditPrompt, generateAutoMask, getCreativeOutput, planImageEdit, saveEditedCreativeOutput } from "../../../lib/api";
+import { applyImageEdit, composeImageEditPrompt, getCreativeOutput, saveEditedCreativeOutput } from "../../../lib/api";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions, useRegisterTopbarControls, useRegisterTopbarMeta } from "../topbar-actions-context";
 
-type ToolMode = "select" | "target" | "brush" | "eraser" | "draw";
+type ToolMode = "select" | "draw";
 type EditorPane = "uploads" | "ai-edit" | "assets" | "templates" | "elements" | "text" | "layers" | "draw";
 type DrawMode = "select" | "pen" | "highlighter";
 type PromptMode = "normal" | "list";
@@ -95,11 +95,6 @@ type EditorSnapshot = {
   originalImage: EditableImage | null;
   currentImage: EditableImage | null;
   canvasLayers: CanvasLayer[];
-  maskDataUrl: string | null;
-  hasMaskPreview: boolean;
-  editPlan: ImageEditPlanResponse | null;
-  plannedPrompt: string;
-  targetPoint: { x: number; y: number } | null;
   toolMode: ToolMode;
 };
 
@@ -150,26 +145,12 @@ const TEMPLATE_PRESETS: Array<{
 
 const DRAW_COLORS = ["#111111", "#7c3aed", "#ef4444", "#10b981", "#f59e0b", "#000000"];
 
-const VISUAL_MASK_COLOR = {
-  red: 80,
-  green: 156,
-  blue: 255,
-  alpha: 118
-};
-
-const VISUAL_MASK_FILL = `rgba(${VISUAL_MASK_COLOR.red}, ${VISUAL_MASK_COLOR.green}, ${VISUAL_MASK_COLOR.blue}, ${Number(
-  (VISUAL_MASK_COLOR.alpha / 255).toFixed(2)
-)})`;
-
 export default function StudioAiEditPage() {
   const { sessionToken, activeBrand, activeBrandId, activeAssets, bootstrap, recentOutputs } = useStudio();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const aiEditFlow = bootstrap?.aiEdit?.flow ?? "mask";
-  const isMaskFlow = aiEditFlow === "mask";
   const outputId = searchParams.get("outputId");
-  const [toolMode, setToolMode] = useState<ToolMode>("target");
-  const [brushSize, setBrushSize] = useState(16);
+  const [toolMode, setToolMode] = useState<ToolMode>("select");
   const [promptMode, setPromptMode] = useState<PromptMode>("normal");
   const [prompt, setPrompt] = useState("");
   const [listPromptItems, setListPromptItems] = useState<string[]>([""]);
@@ -179,21 +160,14 @@ export default function StudioAiEditPage() {
   const [reraNumberText, setReraNumberText] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isPlanning, setIsPlanning] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
-  const [isSegmenting, setIsSegmenting] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
-  const [editPlan, setEditPlan] = useState<ImageEditPlanResponse | null>(null);
-  const [plannedPrompt, setPlannedPrompt] = useState("");
-  const [targetPoint, setTargetPoint] = useState<{ x: number; y: number } | null>(null);
   const [originalImage, setOriginalImage] = useState<EditableImage | null>(null);
   const [currentImage, setCurrentImage] = useState<EditableImage | null>(null);
   const [canvasLayers, setCanvasLayers] = useState<CanvasLayer[]>([]);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [editorHistory, setEditorHistory] = useState<EditorSnapshot[]>([]);
   const [editorFuture, setEditorFuture] = useState<EditorSnapshot[]>([]);
-  const [maskDataUrl, setMaskDataUrl] = useState<string | null>(null);
-  const [hasMaskPreview, setHasMaskPreview] = useState(false);
   const [activeEditorPane, setActiveEditorPane] = useState<EditorPane>("uploads");
   const [drawMode, setDrawMode] = useState<DrawMode>("select");
   const [drawColor, setDrawColor] = useState(DRAW_COLORS[0] ?? "#111111");
@@ -209,11 +183,8 @@ export default function StudioAiEditPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const layerImageInputRef = useRef<HTMLInputElement>(null);
   const stageFrameRef = useRef<HTMLDivElement>(null);
-  const maskCanvasRef = useRef<HTMLCanvasElement>(null);
-  const drawingRef = useRef(false);
   const layerDragRef = useRef<LayerDragState | null>(null);
   const drawPathRef = useRef<CanvasDrawLayer | null>(null);
-  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const loadedOutputIdRef = useRef<string | null>(null);
 
   const currentImageUrl = useObjectUrl(currentImage?.file ?? null);
@@ -225,17 +196,7 @@ export default function StudioAiEditPage() {
     const scale = Math.min(maxWidth / currentImage.width, maxHeight / currentImage.height, 1);
     return Math.max(240, Math.round(currentImage.width * scale));
   }, [currentImage]);
-  const stageBusyMessage = isMaskFlow
-    ? isPlanning
-      ? "Analyzing edit..."
-      : isSegmenting
-        ? "Generating mask..."
-        : isApplying
-          ? "Applying AI edit..."
-          : null
-    : isApplying
-      ? "Applying AI edit..."
-      : null;
+  const stageBusyMessage = isApplying ? "Applying AI edit..." : null;
   const canReset = Boolean(originalImage && currentImage && (originalImage.file !== currentImage.file || canvasLayers.length > 0));
   const dimensionsLabel = currentImage ? `${currentImage.width} x ${currentImage.height}` : "No image loaded";
   const selectedLayer = canvasLayers.find((layer) => layer.id === selectedLayerId) ?? null;
@@ -299,41 +260,10 @@ export default function StudioAiEditPage() {
     [listPromptItems]
   );
   const listPromptKey = useMemo(() => normalizedListPromptItems.join("\n"), [normalizedListPromptItems]);
-  const currentPromptSignature = promptMode === "normal" ? `normal:${promptTrimmed}` : `list:${listPromptKey}`;
   const hasPromptInput = promptMode === "normal" ? promptTrimmed.length > 0 : normalizedListPromptItems.length > 0;
   const hasFreshComposedPrompt = promptMode === "list" && composedPromptKey === listPromptKey && composedPrompt.trim().length > 0;
-  const analysisIsStale = Boolean(editPlan) && plannedPrompt !== currentPromptSignature;
-  const canAnalyze = Boolean(currentImage && hasPromptInput) && !isPlanning && !isApplying && !isSegmenting && !isComposingPrompt;
-  const canGenerateMask = Boolean(editPlan && !analysisIsStale && currentImage) && !isPlanning && !isApplying && !isSegmenting;
-  const canApplyMaskedEdit =
-    Boolean(editPlan && !analysisIsStale && currentImage && hasMaskPreview) && !isPlanning && !isApplying && !isSegmenting;
-  const canApplyDirectEdit = Boolean(currentImage && hasPromptInput) && !isPlanning && !isApplying && !isSegmenting && !isComposingPrompt;
-  const primaryActionLabel = isMaskFlow
-    ? isPlanning
-      ? "Analyzing..."
-      : isSegmenting
-        ? "Generating mask..."
-        : isApplying
-          ? "Applying..."
-          : !editPlan || analysisIsStale
-            ? editPlan
-              ? "Re-analyze edit"
-              : "Analyze edit"
-            : !hasMaskPreview
-              ? "Generate target mask"
-              : "Apply AI edit"
-    : isComposingPrompt
-      ? "Preparing edit..."
-      : isApplying
-      ? "Applying..."
-      : "Apply AI edit";
-  const canRunPrimaryAction = isMaskFlow
-    ? !editPlan || analysisIsStale
-      ? canAnalyze
-      : !hasMaskPreview
-        ? canGenerateMask
-        : canApplyMaskedEdit
-    : canApplyDirectEdit;
+  const canApplyDirectEdit = Boolean(currentImage && hasPromptInput) && !isApplying && !isComposingPrompt;
+  const primaryActionLabel = isComposingPrompt ? "Preparing edit..." : isApplying ? "Applying..." : "Apply AI edit";
 
   const topbarActions = useMemo(
     () => (
@@ -361,7 +291,7 @@ export default function StudioAiEditPage() {
             </button>
             <button
               className="button button-ghost"
-              disabled={isSavingOutput || isApplying || isSegmenting}
+              disabled={isSavingOutput || isApplying}
               onClick={openSaveDrawer}
               type="button"
             >
@@ -378,7 +308,7 @@ export default function StudioAiEditPage() {
         )}
       </>
     ),
-    [currentImage, isSavingOutput, isApplying, isSegmenting, isSharing, canUndo, canRedo]
+    [currentImage, isSavingOutput, isApplying, isSharing, canUndo, canRedo]
   );
 
   const topbarMeta = useMemo(
@@ -475,14 +405,8 @@ export default function StudioAiEditPage() {
         setSelectedLayerId(null);
         setEditorHistory([]);
         setEditorFuture([]);
-        setMaskDataUrl(null);
-        setEditPlan(null);
-        setPlannedPrompt("");
-        setTargetPoint(null);
         setToolMode("select");
         setActiveEditorPane("ai-edit");
-        if (maskCanvasRef.current) clearMaskCanvas(maskCanvasRef.current);
-        setHasMaskPreview(false);
         setStatus("Generated image loaded. You can now edit it.");
       } catch (cause) {
         if (cancelled) {
@@ -500,29 +424,6 @@ export default function StudioAiEditPage() {
       cancelled = true;
     };
   }, [outputId, sessionToken]);
-
-  useEffect(() => {
-    const canvas = maskCanvasRef.current;
-    if (!canvas || !currentImage) return;
-
-    canvas.width = currentImage.width;
-    canvas.height = currentImage.height;
-    if (!maskDataUrl) {
-      clearMaskCanvas(canvas);
-      return;
-    }
-
-    let cancelled = false;
-    void drawCanvasImage(maskDataUrl, canvas).catch(() => {
-      if (!cancelled) {
-        clearMaskCanvas(canvas);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentImage, maskDataUrl]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -572,140 +473,14 @@ export default function StudioAiEditPage() {
       setCurrentSourceOutputId(null);
       setCurrentSourceProjectId(null);
       setCurrentSourceReviewState(null);
-      setEditPlan(null);
-      setPlannedPrompt("");
-      setTargetPoint(null);
       setToolMode("select");
       setCanvasLayers([]);
       setSelectedLayerId(null);
-      setMaskDataUrl(null);
-      setHasMaskPreview(false);
-      setStatus(
-        isMaskFlow
-          ? "Source image loaded. Describe the change, then analyze the edit."
-          : "Source image loaded. Describe the edit and apply it directly."
-      );
+      setStatus("Source image loaded. Describe the edit and apply it directly.");
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load image.");
     }
-  }
-
-  function handlePointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
-    if (!isMaskFlow || !currentImage || isApplying || isSegmenting) return;
-
-    if (toolMode === "target") {
-      if (!editPlan || analysisIsStale) {
-        return;
-      }
-
-      const normalizedPoint = getCanvasNormalizedPoint(event);
-      void runAutoSegmentation(editPlan.targetObject, currentImage, normalizedPoint).catch((cause) => {
-        setError(cause instanceof Error ? cause.message : "Auto segmentation failed.");
-        setStatus(null);
-      });
-      return;
-    }
-
-    pushToEditorHistory();
-    drawingRef.current = true;
-    lastPointRef.current = getCanvasPoint(event);
-    event.currentTarget.setPointerCapture(event.pointerId);
-    drawPoint(lastPointRef.current.x, lastPointRef.current.y);
-    setHasMaskPreview(true);
-  }
-
-  function handlePointerMove(event: ReactPointerEvent<HTMLCanvasElement>) {
-    if (!isMaskFlow || toolMode === "target" || !drawingRef.current || !currentImage) return;
-
-    const nextPoint = getCanvasPoint(event);
-    const lastPoint = lastPointRef.current;
-
-    if (!lastPoint) {
-      lastPointRef.current = nextPoint;
-      drawPoint(nextPoint.x, nextPoint.y);
-      return;
-    }
-
-    drawSegment(lastPoint.x, lastPoint.y, nextPoint.x, nextPoint.y);
-    lastPointRef.current = nextPoint;
-    setHasMaskPreview(true);
-  }
-
-  function handlePointerUp(event: ReactPointerEvent<HTMLCanvasElement>) {
-    if (!isMaskFlow || toolMode === "target") {
-      return;
-    }
-
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-
-    drawingRef.current = false;
-    lastPointRef.current = null;
-    setMaskDataUrl(captureCanvasDataUrl(event.currentTarget));
-  }
-
-  function drawPoint(x: number, y: number) {
-    const canvas = maskCanvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
-
-    stampBrush(canvas, ctx, x, y, brushSize, toolMode);
-  }
-
-  function drawSegment(fromX: number, fromY: number, toX: number, toY: number) {
-    const canvas = maskCanvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
-
-    const radii = getActualBrushRadii(canvas, brushSize);
-    const deltaX = toX - fromX;
-    const deltaY = toY - fromY;
-    const distance = Math.hypot(deltaX, deltaY);
-    const stepSize = Math.max(1, Math.min(radii.x, radii.y) * 0.55);
-    const steps = Math.max(1, Math.ceil(distance / stepSize));
-
-    for (let step = 0; step <= steps; step += 1) {
-      const progress = step / steps;
-      stampBrushAt(ctx, fromX + deltaX * progress, fromY + deltaY * progress, radii, toolMode);
-    }
-  }
-
-  function getCanvasPoint(event: ReactPointerEvent<HTMLCanvasElement>) {
-    const canvas = event.currentTarget;
-    const rect = canvas.getBoundingClientRect();
-
-    return {
-      x: (event.clientX - rect.left) * (canvas.width / rect.width),
-      y: (event.clientY - rect.top) * (canvas.height / rect.height)
-    };
-  }
-
-  function getCanvasNormalizedPoint(event: ReactPointerEvent<HTMLCanvasElement>) {
-    const point = getCanvasPoint(event);
-    const canvas = event.currentTarget;
-
-    return {
-      x: Math.min(1, Math.max(0, point.x / canvas.width)),
-      y: Math.min(1, Math.max(0, point.y / canvas.height))
-    };
-  }
-
-  function handleClearMask() {
-    if (!maskCanvasRef.current) return;
-    if (!maskDataUrl && !hasMaskPreview) return;
-
-    pushToEditorHistory();
-    clearMaskCanvas(maskCanvasRef.current);
-    setTargetPoint(null);
-    if (editPlan && !analysisIsStale) {
-      setToolMode("target");
-    }
-    setMaskDataUrl(null);
-    setHasMaskPreview(false);
-    setStatus("Mask cleared.");
-    setError(null);
   }
 
   function handleResetImage() {
@@ -713,19 +488,10 @@ export default function StudioAiEditPage() {
 
     pushToEditorHistory();
     setCurrentImage(originalImage);
-    setEditPlan(null);
-    setPlannedPrompt("");
-    setTargetPoint(null);
     setToolMode("select");
     setCanvasLayers([]);
     setSelectedLayerId(null);
-    setMaskDataUrl(null);
-    setHasMaskPreview(false);
-    setStatus(
-      isMaskFlow
-        ? "Reset to original image. Analyze the next edit before applying it."
-        : "Reset to original image. Describe the next edit and apply it directly."
-    );
+    setStatus("Reset to original image. Describe the next edit and apply it directly.");
     setError(null);
   }
 
@@ -796,101 +562,6 @@ export default function StudioAiEditPage() {
       return null;
     } finally {
       setIsComposingPrompt(false);
-    }
-  }
-
-  async function handleAnalyzeEdit() {
-    if (!sessionToken) {
-      setError("Your session is missing. Refresh the page and try again.");
-      return;
-    }
-
-    if (!activeBrandId) {
-      setError("Select an active brand before analyzing an edit.");
-      return;
-    }
-
-    if (!currentImage) {
-      setError("Upload a source image first.");
-      return;
-    }
-
-    if (!hasPromptInput) {
-      setError(promptMode === "normal" ? "Describe the edit before analyzing it." : "Add at least one list item before analyzing.");
-      return;
-    }
-
-    setIsPlanning(true);
-    setError(null);
-    setStatus("Analyzing the edit request...");
-
-    try {
-      const resolvedPrompt = await resolveActivePrompt();
-      if (!resolvedPrompt) {
-        return;
-      }
-
-      const result = await planImageEdit(sessionToken, {
-        brandId: activeBrandId,
-        prompt: resolvedPrompt,
-        width: currentImage.width,
-        height: currentImage.height,
-        image: currentImage.file,
-        imageFileName: currentImage.file.name
-      });
-
-      setEditPlan(result);
-      setPlannedPrompt(currentPromptSignature);
-      setTargetPoint(null);
-      setToolMode("target");
-      if (maskCanvasRef.current) clearMaskCanvas(maskCanvasRef.current);
-      setHasMaskPreview(false);
-      setStatus(`Edit analyzed. Target "${result.targetObject}" is ready for segmentation.`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to analyze the edit.");
-      setStatus(null);
-    } finally {
-      setIsPlanning(false);
-    }
-  }
-
-  async function runAutoSegmentation(
-    objectName: string,
-    sourceImage: EditableImage,
-    nextTargetPoint?: { x: number; y: number } | null
-  ) {
-    if (!sessionToken) throw new Error("Your session is missing. Refresh the page and try again.");
-    if (!activeBrandId) throw new Error("Select an active brand before generating an auto mask.");
-
-    const normalizedObjectName = normalizeObjectLabel(objectName);
-    if (!normalizedObjectName) throw new Error("Enter the object you want to auto-mask.");
-
-    setIsSegmenting(true);
-    setError(null);
-    setStatus(`Auto-masking "${normalizedObjectName}"...`);
-
-    try {
-      const result = await generateAutoMask(sessionToken, {
-        brandId: activeBrandId,
-        object: normalizedObjectName,
-        ...(nextTargetPoint ? { targetX: nextTargetPoint.x, targetY: nextTargetPoint.y } : {}),
-        image: sourceImage.file,
-        imageFileName: sourceImage.file.name
-      });
-
-      const canvas = maskCanvasRef.current;
-      if (!canvas) throw new Error("Mask canvas is not available.");
-
-      await applySegmentationMaskToCanvas(result.maskDataUrl ?? result.maskUrl, canvas);
-      setMaskDataUrl(captureCanvasDataUrl(canvas));
-      setToolMode("brush");
-      setTargetPoint(nextTargetPoint ?? null);
-      setHasMaskPreview(true);
-      setStatus(`Auto mask ready from ${result.model}. Refine the selection if needed, then apply the edit.`);
-
-      return normalizedObjectName;
-    } finally {
-      setIsSegmenting(false);
     }
   }
 
@@ -1097,14 +768,8 @@ export default function StudioAiEditPage() {
         setCurrentSourceReviewState(output.reviewState);
         setCanvasLayers([]);
         setSelectedLayerId(null);
-        setMaskDataUrl(null);
-        setHasMaskPreview(false);
-        setEditPlan(null);
-        setPlannedPrompt("");
-        setTargetPoint(null);
         setToolMode("select");
         setActiveEditorPane("uploads");
-        if (maskCanvasRef.current) clearMaskCanvas(maskCanvasRef.current);
         setStatus("Generated post loaded as the base image.");
         setError(null);
         return;
@@ -1292,11 +957,6 @@ export default function StudioAiEditPage() {
       setCurrentSourceReviewState(null);
       setCanvasLayers(templateLayers);
       setSelectedLayerId(templateLayers[0]?.id ?? null);
-      setMaskDataUrl(null);
-      setHasMaskPreview(false);
-      setEditPlan(null);
-      setPlannedPrompt("");
-      setTargetPoint(null);
       setToolMode("select");
       setActiveEditorPane("layers");
       setStatus("Template applied. Edit the layers or add your own image.");
@@ -1316,7 +976,7 @@ export default function StudioAiEditPage() {
     }
 
     if (nextPane === "ai-edit") {
-      setToolMode(isMaskFlow && editPlan && !analysisIsStale ? "target" : "select");
+      setToolMode("select");
       return;
     }
 
@@ -1324,7 +984,7 @@ export default function StudioAiEditPage() {
   }
 
   function handleStagePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (toolMode === "draw" && drawMode !== "select" && currentImage && !isApplying && !isSegmenting) {
+    if (toolMode === "draw" && drawMode !== "select" && currentImage && !isApplying) {
       const point = getStageNormalizedPoint(event);
       const nextLayer: CanvasDrawLayer = {
         id: createLayerId("draw"),
@@ -1434,11 +1094,6 @@ export default function StudioAiEditPage() {
       originalImage: cloneEditableImage(originalImage),
       currentImage: cloneEditableImage(currentImage),
       canvasLayers: cloneCanvasLayers(canvasLayers),
-      maskDataUrl,
-      hasMaskPreview,
-      editPlan: editPlan ? structuredClone(editPlan) : null,
-      plannedPrompt,
-      targetPoint: targetPoint ? { ...targetPoint } : null,
       toolMode
     };
   }
@@ -1463,11 +1118,6 @@ export default function StudioAiEditPage() {
     setOriginalImage(cloneEditableImage(snapshot.originalImage));
     setCurrentImage(cloneEditableImage(snapshot.currentImage));
     setCanvasLayers(cloneCanvasLayers(snapshot.canvasLayers));
-    setMaskDataUrl(snapshot.maskDataUrl);
-    setHasMaskPreview(snapshot.hasMaskPreview);
-    setEditPlan(snapshot.editPlan ? structuredClone(snapshot.editPlan) : null);
-    setPlannedPrompt(snapshot.plannedPrompt);
-    setTargetPoint(snapshot.targetPoint ? { ...snapshot.targetPoint } : null);
     setToolMode(snapshot.toolMode);
     setSelectedLayerId(null);
   }
@@ -1499,7 +1149,7 @@ export default function StudioAiEditPage() {
     layer: CanvasLayer,
     mode: "move" | "resize" = "move"
   ) {
-    if (!currentImage || isApplying || isSegmenting) return;
+    if (!currentImage || isApplying) return;
 
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1751,68 +1401,20 @@ export default function StudioAiEditPage() {
     setStatus("Applying the edit. This can take a few moments.");
 
     try {
-      let result;
-      if (isMaskFlow) {
-        if (!editPlan) {
-          setError("Analyze the edit before applying it.");
-          return;
-        }
-
-        if (analysisIsStale) {
-          setError("The prompt changed after analysis. Analyze the edit again before applying it.");
-          return;
-        }
-
-        const canvas = maskCanvasRef.current;
-        if (!canvas || !canvasHasMask(canvas)) {
-          setError("Generate and confirm the target mask before applying the edit.");
-          return;
-        }
-
-        const maskFile = await exportMaskFile(canvas, buildMaskFileName(currentImage.file.name));
-        const sourceFile = await getComposedImageFile(buildNormalizedSourceFileName(currentImage.file.name));
-        const [sourceDimensions, maskDimensions] = await Promise.all([
-          loadImageDimensions(sourceFile),
-          loadImageDimensions(maskFile)
-        ]);
-
-        if (
-          sourceDimensions.width !== maskDimensions.width ||
-          sourceDimensions.height !== maskDimensions.height
-        ) {
-          throw new Error(
-            `Source and mask dimensions do not match (${sourceDimensions.width}x${sourceDimensions.height} vs ${maskDimensions.width}x${maskDimensions.height}).`
-          );
-        }
-
-        result = await applyMaskedImageEdit(sessionToken, {
-          brandId: activeBrandId,
-          prompt: editPlan.rewrittenPrompt,
-          width: canvas.width,
-          height: canvas.height,
-          image: sourceFile,
-          imageFileName: sourceFile.name,
-          mask: maskFile,
-          maskFileName: maskFile.name,
-          ...(editPlan.targetObject ? { objectLabel: editPlan.targetObject } : {})
-        });
-      } else {
-        const resolvedPrompt = await resolveActivePrompt();
-        if (!resolvedPrompt) {
-          return;
-        }
-
-        const sourceFile = await getComposedImageFile(buildNormalizedSourceFileName(currentImage.file.name));
-
-        result = await applyMaskedImageEdit(sessionToken, {
-          brandId: activeBrandId,
-          prompt: resolvedPrompt,
-          width: currentImage.width,
-          height: currentImage.height,
-          image: sourceFile,
-          imageFileName: sourceFile.name
-        });
+      const resolvedPrompt = await resolveActivePrompt();
+      if (!resolvedPrompt) {
+        return;
       }
+
+      const sourceFile = await getComposedImageFile(buildNormalizedSourceFileName(currentImage.file.name));
+      const result = await applyImageEdit(sessionToken, {
+        brandId: activeBrandId,
+        prompt: resolvedPrompt,
+        width: currentImage.width,
+        height: currentImage.height,
+        image: sourceFile,
+        imageFileName: sourceFile.name
+      });
 
       const nextFile = await sourceToFile(
         result.imageDataUrl ?? result.imageUrl,
@@ -1825,18 +1427,8 @@ export default function StudioAiEditPage() {
       setCurrentImage(nextImage);
       setCanvasLayers([]);
       setSelectedLayerId(null);
-      setMaskDataUrl(null);
-      setEditPlan(null);
-      setPlannedPrompt("");
-      setTargetPoint(null);
-      setToolMode("target");
-      setStatus(
-        isMaskFlow
-          ? `Edit applied with ${result.model}. Analyze the next change or refine the result with a new plan.`
-          : `Edit applied with ${result.model}. Describe the next change to continue editing.`
-      );
-      if (maskCanvasRef.current) clearMaskCanvas(maskCanvasRef.current);
-      setHasMaskPreview(false);
+      setToolMode("select");
+      setStatus(`Edit applied with ${result.model}. Describe the next change to continue editing.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "AI edit failed.");
       setStatus(null);
@@ -1846,31 +1438,6 @@ export default function StudioAiEditPage() {
   }
 
   async function handlePrimaryAction() {
-    if (!isMaskFlow) {
-      await handleApplyEdit();
-      return;
-    }
-
-    if (!editPlan || analysisIsStale) {
-      await handleAnalyzeEdit();
-      return;
-    }
-
-    if (!hasMaskPreview) {
-      if (!currentImage) {
-        setError("Upload a source image first.");
-        return;
-      }
-
-      try {
-        await runAutoSegmentation(editPlan.targetObject, currentImage, targetPoint);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Unable to generate the target mask.");
-        setStatus(null);
-      }
-      return;
-    }
-
     await handleApplyEdit();
   }
 
@@ -2435,46 +2002,7 @@ export default function StudioAiEditPage() {
                     </div>
                   </>
                 )}
-                {isMaskFlow ? (
-                  <>
-                    <div className="create-mode-switch" role="tablist" aria-label="Tool mode">
-                      <button className={`create-mode-option ${toolMode === "select" ? "is-active" : ""}`} onClick={() => setToolMode("select")} role="tab" type="button">Select</button>
-                      <button className={`create-mode-option ${toolMode === "target" ? "is-active" : ""}`} disabled={!editPlan || analysisIsStale} onClick={() => setToolMode("target")} role="tab" type="button">Target</button>
-                      <button className={`create-mode-option ${toolMode === "brush" ? "is-active" : ""}`} disabled={!hasMaskPreview} onClick={() => setToolMode("brush")} role="tab" type="button">Brush</button>
-                      <button className={`create-mode-option ${toolMode === "eraser" ? "is-active" : ""}`} disabled={!hasMaskPreview} onClick={() => setToolMode("eraser")} role="tab" type="button">Eraser</button>
-                    </div>
-                    <button className="button button-ghost ai-editor-full-button" disabled={!canAnalyze} onClick={() => void handleAnalyzeEdit()} type="button">
-                      {isPlanning ? "Analyzing..." : editPlan ? "Re-analyze edit" : "Analyze edit"}
-                    </button>
-                    <div className="create-picker-summary-actions">
-                      <button className="create-inline-action" disabled={!canGenerateMask} onClick={() => currentImage && editPlan ? void runAutoSegmentation(editPlan.targetObject, currentImage, targetPoint) : undefined} type="button">
-                        {hasMaskPreview ? "Re-run target mask" : "Generate target mask"}
-                      </button>
-                      <button className="create-inline-action" onClick={handleClearMask} type="button">Clear mask</button>
-                    </div>
-                    <label className="create-field-label">
-                      Brush size: {brushSize}px
-                      <input className="ai-edit-range" max={120} min={2} onChange={(event) => setBrushSize(Number(event.target.value))} type="range" value={brushSize} />
-                    </label>
-                    {editPlan ? (
-                      <div className="ai-edit-plan-card is-detailed">
-                        <div>
-                          <p className="create-picker-summary-label">Planner target</p>
-                          <strong>{editPlan.targetObject}</strong>
-                        </div>
-                        <div>
-                          <p className="create-picker-summary-label">Edit intent</p>
-                          <strong>{editPlan.editIntent}</strong>
-                        </div>
-                        <div>
-                          <p className="create-picker-summary-label">Masked edit prompt</p>
-                          <p className="ai-edit-plan-copy">{editPlan.rewrittenPrompt}</p>
-                        </div>
-                      </div>
-                    ) : null}
-                  </>
-                ) : null}
-                <button className="button button-primary ai-edit-apply-button" disabled={!canRunPrimaryAction} onClick={() => void handlePrimaryAction()} type="button">
+                <button className="button button-primary ai-edit-apply-button" disabled={!canApplyDirectEdit} onClick={() => void handlePrimaryAction()} type="button">
                   {primaryActionLabel}
                 </button>
               </div>
@@ -2495,17 +2023,7 @@ export default function StudioAiEditPage() {
                 <h3>{currentImage.file.name}</h3>
                 <span className="ai-edit-stage-dimensions">{dimensionsLabel}</span>
               </div>
-              <span className="pill pill-sm">
-                {isMaskFlow
-                  ? toolMode === "target"
-                    ? "Click target"
-                    : hasMaskPreview
-                      ? "Mask ready"
-                      : editPlan
-                        ? "Plan ready"
-                        : "Awaiting analysis"
-                  : "Direct edit"}
-              </span>
+              <span className="pill pill-sm">Direct edit</span>
             </div>
           ) : null}
 
@@ -2611,18 +2129,6 @@ export default function StudioAiEditPage() {
                     );
                   })}
                 </div>
-                {isMaskFlow ? (
-                  <canvas
-                    className={toolMode === "eraser" ? "ai-edit-mask-canvas is-erasing" : "ai-edit-mask-canvas"}
-                    onPointerCancel={handlePointerUp}
-                    onPointerDown={handlePointerDown}
-                    onPointerLeave={handlePointerUp}
-                    onPointerMove={handlePointerMove}
-                    onPointerUp={handlePointerUp}
-                    ref={maskCanvasRef}
-                    style={{ pointerEvents: toolMode === "target" || toolMode === "brush" || toolMode === "eraser" ? "auto" : "none" }}
-                  />
-                ) : null}
                 {stageBusyMessage ? (
                   <div className="ai-edit-stage-overlay" role="status" aria-live="polite">
                     <div className="ai-edit-stage-spinner" />
@@ -2951,125 +2457,6 @@ async function loadImageSourceDimensions(source: string) {
   return { width: image.naturalWidth || image.width, height: image.naturalHeight || image.height };
 }
 
-async function drawCanvasImage(source: string, canvas: HTMLCanvasElement) {
-  const image = await loadImage(source);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    throw new Error("Unable to draw on the canvas.");
-  }
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-}
-
-function clearMaskCanvas(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-}
-
-function canvasHasMask(canvas: HTMLCanvasElement) {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return false;
-
-  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-  for (let index = 3; index < pixels.length; index += 4) {
-    if ((pixels[index] ?? 0) > 0) return true;
-  }
-
-  return false;
-}
-
-async function applySegmentationMaskToCanvas(source: string, canvas: HTMLCanvasElement) {
-  const maskFile = await sourceToFile(source, "auto-segment-mask.png", "image/png");
-  const maskUrl = URL.createObjectURL(maskFile);
-
-  try {
-    const image = await loadImage(maskUrl);
-    const stagingCanvas = document.createElement("canvas");
-    stagingCanvas.width = canvas.width;
-    stagingCanvas.height = canvas.height;
-    const stagingContext = stagingCanvas.getContext("2d");
-    const targetContext = canvas.getContext("2d");
-
-    if (!stagingContext || !targetContext) {
-      throw new Error("Unable to prepare the segmentation mask.");
-    }
-
-    stagingContext.clearRect(0, 0, stagingCanvas.width, stagingCanvas.height);
-    stagingContext.drawImage(image, 0, 0, stagingCanvas.width, stagingCanvas.height);
-
-    const sourceImage = stagingContext.getImageData(0, 0, stagingCanvas.width, stagingCanvas.height);
-    const outputImage = targetContext.createImageData(stagingCanvas.width, stagingCanvas.height);
-    let whitePixels = 0;
-
-    for (let index = 0; index < sourceImage.data.length; index += 4) {
-      const red = sourceImage.data[index] ?? 0;
-      const green = sourceImage.data[index + 1] ?? 0;
-      const blue = sourceImage.data[index + 2] ?? 0;
-      const alpha = sourceImage.data[index + 3] ?? 0;
-      const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-
-      if (alpha > 20 && luminance > 127) {
-        outputImage.data[index] = VISUAL_MASK_COLOR.red;
-        outputImage.data[index + 1] = VISUAL_MASK_COLOR.green;
-        outputImage.data[index + 2] = VISUAL_MASK_COLOR.blue;
-        outputImage.data[index + 3] = VISUAL_MASK_COLOR.alpha;
-        whitePixels += 1;
-      }
-    }
-
-    if (whitePixels === 0) {
-      throw new Error("The segmentation mask did not contain any editable region.");
-    }
-
-    targetContext.clearRect(0, 0, canvas.width, canvas.height);
-    targetContext.putImageData(outputImage, 0, 0);
-  } finally {
-    URL.revokeObjectURL(maskUrl);
-  }
-}
-
-async function exportMaskFile(canvas: HTMLCanvasElement, fileName: string) {
-  const exportCanvas = document.createElement("canvas");
-  exportCanvas.width = canvas.width;
-  exportCanvas.height = canvas.height;
-  const exportContext = exportCanvas.getContext("2d");
-  const sourceContext = canvas.getContext("2d");
-
-  if (!exportContext || !sourceContext) {
-    throw new Error("Unable to prepare the mask export.");
-  }
-
-  const sourceImage = sourceContext.getImageData(0, 0, exportCanvas.width, exportCanvas.height);
-  const outputImage = exportContext.createImageData(exportCanvas.width, exportCanvas.height);
-
-  for (let index = 0; index < sourceImage.data.length; index += 4) {
-    const alpha = sourceImage.data[index + 3] ?? 0;
-    const value = alpha > 20 ? 255 : 0;
-    outputImage.data[index] = value;
-    outputImage.data[index + 1] = value;
-    outputImage.data[index + 2] = value;
-    outputImage.data[index + 3] = 255;
-  }
-
-  exportContext.putImageData(outputImage, 0, 0);
-
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    exportCanvas.toBlob((value) => {
-      if (!value) {
-        reject(new Error("Unable to export the mask."));
-        return;
-      }
-
-      resolve(value);
-    }, "image/png");
-  });
-
-  return new File([blob], fileName, { type: "image/png" });
-}
-
 async function sourceToFile(source: string, fileName: string, fallbackType: string) {
   const response = await fetch(source);
   if (!response.ok) {
@@ -3184,10 +2571,6 @@ function buildEditedFileName(fileName: string) {
 
 function buildComposedFileName(fileName: string) {
   return `${stripFileExtension(fileName)}-composition.png`;
-}
-
-function buildMaskFileName(fileName: string) {
-  return `${stripFileExtension(fileName)}-mask.png`;
 }
 
 function buildNormalizedSourceFileName(fileName: string) {
@@ -3533,11 +2916,6 @@ function areEditorSnapshotsEqual(left: EditorSnapshot, right: EditorSnapshot) {
     areEditableImagesEqual(left.originalImage, right.originalImage) &&
     areEditableImagesEqual(left.currentImage, right.currentImage) &&
     areCanvasLayersEqual(left.canvasLayers, right.canvasLayers) &&
-    left.maskDataUrl === right.maskDataUrl &&
-    left.hasMaskPreview === right.hasMaskPreview &&
-    JSON.stringify(left.editPlan) === JSON.stringify(right.editPlan) &&
-    left.plannedPrompt === right.plannedPrompt &&
-    JSON.stringify(left.targetPoint) === JSON.stringify(right.targetPoint) &&
     left.toolMode === right.toolMode
   );
 }
@@ -3554,10 +2932,6 @@ function areEditableImagesEqual(left: EditableImage | null, right: EditableImage
     left.file.lastModified === right.file.lastModified &&
     left.file.type === right.file.type
   );
-}
-
-function captureCanvasDataUrl(canvas: HTMLCanvasElement) {
-  return canvas.toDataURL("image/png");
 }
 
 function getLayerLabel(layer: CanvasLayer) {
@@ -3604,68 +2978,4 @@ function ensureExtension(fileName: string, contentType: string) {
   if (contentType === "image/webp") return `${fileName}.webp`;
   if (contentType === "image/jpeg") return `${fileName}.jpg`;
   return `${fileName}.png`;
-}
-
-function normalizeObjectLabel(value: string | null | undefined) {
-  const normalized = value
-    ?.trim()
-    .replace(/\s+/g, " ")
-    .replace(/^[Tt]he\s+/, "")
-    .replace(/^[Aa]n?\s+/, "")
-    .replace(/[.,!?]+$/g, "")
-    .trim();
-
-  return normalized && normalized.length > 0 ? normalized : null;
-}
-
-function getCanvasScaleFactors(canvas: HTMLCanvasElement) {
-  const rect = canvas.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) {
-    return { x: 1, y: 1 };
-  }
-
-  return {
-    x: canvas.width / rect.width,
-    y: canvas.height / rect.height
-  };
-}
-
-function getActualBrushRadii(canvas: HTMLCanvasElement, brushSize: number) {
-  const scale = getCanvasScaleFactors(canvas);
-
-  return {
-    x: Math.max(1, (brushSize * scale.x) / 2),
-    y: Math.max(1, (brushSize * scale.y) / 2)
-  };
-}
-
-function stampBrush(
-  canvas: HTMLCanvasElement,
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  brushSize: number,
-  toolMode: ToolMode
-) {
-  stampBrushAt(ctx, x, y, getActualBrushRadii(canvas, brushSize), toolMode);
-}
-
-function stampBrushAt(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  radii: { x: number; y: number },
-  toolMode: ToolMode
-) {
-  if (toolMode === "eraser") {
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.fillStyle = "rgba(0, 0, 0, 1)";
-  } else {
-    ctx.globalCompositeOperation = "source-over";
-    ctx.fillStyle = VISUAL_MASK_FILL;
-  }
-
-  ctx.beginPath();
-  ctx.ellipse(x, y, radii.x, radii.y, 0, 0, Math.PI * 2);
-  ctx.fill();
 }

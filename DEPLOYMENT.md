@@ -13,7 +13,7 @@ This document covers the current deployment flow for Briefly Social.
 
 - `apps/web`: Next.js frontend
 - `apps/api`: Fastify backend
-- `services/socialpython`: Python compile and image-edit planning service
+- `services/socialpython`: Python compile service
 - `packages/contracts`: shared schemas
 - `supabase`: database migrations
 
@@ -53,15 +53,10 @@ SUPABASE_JWT_SECRET=...
 SUPABASE_STORAGE_BUCKET=creative-assets
 CREATIVE_DIRECTOR_V2_MODE=auto
 CREATIVE_DIRECTOR_V2_TRANSPORT=server
-AI_EDIT_DIRECTOR_MODE=auto
-AI_EDIT_DIRECTOR_TRANSPORT=server
 AGNO_PYTHON_BIN=python3
 AGNO_AGENT_V2_SCRIPT=../../services/socialpython/agents/creative_director_notebook.py
-AI_EDIT_DIRECTOR_SCRIPT=../../services/socialpython/agents/ai_edit_director.py
 AGNO_AGENT_V2_SERVER_URL=http://127.0.0.1:8787/api/compile-v2
-AI_EDIT_DIRECTOR_SERVER_URL=http://127.0.0.1:8787/api/image-edit-plan
 AGNO_AGENT_V2_SERVER_TIMEOUT_SEC=180
-AI_EDIT_DIRECTOR_SERVER_TIMEOUT_SEC=60
 OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-4.1-mini
 ```
@@ -260,7 +255,7 @@ Backend:
 2. `git push heroku main`
 3. verify `/health`
 4. test auth
-5. test `/api/creative/compile`
+5. test `/api/creative/compile-v2`
 6. test one style-seed generation
 
 Frontend:

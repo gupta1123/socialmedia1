@@ -973,7 +973,6 @@ function splitList(value: string) {
 function normalizeBootstrapPayload(payload: BootstrapResponse): BootstrapResponse {
   return {
     ...payload,
-    aiEdit: payload.aiEdit ?? { flow: "mask" },
     workspaceComplianceSettings: payload.workspaceComplianceSettings ?? (
       payload.workspace
         ? {

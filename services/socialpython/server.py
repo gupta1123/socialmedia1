@@ -21,7 +21,6 @@ HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8787"))
 LAB_VENV_PYTHON = APP_ROOT / ".venv" / "bin" / "python"
 PROMPT_SKILLS_DIR = APP_ROOT / "skills" / "prompt" / "v2"
-IMAGE_EDIT_SKILLS_DIR = APP_ROOT / "skills" / "image-edit" / "v1"
 PROMPT_LAB_LOGO_ASSET_ID = "00000000-0000-0000-0000-000000000001"
 PROMPT_LAB_RERA_QR_ASSET_ID = "00000000-0000-0000-0000-000000000002"
 
@@ -84,17 +83,12 @@ def absolutize_env_path(key: str) -> None:
 
 def prime_environment() -> None:
     load_env_file(APP_ROOT / ".env")
-    os.environ.setdefault("CREATIVE_DIRECTOR_MODE", "agno")
     os.environ.setdefault("CREATIVE_DIRECTOR_V2_MODE", "agno")
     os.environ.setdefault("AGNO_SKILL_FIRST_MODE", "1")
     os.environ.setdefault("AGNO_AGENT_V2_SCRIPT", "./agents/creative_director_notebook.py")
     os.environ.setdefault("AGNO_AGENT_V2_SKILLS_DIR", str(PROMPT_SKILLS_DIR))
-    os.environ.setdefault("AI_EDIT_DIRECTOR_SKILLS_DIR", str(IMAGE_EDIT_SKILLS_DIR))
-    os.environ.setdefault("AI_EDIT_PROMPT_LAB_AGENT_SCRIPT", "./agents/ai_edit_director.py")
     absolutize_env_path("AGNO_AGENT_V2_SCRIPT")
     absolutize_env_path("AGNO_AGENT_V2_SKILLS_DIR")
-    absolutize_env_path("AI_EDIT_DIRECTOR_SKILLS_DIR")
-    absolutize_env_path("AI_EDIT_PROMPT_LAB_AGENT_SCRIPT")
 
 
 def load_creative_director_module():
@@ -113,22 +107,9 @@ def load_creative_director_module():
     return module
 
 
-def load_ai_edit_director_module():
-    relative_script = os.getenv("AI_EDIT_PROMPT_LAB_AGENT_SCRIPT", "./agents/ai_edit_director.py")
-    module_path = (APP_ROOT / relative_script).resolve()
-    spec = importlib.util.spec_from_file_location("agno_prompt_lab_ai_edit_director", module_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not load AI edit director module from {module_path}")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
 ensure_lab_venv()
 prime_environment()
 CREATIVE_DIRECTOR = load_creative_director_module()
-AI_EDIT_DIRECTOR = load_ai_edit_director_module()
 
 
 with PRESETS_PATH.open("r", encoding="utf8") as handle:
@@ -152,8 +133,6 @@ LOOKUPS = LookupState(
 
 AGENT = None
 AGENT_LOCK = threading.Lock()
-AI_EDIT_AGENT = None
-AI_EDIT_AGENT_LOCK = threading.Lock()
 SKILLS_DIR = Path(getattr(CREATIVE_DIRECTOR, "SKILLS_DIR", PROMPT_SKILLS_DIR))
 CANONICAL_TRUTH_BUNDLE_KEYS = (
     "requestContext",
@@ -182,14 +161,6 @@ def get_agent():
             if hasattr(AGENT, "structured_outputs"):
                 AGENT.structured_outputs = False
         return AGENT
-
-
-def get_ai_edit_agent():
-    global AI_EDIT_AGENT
-    with AI_EDIT_AGENT_LOCK:
-        if AI_EDIT_AGENT is None:
-            AI_EDIT_AGENT = AI_EDIT_DIRECTOR.build_agent()
-        return AI_EDIT_AGENT
 
 
 def get_effective_llm_runtime() -> dict[str, Any]:
@@ -1176,7 +1147,7 @@ class PromptLabHandler(BaseHTTPRequestHandler):
                         if os.getenv("USE_OPENROUTER", "false").lower() == "true"
                         else os.getenv("OPENAI_API_KEY")
                     ),
-                    "mode": os.getenv("CREATIVE_DIRECTOR_MODE", "agno"),
+                    "mode": os.getenv("CREATIVE_DIRECTOR_V2_MODE", "agno"),
                     "openAiModel": os.getenv("OPENAI_MODEL", "unset"),
                     "runtime": runtime_diagnostics()
                 }
@@ -1192,10 +1163,6 @@ class PromptLabHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         if self.path == "/api/compile-v2":
             self._handle_compile_v2()
-            return
-
-        if self.path == "/api/image-edit-plan":
-            self._handle_image_edit_plan()
             return
 
         if self.path != "/api/chat":
@@ -1271,30 +1238,6 @@ class PromptLabHandler(BaseHTTPRequestHandler):
                 },
             }
             self._send_json(HTTPStatus.OK, {"ok": True, "result": result, "runtime": runtime, "trace": trace})
-        except ValueError as exc:
-            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
-        except Exception as exc:  # pragma: no cover - interactive lab handler
-            self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": describe_runtime_failure(exc)})
-
-    def _handle_image_edit_plan(self) -> None:
-        try:
-            body = self._read_json()
-            payload = body.get("payload", body)
-            if not isinstance(payload, dict):
-                raise ValueError("Expected an image edit payload object.")
-
-            result = AI_EDIT_DIRECTOR.execute(get_ai_edit_agent(), payload)
-            planner_trace = result.get("plannerTrace")
-            if not isinstance(planner_trace, dict):
-                planner_trace = {}
-            result["plannerTrace"] = {
-                **planner_trace,
-                "pythonServer": {
-                    "url": f"http://{HOST}:{PORT}",
-                    "agentScript": os.getenv("AI_EDIT_PROMPT_LAB_AGENT_SCRIPT", "./agents/ai_edit_director.py"),
-                },
-            }
-            self._send_json(HTTPStatus.OK, {"ok": True, "result": result})
         except ValueError as exc:
             self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
         except Exception as exc:  # pragma: no cover - interactive lab handler

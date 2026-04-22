@@ -715,8 +715,8 @@ describe("compilePromptPackageV2", () => {
     const imageRefPattern = /(?:Image \d+ is [^.]+\.(?:jpg|jpeg|png|webp)[^,]*(?:,|and)|filename.*(?:jpg|jpeg|png|webp).*Image \d+)/i;
     const hasActualImageRefs = imageRefPattern.test(output.finalPrompt ?? "");
     expect(hasActualImageRefs).toBe(false);
-    expect(output.finalPrompt).toContain("Create a premium 4:5 amenity spotlight poster for social media");
-    expect(output.finalPrompt).toContain("Poster structure:");
+    expect(output.finalPrompt).toContain("Create a premium 4:5 amenity spotlight image for social media");
+    expect(output.finalPrompt).toContain("Composition family:");
     expect(output.finalPrompt).toContain("Negative prompt:");
     expect(output.compilerTrace?.promptDetailMode).toBe("poster-spec");
   });
