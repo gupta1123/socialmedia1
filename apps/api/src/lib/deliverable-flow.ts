@@ -6,7 +6,7 @@ import type {
   PostVersionRecord,
   ProjectReraRegistrationRecord
 } from "@image-lab/contracts";
-import { compilePromptPackage } from "./creative-director.js";
+import { compilePromptPackageV2 } from "./creative-director.js";
 import { buildInferredReferenceSelection } from "./creative-reference-selection.js";
 import { buildPostTypePromptGuidance } from "./post-type-prompt-guidance.js";
 import { deriveLegacyCreativeFormat, inferDeliverableStatusFromExecution } from "./deliverable-utils.js";
@@ -129,12 +129,14 @@ export async function compileDeliverablePromptPackage(params: {
     allAssets.filter((asset) => inferredReferenceAssetIds.includes(asset.id)),
     inferredReferenceAssetIds
   );
-  const compiled = await compilePromptPackage({
+  const compiled = await compilePromptPackageV2({
+    workspaceId: brand.workspaceId,
     brandName: brand.name,
     brandProfile: brandProfileVersion.profile,
     brandAssets: allAssets,
     projectId: project?.id ?? null,
     projectName: project?.name ?? null,
+    projectStage: project?.stage ?? null,
     projectProfile: projectProfileVersion?.profile ?? null,
     festival,
     postType: {

@@ -41,7 +41,14 @@ import {
 import { createSignedImageUrls } from "../lib/storage.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { randomId } from "../lib/utils.js";
-import { getFinalProviderModel, getStyleSeedProviderModel, resolveImageGenerationProvider, submitFinalGeneration, submitStyleSeedGeneration } from "../lib/image-provider.js";
+import {
+  getFinalProviderModel,
+  getStyleSeedProviderModel,
+  isImmediateImageProvider,
+  resolveImageGenerationProvider,
+  submitFinalGeneration,
+  submitStyleSeedGeneration
+} from "../lib/image-provider.js";
 import { getSignedPreview, persistCompletedJobImages, refreshJobOutputs } from "../lib/job-sync.js";
 import { env } from "../lib/config.js";
 import {
@@ -52,7 +59,6 @@ import {
   settleWorkspaceCreditReservation
 } from "../lib/credits.js";
 import {
-  compileDeliverablePromptPackage,
   recordOutputFeedback,
   resolveOrCreateAdHocDeliverable
 } from "../lib/deliverable-flow.js";
@@ -94,6 +100,315 @@ type RoleAwareReferencePlan = {
   complianceQr: { role: "rera_qr"; label: string; storagePath: string } | null;
   references: Array<{ role: "reference"; label: string; storagePath: string }>;
 };
+
+async function prepareV2CompileContext(params: {
+  parsedBrief: z.infer<typeof CreativeCompileV2RequestSchema>;
+  viewer: any;
+  request: any;
+  allowedRoles: Array<"owner" | "admin" | "editor" | "viewer">;
+}) {
+  const { brief, autoCopyStripped } = normalizeCreativeBriefForCompilation(params.parsedBrief);
+  const brand = await getBrand(brief.brandId);
+  await assertWorkspaceRole(params.viewer, brand.workspaceId, params.allowedRoles, params.request.log);
+
+  const [
+    project,
+    postType,
+    reusableTemplateDetail,
+    calendarItem,
+    campaign,
+    series,
+    campaignPlan,
+    sourceOutput,
+    festival
+  ] = await Promise.all([
+    brief.projectId ? getProject(brief.projectId) : Promise.resolve(null),
+    brief.postTypeId ? getPostType(brief.postTypeId) : Promise.resolve(null),
+    brief.creativeTemplateId ? getCreativeTemplateDetail(brief.creativeTemplateId) : Promise.resolve(null),
+    brief.calendarItemId ? getCalendarItem(brief.calendarItemId) : Promise.resolve(null),
+    brief.campaignId ? getCampaign(brief.campaignId) : Promise.resolve(null),
+    brief.seriesId ? getSeries(brief.seriesId) : Promise.resolve(null),
+    brief.campaignPlanId ? getCampaignDeliverablePlan(brief.campaignPlanId) : Promise.resolve(null),
+    brief.sourceOutputId
+      ? supabaseAdmin
+          .from("creative_outputs")
+          .select("id, workspace_id, brand_id, storage_path")
+          .eq("id", brief.sourceOutputId)
+          .maybeSingle()
+          .then(({ data }) => data)
+      : Promise.resolve(null),
+    brief.festivalId ? getFestival(brief.festivalId) : Promise.resolve(null)
+  ]);
+
+  const reusableTemplate = reusableTemplateDetail?.template ?? null;
+  const reusableTemplateAssets = reusableTemplateDetail?.assets ?? [];
+
+  if (project && (project.workspaceId !== brand.workspaceId || project.brandId !== brand.id)) {
+    return { ok: false as const, message: "Project does not belong to the selected brand/workspace" };
+  }
+
+  if (postType && postType.workspaceId && postType.workspaceId !== brand.workspaceId) {
+    return { ok: false as const, message: "Post type does not belong to the selected workspace" };
+  }
+
+  if (reusableTemplate && (reusableTemplate.workspaceId !== brand.workspaceId || reusableTemplate.brandId !== brand.id)) {
+    return { ok: false as const, message: "Template does not belong to the selected brand/workspace" };
+  }
+
+  if (calendarItem && (calendarItem.workspaceId !== brand.workspaceId || calendarItem.brandId !== brand.id)) {
+    return { ok: false as const, message: "Calendar item does not belong to the selected brand/workspace" };
+  }
+
+  if (campaign && (campaign.workspaceId !== brand.workspaceId || campaign.brandId !== brand.id)) {
+    return { ok: false as const, message: "Campaign does not belong to the selected brand/workspace" };
+  }
+
+  if (series && (series.workspaceId !== brand.workspaceId || series.brandId !== brand.id)) {
+    return { ok: false as const, message: "Series does not belong to the selected brand/workspace" };
+  }
+
+  if (campaignPlan && !campaign) {
+    return { ok: false as const, message: "A campaign is required when selecting a planned asset" };
+  }
+
+  if (campaignPlan && campaign && campaignPlan.campaignId !== campaign.id) {
+    return { ok: false as const, message: "Planned asset does not belong to the selected campaign" };
+  }
+
+  if (sourceOutput && (sourceOutput.workspace_id !== brand.workspaceId || sourceOutput.brand_id !== brand.id)) {
+    return { ok: false as const, message: "Source post does not belong to the selected brand/workspace" };
+  }
+
+  if (festival && festival.workspaceId && festival.workspaceId !== brand.workspaceId) {
+    return { ok: false as const, message: "Festival does not belong to the selected workspace" };
+  }
+
+  if (!postType) {
+    return { ok: false as const, message: "Choose a post type before compiling v2 prompts" };
+  }
+
+  if (postType.code === "festive-greeting" && !festival) {
+    return { ok: false as const, message: "Choose a festival before creating a festive greeting" };
+  }
+
+  const [brandProfileVersion, allAssets, reraRegistrations, projectProfileVersion] = await Promise.all([
+    getActiveBrandProfile(brand.id),
+    listBrandAssets(brand.id),
+    listProjectReraRegistrations(brand.workspaceId, brand.id),
+    project ? getActiveProjectProfile(project.id).catch(() => null) : Promise.resolve(null)
+  ]);
+
+  const isFestiveGreeting = postType.code === "festive-greeting" && Boolean(festival);
+  const projectActualImages = Array.isArray(projectProfileVersion?.profile.actualProjectImageIds)
+    ? projectProfileVersion.profile.actualProjectImageIds
+    : [];
+  const projectSampleImages = Array.isArray(projectProfileVersion?.profile.sampleFlatImageIds)
+    ? projectProfileVersion.profile.sampleFlatImageIds
+    : [];
+  const brandReferenceImages = Array.isArray(brandProfileVersion.profile.referenceAssetIds)
+    ? brandProfileVersion.profile.referenceAssetIds
+    : [];
+  const postTypeGuidance = buildPostTypePromptGuidance({
+    brandName: brand.name,
+    brief,
+    postType: {
+      code: postType.code,
+      name: postType.name,
+      config: postType.config
+    },
+    projectName: project?.name ?? null,
+    projectProfile: projectProfileVersion?.profile ?? null,
+    brandAssets: allAssets,
+    projectId: project?.id ?? null
+  });
+  const inferredReferenceSelection = buildInferredReferenceSelection({
+    postTypeCode: postType.code,
+    isFestiveGreeting,
+    explicitReferenceAssetIds: brief.referenceAssetIds,
+    projectImageAssetIds: projectActualImages,
+    sampleFlatImageIds: projectSampleImages,
+    brandReferenceAssetIds: brandReferenceImages,
+    allAssets,
+    projectId: project?.id ?? null,
+    focusAmenity: postTypeGuidance.manifest.amenityFocus ?? null,
+  });
+  const inferredReferenceAssetIds = inferredReferenceSelection.referenceAssetIds;
+  const referenceAssets = sortAssetsByIdOrder(
+    allAssets.filter((asset) => inferredReferenceAssetIds.includes(asset.id)),
+    inferredReferenceAssetIds
+  );
+  const explicitLogoAsset =
+    brief.logoAssetId
+      ? allAssets.find((asset) => asset.id === brief.logoAssetId && asset.kind === "logo") ?? null
+      : null;
+  const selectedBrandLogoAsset = brief.includeBrandLogo ? explicitLogoAsset : null;
+  const selectedReraQrAsset = brief.includeReraQr
+    ? selectReraQrAssetForProject(allAssets, project?.id ?? null, null, reraRegistrations)
+    : null;
+  const requestedVariationCount = brief.variationCount ?? env.CREATIVE_STYLE_VARIATION_COUNT;
+  const sourceBriefSnapshot = {
+    ...brief,
+    variationCount: requestedVariationCount
+  };
+
+  return {
+    ok: true as const,
+    context: {
+      brief,
+      autoCopyStripped,
+      brand,
+      project,
+      postType,
+      reusableTemplate,
+      reusableTemplateAssets,
+      calendarItem,
+      campaign,
+      series,
+      campaignPlan,
+      sourceOutput,
+      festival,
+      brandProfileVersion,
+      allAssets,
+      reraRegistrations,
+      projectProfileVersion,
+      inferredReferenceSelection,
+      referenceAssets,
+      selectedBrandLogoAsset,
+      selectedReraQrAsset,
+      requestedVariationCount,
+      sourceBriefSnapshot
+    }
+  };
+}
+
+function buildPreparedV2CompileInput(context: any) {
+  return {
+    workspaceId: context.brand.workspaceId,
+    brandName: context.brand.name,
+    brandProfile: context.brandProfileVersion.profile,
+    brandAssets: context.allAssets,
+    projectId: context.project?.id ?? null,
+    projectName: context.project?.name ?? null,
+    projectStage: context.project?.stage ?? null,
+    projectProfile: context.projectProfileVersion?.profile ?? null,
+    festival: context.festival,
+    postType: {
+      code: context.postType.code,
+      name: context.postType.name,
+      config: context.postType.config
+    },
+    template: context.reusableTemplate
+      ? {
+          id: context.reusableTemplate.id,
+          name: context.reusableTemplate.name,
+          channel: context.reusableTemplate.channel,
+          format: context.reusableTemplate.format,
+          basePrompt: context.reusableTemplate.basePrompt,
+          config: context.reusableTemplate.config,
+          linkedAssets: context.reusableTemplateAssets.map((asset: any) => ({
+            assetId: asset.assetId,
+            role: asset.role
+          }))
+        }
+      : null,
+    templateAssets: context.reusableTemplateAssets.map((asset: any) => ({
+      assetId: asset.assetId,
+      role: asset.role
+    })),
+    calendarItem: context.calendarItem
+      ? {
+          title: context.calendarItem.title,
+          objective: context.calendarItem.objective,
+          scheduledFor: context.calendarItem.scheduledFor,
+          status: context.calendarItem.status
+        }
+      : null,
+    series: context.series
+      ? {
+          id: context.series.id,
+          name: context.series.name,
+          description: context.series.description,
+          contentFormat: context.series.contentFormat,
+          sourceBriefJson: context.series.sourceBriefJson
+        }
+      : null,
+    deliverableSnapshot: null,
+    brief: context.sourceBriefSnapshot,
+    referenceLabels: context.referenceAssets.map((asset: any) => asset.label),
+    variationCount: context.requestedVariationCount
+  } as const;
+}
+
+function buildPreviewV2PromptPackage(
+  context: any,
+  compiled: any,
+  options: {
+    endpoint: string;
+    deprecatedAlias?: boolean;
+  }
+) {
+  const now = Date.now();
+  return PromptPackageSchema.parse({
+    id: randomId(),
+    workspaceId: context.brand.workspaceId,
+    brandId: context.brand.id,
+    deliverableId: null,
+    projectId: context.project?.id ?? null,
+    postTypeId: context.postType.id,
+    postType: {
+      code: context.postType.code,
+      name: context.postType.name,
+      config: context.postType.config
+    },
+    creativeTemplateId: context.reusableTemplate?.id ?? null,
+    calendarItemId: context.calendarItem?.id ?? null,
+    creativeRequestId: randomId(),
+    brandProfileVersionId: context.brandProfileVersion.id,
+    promptSummary: compiled.promptSummary,
+    finalPrompt: compiled.finalPrompt,
+    aspectRatio: compiled.aspectRatio,
+    chosenModel: compiled.chosenModel,
+    templateType: compiled.templateType,
+    referenceStrategy: compiled.referenceStrategy,
+    referenceAssetIds: context.inferredReferenceSelection.referenceAssetIds,
+    variations: compiled.variations ?? [],
+    resolvedConstraints: {
+      ...compiled.resolvedConstraints,
+      projectImageAssetIds: context.projectProfileVersion?.profile.actualProjectImageIds ?? [],
+      sampleFlatImageIds: context.projectProfileVersion?.profile.sampleFlatImageIds ?? [],
+      amenityImageAssetIds: context.inferredReferenceSelection.amenityAssetIds,
+      includeBrandLogo: context.brief.includeBrandLogo,
+      includeReraQr: context.brief.includeReraQr,
+      brandLogoAssetId: context.selectedBrandLogoAsset?.id ?? null,
+      brandLogoLabel: context.selectedBrandLogoAsset?.label ?? null,
+      reraQrAssetId: context.selectedReraQrAsset?.id ?? null,
+      reraQrLabel: context.selectedReraQrAsset?.label ?? null
+    },
+    compilerTrace: {
+      ...compiled.compilerTrace,
+      sourceBrief: context.sourceBriefSnapshot,
+      preview: true,
+      previewId: `preview_v2_${now}`,
+      endpoint: options.endpoint,
+      persisted: false,
+      postTypeCode: context.postType.code,
+      promptDetailMode: "poster-spec",
+      autoCopySanitized: context.autoCopyStripped,
+      ...(options.deprecatedAlias ? { deprecatedEndpointAlias: true } : {}),
+      referenceRolePlan: {
+        hasPrimaryAnchor: Boolean(context.reusableTemplate || context.sourceOutput),
+        hasAmenityAnchorCandidate: context.inferredReferenceSelection.amenityAssetIds.length > 0,
+        hasProjectAnchorCandidate: (context.projectProfileVersion?.profile.actualProjectImageIds ?? []).length > 0,
+        secondaryReferenceCount: Math.max(
+          0,
+          context.referenceAssets.length - context.inferredReferenceSelection.amenityAssetIds.length
+        ),
+        includeBrandLogo: context.brief.includeBrandLogo,
+        includeReraQr: context.brief.includeReraQr
+      }
+    }
+  });
+}
 
 function selectReraQrAssetForProject(
   assets: BrandAssetRecord[],
@@ -375,126 +690,38 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       return reply.unauthorized();
     }
 
-    const brief = CreativeBriefSchema.parse(request.body);
-    const brand = await getBrand(brief.brandId);
-    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
+    request.log.warn({ endpoint: "/api/creative/compile" }, "deprecated creative compile alias invoked");
 
-    const [project, postType, reusableTemplateDetail, calendarItem, campaign, series, campaignPlan, sourceOutput, festival] = await Promise.all([
-      brief.projectId ? getProject(brief.projectId) : Promise.resolve(null),
-      brief.postTypeId ? getPostType(brief.postTypeId) : Promise.resolve(null),
-      brief.creativeTemplateId ? getCreativeTemplateDetail(brief.creativeTemplateId) : Promise.resolve(null),
-      brief.calendarItemId ? getCalendarItem(brief.calendarItemId) : Promise.resolve(null),
-      brief.campaignId ? getCampaign(brief.campaignId) : Promise.resolve(null),
-      brief.seriesId ? getSeries(brief.seriesId) : Promise.resolve(null),
-      brief.campaignPlanId ? getCampaignDeliverablePlan(brief.campaignPlanId) : Promise.resolve(null),
-      brief.sourceOutputId
-        ? supabaseAdmin
-            .from("creative_outputs")
-            .select("id, workspace_id, brand_id, storage_path")
-            .eq("id", brief.sourceOutputId)
-            .maybeSingle()
-            .then(({ data }) => data)
-        : Promise.resolve(null),
-      brief.festivalId ? getFestival(brief.festivalId) : Promise.resolve(null)
-    ]);
-
-    if (project && (project.workspaceId !== brand.workspaceId || project.brandId !== brand.id)) {
-      return reply.badRequest("Project does not belong to the selected brand/workspace");
+    const parsedBrief = CreativeCompileV2RequestSchema.parse(request.body);
+    const prepared = await prepareV2CompileContext({
+      parsedBrief,
+      viewer,
+      request,
+      allowedRoles: ["owner", "admin", "editor", "viewer"]
+    });
+    if (!prepared.ok) {
+      return reply.badRequest(prepared.message);
     }
 
-    if (postType && postType.workspaceId && postType.workspaceId !== brand.workspaceId) {
-      return reply.badRequest("Post type does not belong to the selected workspace");
-    }
-
-    const reusableTemplate = reusableTemplateDetail?.template ?? null;
-    const reusableTemplateAssets = reusableTemplateDetail?.assets ?? [];
-
-    if (reusableTemplate && (reusableTemplate.workspaceId !== brand.workspaceId || reusableTemplate.brandId !== brand.id)) {
-      return reply.badRequest("Template does not belong to the selected brand/workspace");
-    }
-
-    if (calendarItem && (calendarItem.workspaceId !== brand.workspaceId || calendarItem.brandId !== brand.id)) {
-      return reply.badRequest("Calendar item does not belong to the selected brand/workspace");
-    }
-
-    if (campaign && (campaign.workspaceId !== brand.workspaceId || campaign.brandId !== brand.id)) {
-      return reply.badRequest("Campaign does not belong to the selected brand/workspace");
-    }
-
-    if (series && (series.workspaceId !== brand.workspaceId || series.brandId !== brand.id)) {
-      return reply.badRequest("Series does not belong to the selected brand/workspace");
-    }
-
-    if (campaignPlan && !campaign) {
-      return reply.badRequest("A campaign is required when selecting a planned asset");
-    }
-
-    if (campaignPlan && campaign && campaignPlan.campaignId !== campaign.id) {
-      return reply.badRequest("Planned asset does not belong to the selected campaign");
-    }
-
-    if (sourceOutput && (sourceOutput.workspace_id !== brand.workspaceId || sourceOutput.brand_id !== brand.id)) {
-      return reply.badRequest("Source post does not belong to the selected brand/workspace");
-    }
-
-    if (festival && festival.workspaceId && festival.workspaceId !== brand.workspaceId) {
-      return reply.badRequest("Festival does not belong to the selected workspace");
-    }
-
-    if (postType?.code === "festive-greeting" && !festival) {
-      return reply.badRequest("Choose a festival before creating a festive greeting");
-    }
-
-    let deliverable;
-    try {
-      deliverable = await resolveOrCreateAdHocDeliverable({
-        brandId: brand.id,
-        deliverableId: brief.deliverableId ?? null,
-        campaignId: brief.campaignId ?? null,
-        campaignPlanId: brief.campaignPlanId ?? null,
-        seriesId: brief.seriesId ?? null,
-        sourceOutputId: brief.sourceOutputId ?? null,
-        projectId: project?.id ?? null,
-        postTypeId: postType?.id ?? null,
-        creativeTemplateId: reusableTemplate?.id ?? null,
-        calendarItemId: calendarItem?.id ?? null,
-        brief,
-        createdBy: viewer.userId
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to prepare a post task for creation";
-      if (
-        message.includes("Choose a post type") ||
-        message.includes("A post type is required")
-      ) {
-        return reply.badRequest(message);
-      }
-      throw error;
-    }
-
-    let payload;
+    const compileInput = buildPreparedV2CompileInput(prepared.context);
 
     try {
-      payload = await compileDeliverablePromptPackage({
-        deliverableId: deliverable.id,
-        viewerUserId: viewer.userId,
-        briefOverride: brief
+      const compiled = await compilePromptPackageV2(compileInput);
+      return buildPreviewV2PromptPackage(prepared.context, compiled, {
+        endpoint: "/api/creative/compile",
+        deprecatedAlias: true
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Creative compile failed";
-
-      if (isCompilerConnectionError(message)) {
-        return reply.code(503).send({
-          statusCode: 503,
-          error: "Service Unavailable",
-          message: "OpenAI compile service is unavailable right now"
-        });
-      }
-
-      throw error;
+      const message = error instanceof Error ? error.message : "Creative v2 compile failed";
+      request.log.error({ error }, "deprecated creative compile alias failed");
+      return reply.code(503).send({
+        statusCode: 503,
+        error: "Service Unavailable",
+        message: isCompilerConnectionError(message)
+          ? "OpenAI compile v2 service is unavailable right now"
+          : `Prompt compiler v2 failed: ${message}`
+      });
     }
-
-    return PromptPackageSchema.parse(payload);
   });
 
   app.post("/api/creative/compile-v2", { preHandler: app.authenticate }, async (request, reply) => {
@@ -504,198 +731,22 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     }
 
     const parsedBrief = CreativeCompileV2RequestSchema.parse(request.body);
-    const { brief, autoCopyStripped } = normalizeCreativeBriefForCompilation(parsedBrief);
-    const brand = await getBrand(brief.brandId);
-    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
-
-    const [project, postType, reusableTemplateDetail, calendarItem, campaign, series, campaignPlan, sourceOutput, festival] = await Promise.all([
-      brief.projectId ? getProject(brief.projectId) : Promise.resolve(null),
-      brief.postTypeId ? getPostType(brief.postTypeId) : Promise.resolve(null),
-      brief.creativeTemplateId ? getCreativeTemplateDetail(brief.creativeTemplateId) : Promise.resolve(null),
-      brief.calendarItemId ? getCalendarItem(brief.calendarItemId) : Promise.resolve(null),
-      brief.campaignId ? getCampaign(brief.campaignId) : Promise.resolve(null),
-      brief.seriesId ? getSeries(brief.seriesId) : Promise.resolve(null),
-      brief.campaignPlanId ? getCampaignDeliverablePlan(brief.campaignPlanId) : Promise.resolve(null),
-      brief.sourceOutputId
-        ? supabaseAdmin
-            .from("creative_outputs")
-            .select("id, workspace_id, brand_id, storage_path")
-            .eq("id", brief.sourceOutputId)
-            .maybeSingle()
-            .then(({ data }) => data)
-        : Promise.resolve(null),
-      brief.festivalId ? getFestival(brief.festivalId) : Promise.resolve(null)
-    ]);
-
-    const reusableTemplate = reusableTemplateDetail?.template ?? null;
-    const reusableTemplateAssets = reusableTemplateDetail?.assets ?? [];
-
-    if (project && (project.workspaceId !== brand.workspaceId || project.brandId !== brand.id)) {
-      return reply.badRequest("Project does not belong to the selected brand/workspace");
-    }
-
-    if (postType && postType.workspaceId && postType.workspaceId !== brand.workspaceId) {
-      return reply.badRequest("Post type does not belong to the selected workspace");
-    }
-
-    if (reusableTemplate && (reusableTemplate.workspaceId !== brand.workspaceId || reusableTemplate.brandId !== brand.id)) {
-      return reply.badRequest("Template does not belong to the selected brand/workspace");
-    }
-
-    if (calendarItem && (calendarItem.workspaceId !== brand.workspaceId || calendarItem.brandId !== brand.id)) {
-      return reply.badRequest("Calendar item does not belong to the selected brand/workspace");
-    }
-
-    if (campaign && (campaign.workspaceId !== brand.workspaceId || campaign.brandId !== brand.id)) {
-      return reply.badRequest("Campaign does not belong to the selected brand/workspace");
-    }
-
-    if (series && (series.workspaceId !== brand.workspaceId || series.brandId !== brand.id)) {
-      return reply.badRequest("Series does not belong to the selected brand/workspace");
-    }
-
-    if (campaignPlan && !campaign) {
-      return reply.badRequest("A campaign is required when selecting a planned asset");
-    }
-
-    if (campaignPlan && campaign && campaignPlan.campaignId !== campaign.id) {
-      return reply.badRequest("Planned asset does not belong to the selected campaign");
-    }
-
-    if (sourceOutput && (sourceOutput.workspace_id !== brand.workspaceId || sourceOutput.brand_id !== brand.id)) {
-      return reply.badRequest("Source post does not belong to the selected brand/workspace");
-    }
-
-    if (festival && festival.workspaceId && festival.workspaceId !== brand.workspaceId) {
-      return reply.badRequest("Festival does not belong to the selected workspace");
-    }
-
-    if (!postType) {
-      return reply.badRequest("Choose a post type before compiling v2 prompts");
-    }
-
-    if (postType.code === "festive-greeting" && !festival) {
-      return reply.badRequest("Choose a festival before creating a festive greeting");
-    }
-
-    const [brandProfileVersion, allAssets, reraRegistrations, projectProfileVersion] = await Promise.all([
-      getActiveBrandProfile(brand.id),
-      listBrandAssets(brand.id),
-      listProjectReraRegistrations(brand.workspaceId, brand.id),
-      project ? getActiveProjectProfile(project.id).catch(() => null) : Promise.resolve(null)
-    ]);
-
-    const isFestiveGreeting = postType.code === "festive-greeting" && Boolean(festival);
-    const projectActualImages = Array.isArray(projectProfileVersion?.profile.actualProjectImageIds)
-      ? projectProfileVersion?.profile.actualProjectImageIds
-      : [];
-    const projectSampleImages = Array.isArray(projectProfileVersion?.profile.sampleFlatImageIds)
-      ? projectProfileVersion?.profile.sampleFlatImageIds
-      : [];
-    const brandReferenceImages = Array.isArray(brandProfileVersion.profile.referenceAssetIds)
-      ? brandProfileVersion.profile.referenceAssetIds
-      : [];
-    const postTypeGuidance = buildPostTypePromptGuidance({
-      brandName: brand.name,
-      brief,
-      postType: {
-        code: postType.code,
-        name: postType.name,
-        config: postType.config
-      },
-      projectName: project?.name ?? null,
-      projectProfile: projectProfileVersion?.profile ?? null,
-      brandAssets: allAssets,
-      projectId: project?.id ?? null
+    const prepared = await prepareV2CompileContext({
+      parsedBrief,
+      viewer,
+      request,
+      allowedRoles: ["owner", "admin", "editor", "viewer"]
     });
-    const inferredReferenceSelection = buildInferredReferenceSelection({
-      postTypeCode: postType.code,
-      isFestiveGreeting,
-      explicitReferenceAssetIds: brief.referenceAssetIds,
-      projectImageAssetIds: projectActualImages,
-      sampleFlatImageIds: projectSampleImages,
-      brandReferenceAssetIds: brandReferenceImages,
-      allAssets,
-      projectId: project?.id ?? null,
-      focusAmenity: postTypeGuidance.manifest.amenityFocus ?? null,
-    });
-    const inferredReferenceAssetIds = inferredReferenceSelection.referenceAssetIds;
-    const referenceAssets = sortAssetsByIdOrder(
-      allAssets.filter((asset) => inferredReferenceAssetIds.includes(asset.id)),
-      inferredReferenceAssetIds
-    );
-    const explicitLogoAsset =
-      brief.logoAssetId
-        ? allAssets.find((asset) => asset.id === brief.logoAssetId && asset.kind === "logo") ?? null
-        : null;
-    const selectedBrandLogoAsset = brief.includeBrandLogo
-      ? explicitLogoAsset
-      : null;
-    const selectedReraQrAsset = brief.includeReraQr
-      ? selectReraQrAssetForProject(allAssets, project?.id ?? null, null, reraRegistrations)
-      : null;
-    const requestedVariationCount = brief.variationCount ?? env.CREATIVE_STYLE_VARIATION_COUNT;
-    const sourceBriefSnapshot = {
-      ...brief,
-      variationCount: requestedVariationCount
-    };
+    if (!prepared.ok) {
+      return reply.badRequest(prepared.message);
+    }
 
-    let compiled;
+    const compileInput = buildPreparedV2CompileInput(prepared.context);
+
     try {
-      compiled = await compilePromptPackageV2({
-        workspaceId: brand.workspaceId,
-        brandName: brand.name,
-        brandProfile: brandProfileVersion.profile,
-        brandAssets: allAssets,
-        projectId: project?.id ?? null,
-        projectName: project?.name ?? null,
-        projectStage: project?.stage ?? null,
-        projectProfile: projectProfileVersion?.profile ?? null,
-        festival,
-        postType: {
-          code: postType.code,
-          name: postType.name,
-          config: postType.config
-        },
-        template: reusableTemplate
-          ? {
-              id: reusableTemplate.id,
-              name: reusableTemplate.name,
-              channel: reusableTemplate.channel,
-              format: reusableTemplate.format,
-              basePrompt: reusableTemplate.basePrompt,
-              config: reusableTemplate.config,
-              linkedAssets: reusableTemplateAssets.map((asset) => ({
-                assetId: asset.assetId,
-                role: asset.role
-              }))
-            }
-          : null,
-        templateAssets: reusableTemplateAssets.map((asset) => ({
-          assetId: asset.assetId,
-          role: asset.role
-        })),
-        calendarItem: calendarItem
-          ? {
-              title: calendarItem.title,
-              objective: calendarItem.objective,
-              scheduledFor: calendarItem.scheduledFor,
-              status: calendarItem.status
-            }
-          : null,
-        series: series
-          ? {
-              id: series.id,
-              name: series.name,
-              description: series.description,
-              contentFormat: series.contentFormat,
-              sourceBriefJson: series.sourceBriefJson
-            }
-          : null,
-        deliverableSnapshot: null,
-        brief: sourceBriefSnapshot,
-        referenceLabels: referenceAssets.map((asset) => asset.label),
-        variationCount: requestedVariationCount
+      const compiled = await compilePromptPackageV2(compileInput);
+      return buildPreviewV2PromptPackage(prepared.context, compiled, {
+        endpoint: "/api/creative/compile-v2"
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Creative v2 compile failed";
@@ -708,66 +759,6 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           : `Prompt compiler v2 failed: ${message}`
       });
     }
-
-    const now = Date.now();
-    const promptPackage = {
-      id: randomId(),
-      workspaceId: brand.workspaceId,
-      brandId: brand.id,
-      deliverableId: null,
-      projectId: project?.id ?? null,
-      postTypeId: postType.id,
-      postType: {
-        code: postType.code,
-        name: postType.name,
-        config: postType.config
-      },
-      creativeTemplateId: reusableTemplate?.id ?? null,
-      calendarItemId: calendarItem?.id ?? null,
-      creativeRequestId: randomId(),
-      brandProfileVersionId: brandProfileVersion.id,
-      promptSummary: compiled.promptSummary,
-      finalPrompt: compiled.finalPrompt,
-      aspectRatio: compiled.aspectRatio,
-      chosenModel: compiled.chosenModel,
-      templateType: compiled.templateType,
-      referenceStrategy: compiled.referenceStrategy,
-      referenceAssetIds: inferredReferenceAssetIds,
-      variations: compiled.variations ?? [],
-      resolvedConstraints: {
-        ...compiled.resolvedConstraints,
-        projectImageAssetIds: projectProfileVersion?.profile.actualProjectImageIds ?? [],
-        sampleFlatImageIds: projectProfileVersion?.profile.sampleFlatImageIds ?? [],
-        amenityImageAssetIds: inferredReferenceSelection.amenityAssetIds,
-        includeBrandLogo: brief.includeBrandLogo,
-        includeReraQr: brief.includeReraQr,
-        brandLogoAssetId: selectedBrandLogoAsset?.id ?? null,
-        brandLogoLabel: selectedBrandLogoAsset?.label ?? null,
-        reraQrAssetId: selectedReraQrAsset?.id ?? null,
-        reraQrLabel: selectedReraQrAsset?.label ?? null
-      },
-      compilerTrace: {
-        ...compiled.compilerTrace,
-        sourceBrief: sourceBriefSnapshot,
-        preview: true,
-        previewId: `preview_v2_${now}`,
-        endpoint: "/api/creative/compile-v2",
-        persisted: false,
-        postTypeCode: postType.code,
-        promptDetailMode: "poster-spec",
-        autoCopySanitized: autoCopyStripped,
-        referenceRolePlan: {
-          hasPrimaryAnchor: Boolean(reusableTemplate || sourceOutput),
-          hasAmenityAnchorCandidate: inferredReferenceSelection.amenityAssetIds.length > 0,
-          hasProjectAnchorCandidate: projectActualImages.length > 0,
-          secondaryReferenceCount: Math.max(0, referenceAssets.length - inferredReferenceSelection.amenityAssetIds.length),
-          includeBrandLogo: brief.includeBrandLogo,
-          includeReraQr: brief.includeReraQr
-        }
-      }
-    };
-
-    return PromptPackageSchema.parse(promptPackage);
   });
 
   app.post("/api/creative/compile-v2-async", { preHandler: app.authenticate }, async (request, reply) => {
@@ -777,195 +768,26 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     }
 
     const parsedBrief = CreativeCompileV2RequestSchema.parse(request.body);
-    const { brief, autoCopyStripped } = normalizeCreativeBriefForCompilation(parsedBrief);
-    const brand = await getBrand(brief.brandId);
-    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
-
-    const [project, postType, reusableTemplateDetail, calendarItem, campaign, series, campaignPlan, sourceOutput, festival] = await Promise.all([
-      brief.projectId ? getProject(brief.projectId) : Promise.resolve(null),
-      brief.postTypeId ? getPostType(brief.postTypeId) : Promise.resolve(null),
-      brief.creativeTemplateId ? getCreativeTemplateDetail(brief.creativeTemplateId) : Promise.resolve(null),
-      brief.calendarItemId ? getCalendarItem(brief.calendarItemId) : Promise.resolve(null),
-      brief.campaignId ? getCampaign(brief.campaignId) : Promise.resolve(null),
-      brief.seriesId ? getSeries(brief.seriesId) : Promise.resolve(null),
-      brief.campaignPlanId ? getCampaignDeliverablePlan(brief.campaignPlanId) : Promise.resolve(null),
-      brief.sourceOutputId
-        ? supabaseAdmin
-            .from("creative_outputs")
-            .select("id, workspace_id, brand_id, storage_path")
-            .eq("id", brief.sourceOutputId)
-            .maybeSingle()
-            .then(({ data }) => data)
-        : Promise.resolve(null),
-      brief.festivalId ? getFestival(brief.festivalId) : Promise.resolve(null)
-    ]);
-
-    if (project && (project.workspaceId !== brand.workspaceId || project.brandId !== brand.id)) {
-      return reply.badRequest("Project does not belong to the selected brand/workspace");
-    }
-
-    if (postType && postType.workspaceId && postType.workspaceId !== brand.workspaceId) {
-      return reply.badRequest("Post type does not belong to the selected workspace");
-    }
-
-    if (reusableTemplateDetail?.template && (
-      reusableTemplateDetail.template.workspaceId !== brand.workspaceId ||
-      reusableTemplateDetail.template.brandId !== brand.id
-    )) {
-      return reply.badRequest("Template does not belong to the selected brand/workspace");
-    }
-
-    if (calendarItem && (calendarItem.workspaceId !== brand.workspaceId || calendarItem.brandId !== brand.id)) {
-      return reply.badRequest("Calendar item does not belong to the selected brand/workspace");
-    }
-
-    if (campaign && (campaign.workspaceId !== brand.workspaceId || campaign.brandId !== brand.id)) {
-      return reply.badRequest("Campaign does not belong to the selected brand/workspace");
-    }
-
-    if (series && (series.workspaceId !== brand.workspaceId || series.brandId !== brand.id)) {
-      return reply.badRequest("Series does not belong to the selected brand/workspace");
-    }
-
-    if (campaignPlan && !campaign) {
-      return reply.badRequest("A campaign is required when selecting a planned asset");
-    }
-
-    if (campaignPlan && campaign && campaignPlan.campaignId !== campaign.id) {
-      return reply.badRequest("Planned asset does not belong to the selected campaign");
-    }
-
-    if (sourceOutput && (sourceOutput.workspace_id !== brand.workspaceId || sourceOutput.brand_id !== brand.id)) {
-      return reply.badRequest("Source post does not belong to the selected brand/workspace");
-    }
-
-    if (festival && festival.workspaceId && festival.workspaceId !== brand.workspaceId) {
-      return reply.badRequest("Festival does not belong to the selected workspace");
-    }
-
-    if (!postType) {
-      return reply.badRequest("Choose a post type before compiling v2 prompts");
-    }
-
-    if (postType.code === "festive-greeting" && !festival) {
-      return reply.badRequest("Choose a festival before creating a festive greeting");
-    }
-
-    const [brandProfileVersion, allAssets, projectProfileVersion] = await Promise.all([
-      getActiveBrandProfile(brand.id),
-      listBrandAssets(brand.id),
-      project ? getActiveProjectProfile(project.id).catch(() => null) : Promise.resolve(null)
-    ]);
-
-    const isFestiveGreeting = postType.code === "festive-greeting" && Boolean(festival);
-    const projectActualImages = Array.isArray(projectProfileVersion?.profile.actualProjectImageIds)
-      ? projectProfileVersion?.profile.actualProjectImageIds
-      : [];
-    const projectSampleImages = Array.isArray(projectProfileVersion?.profile.sampleFlatImageIds)
-      ? projectProfileVersion?.profile.sampleFlatImageIds
-      : [];
-    const brandReferenceImages = Array.isArray(brandProfileVersion.profile.referenceAssetIds)
-      ? brandProfileVersion.profile.referenceAssetIds
-      : [];
-    const postTypeGuidance = buildPostTypePromptGuidance({
-      brandName: brand.name,
-      brief,
-      postType: {
-        code: postType.code,
-        name: postType.name,
-        config: postType.config
-      },
-      projectName: project?.name ?? null,
-      projectProfile: projectProfileVersion?.profile ?? null,
-      brandAssets: allAssets,
-      projectId: project?.id ?? null
+    const prepared = await prepareV2CompileContext({
+      parsedBrief,
+      viewer,
+      request,
+      allowedRoles: ["owner", "admin", "editor"]
     });
-    const inferredReferenceSelection = buildInferredReferenceSelection({
-      postTypeCode: postType.code,
-      isFestiveGreeting,
-      explicitReferenceAssetIds: brief.referenceAssetIds,
-      projectImageAssetIds: projectActualImages,
-      sampleFlatImageIds: projectSampleImages,
-      brandReferenceAssetIds: brandReferenceImages,
-      allAssets,
-      projectId: project?.id ?? null,
-      focusAmenity: postTypeGuidance.manifest.amenityFocus ?? null,
-    });
+    if (!prepared.ok) {
+      return reply.badRequest(prepared.message);
+    }
 
-    const reusableTemplate = reusableTemplateDetail?.template ?? null;
-    const reusableTemplateAssets = reusableTemplateDetail?.assets ?? [];
-    const requestedVariationCount = brief.variationCount ?? env.CREATIVE_STYLE_VARIATION_COUNT;
-    const sourceBrief = {
-      ...brief,
-      variationCount: requestedVariationCount
-    };
-    const compileInput = {
-      workspaceId: brand.workspaceId,
-      brandName: brand.name,
-      brandProfile: brandProfileVersion.profile,
-      brandAssets: allAssets,
-      projectId: project?.id ?? null,
-      projectName: project?.name ?? null,
-      projectStage: project?.stage ?? null,
-      projectProfile: projectProfileVersion?.profile ?? null,
-      festival,
-      postType: {
-        code: postType.code,
-        name: postType.name,
-        config: postType.config
-      },
-      template: reusableTemplate
-        ? {
-            id: reusableTemplate.id,
-            name: reusableTemplate.name,
-            channel: reusableTemplate.channel,
-            format: reusableTemplate.format,
-            basePrompt: reusableTemplate.basePrompt,
-            config: reusableTemplate.config,
-            linkedAssets: reusableTemplateAssets.map((asset) => ({
-              assetId: asset.assetId,
-              role: asset.role
-            }))
-          }
-        : null,
-      templateAssets: reusableTemplateAssets.map((asset) => ({
-        assetId: asset.assetId,
-        role: asset.role
-      })),
-      calendarItem: calendarItem
-        ? {
-            title: calendarItem.title,
-            objective: calendarItem.objective,
-            scheduledFor: calendarItem.scheduledFor,
-            status: calendarItem.status
-          }
-        : null,
-      series: series
-        ? {
-            id: series.id,
-            name: series.name,
-            description: series.description,
-            contentFormat: series.contentFormat,
-            sourceBriefJson: series.sourceBriefJson
-          }
-        : null,
-      deliverableSnapshot: null,
-      brief: sourceBrief,
-      referenceLabels: sortAssetsByIdOrder(
-        allAssets.filter((asset) => inferredReferenceSelection.referenceAssetIds.includes(asset.id)),
-        inferredReferenceSelection.referenceAssetIds
-      ).map((asset) => asset.label),
-      variationCount: requestedVariationCount
-    } as const;
+    const compileInput = buildPreparedV2CompileInput(prepared.context);
     const preparedPayload = {
-      sourceBrief,
+      sourceBrief: prepared.context.sourceBriefSnapshot,
       payload: buildCanonicalV2AgentPayload(compileInput),
       meta: {
-        autoCopyStripped,
-        brandProfileVersionId: brandProfileVersion.id,
-        postTypeCode: postType.code,
-        referenceAssetIds: inferredReferenceSelection.referenceAssetIds,
-        amenityAssetIds: inferredReferenceSelection.amenityAssetIds
+        autoCopyStripped: prepared.context.autoCopyStripped,
+        brandProfileVersionId: prepared.context.brandProfileVersion.id,
+        postTypeCode: prepared.context.postType.code,
+        referenceAssetIds: prepared.context.inferredReferenceSelection.referenceAssetIds,
+        amenityAssetIds: prepared.context.inferredReferenceSelection.amenityAssetIds
       }
     };
 
@@ -973,8 +795,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const { data: compileJob, error: jobError } = await supabaseAdmin
       .from("compile_jobs")
       .insert({
-        workspace_id: brand.workspaceId,
-        brand_id: brand.id,
+        workspace_id: prepared.context.brand.workspaceId,
+        brand_id: prepared.context.brand.id,
         status: "pending",
         input_brief: preparedPayload,
         session_token: sessionToken
@@ -1478,11 +1300,11 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
     const jobs: Array<{ id: string; variationId: string; variationTitle: string; requestId: string | null }> = [];
 
-    if (optionProvider === "openrouter") {
+    if (isImmediateImageProvider(optionProvider)) {
       for (const { jobId, variationId, variationTitle, optionPromptWithRoles, optionJob } of preparedOptionJobs) {
         let requestInfo: { request_id: string } | null = null;
 
-        requestInfo = { request_id: `openrouter-v2-option-${jobId}` };
+        requestInfo = { request_id: `${optionProvider}-v2-option-${jobId}` };
 
         const { error: optionJobUpdateError } = await supabaseAdmin
           .from("creative_jobs")
@@ -1856,8 +1678,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
     let requestInfo: { request_id: string } | null = null;
 
-    if (seedProvider === "openrouter") {
-      requestInfo = { request_id: `openrouter-style-seed-${jobId}` };
+    if (isImmediateImageProvider(seedProvider)) {
+      requestInfo = { request_id: `${seedProvider}-style-seed-${jobId}` };
 
       const { error: styleJobUpdateError } = await supabaseAdmin
         .from("creative_jobs")
@@ -2173,8 +1995,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
     let requestInfo: { request_id: string } | null = null;
 
-    if (finalProvider === "openrouter") {
-      requestInfo = { request_id: `openrouter-final-${jobId}` };
+    if (isImmediateImageProvider(finalProvider)) {
+      requestInfo = { request_id: `${finalProvider}-final-${jobId}` };
 
       const { error: finalJobUpdateError } = await supabaseAdmin
         .from("creative_jobs")
@@ -3218,6 +3040,14 @@ async function runImmediateProviderJob({
       jobId: job.id
     });
   } catch (error) {
+    console.error("[runImmediateProviderJob] failed", {
+      jobId: job.id,
+      provider: job.provider,
+      providerRequestId: job.providerRequestId,
+      mode,
+      postTypeCode,
+      message: error instanceof Error ? error.message : String(error)
+    });
     await failJobSubmission(job.id, error, job.creditReservationId ?? null);
   }
 }

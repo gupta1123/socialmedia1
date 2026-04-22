@@ -180,31 +180,8 @@ type Input = CreativeDirectorInput & {
 };
 
 export async function compilePromptPackage(input: Input) {
-  const normalizedInput = normalizeCreativeDirectorInput(input);
-  const mode = resolveCompilerMode();
-
-  if (mode === "mock") {
-    return compilePromptPackageMock(normalizedInput);
-  }
-
-  try {
-    return await runAgnoCreativeDirector(normalizedInput);
-  } catch (error) {
-    if (!isTransientAgnoError(error) && env.CREATIVE_DIRECTOR_MODE === "agno") {
-      throw error;
-    }
-
-    if (isTransientAgnoError(error)) {
-      resetWorkerState();
-      console.warn(
-        `Creative Director Agno compiler timed out or hit a transient connection issue. Falling back to mock compiler. ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
-
-    return buildMockFallbackResult(normalizedInput, error);
-  }
+  console.warn("[compilePromptPackage] deprecated V1 compile path invoked; delegating to compilePromptPackageV2");
+  return compilePromptPackageV2(input);
 }
 
 export async function compilePromptPackageV2(input: Input) {
@@ -542,14 +519,26 @@ async function runAgnoCreativeDirectorV2Server(input: Input) {
   const controller = new AbortController();
   const timeoutSeconds = env.AGNO_AGENT_V2_SERVER_TIMEOUT_SEC;
   const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+  const startedAt = Date.now();
   timeout.unref?.();
 
   try {
+    console.log("[runAgnoCreativeDirectorV2Server] requesting", {
+      transport: env.CREATIVE_DIRECTOR_V2_TRANSPORT,
+      url: env.AGNO_AGENT_V2_SERVER_URL,
+      timeoutSeconds
+    });
     const response = await fetch(env.AGNO_AGENT_V2_SERVER_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ payload }),
       signal: controller.signal
+    });
+    console.log("[runAgnoCreativeDirectorV2Server] response", {
+      url: env.AGNO_AGENT_V2_SERVER_URL,
+      status: response.status,
+      ok: response.ok,
+      durationMs: Date.now() - startedAt
     });
     const raw = await response.text();
 
@@ -575,12 +564,22 @@ async function runAgnoCreativeDirectorV2Server(input: Input) {
     return normalizeV2AgnoResult((parsed as { result: CompilerResult }).result, input);
   } catch (error) {
     if (isAbortError(error)) {
+      console.error("[runAgnoCreativeDirectorV2Server] timeout", {
+        url: env.AGNO_AGENT_V2_SERVER_URL,
+        timeoutSeconds,
+        durationMs: Date.now() - startedAt
+      });
       throw new Error(
         `Agno v2 server timed out after ${timeoutSeconds}s at ${env.AGNO_AGENT_V2_SERVER_URL}. ` +
           "Increase AGNO_AGENT_V2_SERVER_TIMEOUT_SEC or check the prompt-lab/OpenAI run latency."
       );
     }
 
+    console.error("[runAgnoCreativeDirectorV2Server] failed", {
+      url: env.AGNO_AGENT_V2_SERVER_URL,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error)
+    });
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -1227,6 +1226,8 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
         ? raw.chosenModel
         : env.IMAGE_GENERATION_PROVIDER === "openrouter"
           ? env.OPENROUTER_FINAL_MODEL
+          : env.IMAGE_GENERATION_PROVIDER === "openai"
+            ? env.OPENAI_FINAL_MODEL
           : env.FAL_FINAL_MODEL,
     referenceStrategy,
     templateType,
@@ -1358,6 +1359,8 @@ function normalizeAgnoResult(raw: CompilerResult, input: Input): CompilerResult 
         ? raw.chosenModel
         : env.IMAGE_GENERATION_PROVIDER === "openrouter"
           ? env.OPENROUTER_FINAL_MODEL
+          : env.IMAGE_GENERATION_PROVIDER === "openai"
+            ? env.OPENAI_FINAL_MODEL
           : env.FAL_FINAL_MODEL,
     referenceStrategy,
     templateType,
@@ -1824,6 +1827,10 @@ function buildV2GenerationContract(input: Input) {
   const chosenModel =
     env.IMAGE_GENERATION_PROVIDER === "openrouter"
       ? env.OPENROUTER_FINAL_MODEL
+      : env.IMAGE_GENERATION_PROVIDER === "openai"
+        ? hasReferences
+          ? env.OPENAI_FINAL_MODEL
+          : env.OPENAI_STYLE_SEED_MODEL
       : hasReferences
         ? env.FAL_FINAL_MODEL
         : env.FAL_STYLE_SEED_MODEL;

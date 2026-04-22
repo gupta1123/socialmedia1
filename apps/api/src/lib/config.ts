@@ -81,7 +81,6 @@ const EnvSchema = z.object({
   CREATIVE_DIRECTOR_MODE: z.enum(["auto", "mock", "agno"]).default("auto"),
   CREATIVE_DIRECTOR_V2_MODE: z.enum(["auto", "mock", "agno"]).default("auto"),
   CREATIVE_DIRECTOR_V2_TRANSPORT: z.enum(["server", "worker"]).default("server"),
-  CREATIVE_STYLE_FLOW_VERSION: z.enum(["v1", "v2"]).default("v2"),
   CREATIVE_STYLE_VARIATION_COUNT: z.coerce.number().int().min(1).max(6).default(3),
   CREDITS_STYLE_SEED_PER_IMAGE: z.coerce.number().int().min(0).default(1),
   CREDITS_FINAL_PER_IMAGE: z.coerce.number().int().min(0).default(1),

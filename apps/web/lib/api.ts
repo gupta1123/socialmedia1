@@ -95,7 +95,7 @@ import type {
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const rawStyleVariationCount = Number(process.env.NEXT_PUBLIC_STYLE_VARIATION_COUNT ?? "3");
 
-export type CreativeFlowVersion = "v1" | "v2";
+export type CreativeFlowVersion = "v2";
 export type BootstrapMode = "full" | "light" | "create";
 export const creativeFlowVersion: CreativeFlowVersion = "v2";
 export const styleVariationLimit = 3;
@@ -1403,7 +1403,7 @@ export function deleteBrandAsset(token: string, brandId: string, assetId: string
 }
 
 export function compileCreative(token: string, payload: CreativeBrief) {
-  return request<PromptPackage>("/api/creative/compile", token, {
+  return request<PromptPackage>("/api/creative/compile-v2", token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)

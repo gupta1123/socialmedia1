@@ -16,7 +16,6 @@ import type {
 import {
   type BootstrapMode,
   bootstrapSession,
-  compileCreative,
   compileCreativeV2,
   compileCreativeV2Async,
   createBrand,
@@ -24,7 +23,6 @@ import {
   defaultStyleVariationCount,
   generateFinals,
   generateOptions,
-  generateStyleSeeds,
   getCompileV2AsyncStatus,
   styleVariationLimit,
   getCreativeJob,
@@ -139,7 +137,7 @@ type StudioContextValue = {
   pendingTargetKey: string | null;
   isPending: boolean;
   hasRunningJobs: boolean;
-  creativeFlowVersion: "v1" | "v2";
+  creativeFlowVersion: "v2";
   styleVariationCount: number;
   styleVariationLimit: number;
   brandForm: BrandFormState;
@@ -718,7 +716,7 @@ export function StudioProvider({
         referenceAssetIds: briefForm.selectedReferenceAssetIds
       };
 
-      const useAsyncV2 = creativeFlowVersion === "v2" && (options?.useAsync ?? process.env.NEXT_PUBLIC_USE_ASYNC_COMPILE === "true");
+      const useAsyncV2 = options?.useAsync ?? process.env.NEXT_PUBLIC_USE_ASYNC_COMPILE === "true";
 
       if (useAsyncV2) {
         // Use async endpoint with polling to avoid Heroku 30s timeout
@@ -747,13 +745,10 @@ export function StudioProvider({
         throw new Error("Compile timed out");
       }
 
-      const payload =
-        creativeFlowVersion === "v2"
-          ? await compileCreativeV2(sessionToken, {
-              ...basePayload,
-              variationCount: styleVariationCount
-            })
-          : await compileCreative(sessionToken, basePayload);
+      const payload = await compileCreativeV2(sessionToken, {
+        ...basePayload,
+        variationCount: styleVariationCount
+      });
       setPromptPackage(payload);
       if (!options?.silentSuccess) {
         setMessage("Prompt package compiled.");
@@ -788,7 +783,7 @@ export function StudioProvider({
           : promptPackage?.id === promptPackageId
             ? promptPackage
             : null;
-      if (creativeFlowVersion === "v2" && activePromptPackage) {
+      if (activePromptPackage) {
         await generateOptions(sessionToken, {
           promptPackage: activePromptPackage,
           variationCount: styleVariationCount
@@ -805,17 +800,8 @@ export function StudioProvider({
               }
             : current
         );
-      } else {
-        await generateStyleSeeds(sessionToken, {
-          promptPackageId,
-          count: Math.min(styleVariationCount, 4)
-        });
       }
-      setMessage(
-        creativeFlowVersion === "v2"
-          ? "Generating post options. Results will appear here automatically."
-          : "Generating style directions. Results will appear here automatically."
-      );
+      setMessage("Generating post options. Results will appear here automatically.");
 
       return true;
     } catch (error) {
