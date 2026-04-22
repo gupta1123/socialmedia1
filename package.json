@@ -9,8 +9,8 @@
   "scripts": {
     "dev:web": "node scripts/ops/run-pnpm.mjs --filter @image-lab/web dev",
     "dev:api": "node scripts/ops/run-pnpm.mjs --filter @image-lab/api dev",
-    "dev:socialpython": "python3 services/socialpython/server.py",
-    "dev:prompt-lab": "python3 services/socialpython/server.py",
+    "dev:socialpython": "node scripts/ops/run-socialpython.mjs",
+    "dev:prompt-lab": "node scripts/ops/run-socialpython.mjs",
     "build": "node scripts/ops/run-pnpm.mjs --filter @image-lab/contracts build && node scripts/ops/run-pnpm.mjs --filter @image-lab/api build && node scripts/ops/run-pnpm.mjs --filter @image-lab/web build",
     "check:runtime-ownership": "node scripts/ops/check-runtime-ownership.mjs",
     "test": "node scripts/ops/run-pnpm.mjs --filter @image-lab/api test && node scripts/ops/run-pnpm.mjs --filter @image-lab/web test",

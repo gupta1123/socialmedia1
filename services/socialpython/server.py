@@ -25,6 +25,12 @@ IMAGE_EDIT_SKILLS_DIR = APP_ROOT / "skills" / "image-edit" / "v1"
 PROMPT_LAB_LOGO_ASSET_ID = "00000000-0000-0000-0000-000000000001"
 PROMPT_LAB_RERA_QR_ASSET_ID = "00000000-0000-0000-0000-000000000002"
 
+if sys.version_info < (3, 10):
+    raise SystemExit(
+        "services/socialpython requires Python 3.10+. "
+        "Use python3.11 or run `npm run dev:socialpython` so the repo can pick a compatible interpreter."
+    )
+
 
 def ensure_lab_venv() -> None:
     if os.getenv("AGNO_PROMPT_LAB_SKIP_REEXEC") == "1":
@@ -63,6 +69,19 @@ def load_env_file(path: Path) -> None:
             os.environ[key] = value
 
 
+def absolutize_env_path(key: str) -> None:
+    value = os.getenv(key, "").strip()
+    if not value:
+        return
+
+    candidate = Path(value)
+    if candidate.is_absolute():
+        os.environ[key] = str(candidate)
+        return
+
+    os.environ[key] = str((APP_ROOT / candidate).resolve())
+
+
 def prime_environment() -> None:
     load_env_file(APP_ROOT / ".env")
     os.environ.setdefault("CREATIVE_DIRECTOR_MODE", "agno")
@@ -71,6 +90,11 @@ def prime_environment() -> None:
     os.environ.setdefault("AGNO_AGENT_V2_SCRIPT", "./agents/creative_director_notebook.py")
     os.environ.setdefault("AGNO_AGENT_V2_SKILLS_DIR", str(PROMPT_SKILLS_DIR))
     os.environ.setdefault("AI_EDIT_DIRECTOR_SKILLS_DIR", str(IMAGE_EDIT_SKILLS_DIR))
+    os.environ.setdefault("AI_EDIT_PROMPT_LAB_AGENT_SCRIPT", "./agents/ai_edit_director.py")
+    absolutize_env_path("AGNO_AGENT_V2_SCRIPT")
+    absolutize_env_path("AGNO_AGENT_V2_SKILLS_DIR")
+    absolutize_env_path("AI_EDIT_DIRECTOR_SKILLS_DIR")
+    absolutize_env_path("AI_EDIT_PROMPT_LAB_AGENT_SCRIPT")
 
 
 def load_creative_director_module():
