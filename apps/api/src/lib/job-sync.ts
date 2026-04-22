@@ -378,7 +378,7 @@ export async function getSignedPreview(storagePath: string, thumbnailStoragePath
 }
 
 function resolveFalEndpoint(jobType: "style_seed" | "final", providerModel: string) {
-  if (providerModel.startsWith("fal-ai/")) {
+  if (providerModel.includes("/")) {
     return providerModel;
   }
 

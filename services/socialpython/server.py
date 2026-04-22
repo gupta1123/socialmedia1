@@ -484,6 +484,8 @@ def derive_aspect_ratio(fmt: str | None) -> str:
 def choose_image_model(has_references: bool) -> str:
     if os.getenv("IMAGE_GENERATION_PROVIDER") == "openrouter":
         return os.getenv("OPENROUTER_FINAL_MODEL", "google/gemini-2.5-flash-image")
+    if os.getenv("IMAGE_GENERATION_PROVIDER") == "openai":
+        return os.getenv("OPENAI_FINAL_MODEL", "gpt-image-2")
     if has_references:
         return os.getenv("FAL_FINAL_MODEL", "fal-ai/nano-banana/edit")
     return os.getenv("FAL_STYLE_SEED_MODEL", "fal-ai/nano-banana")

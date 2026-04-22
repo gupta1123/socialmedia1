@@ -79,6 +79,65 @@ fal.config({
   credentials: env.FAL_KEY
 });
 
+type FalImageSizePreset =
+  | "square_hd"
+  | "square"
+  | "portrait_4_3"
+  | "portrait_16_9"
+  | "landscape_4_3"
+  | "landscape_16_9"
+  | "auto";
+
+type FalImageSize = FalImageSizePreset | { width: number; height: number };
+
+function isGptImage2Model(model: string) {
+  return model.includes("gpt-image-2");
+}
+
+function resolveGptImage2Size(aspectRatio: string): FalImageSize {
+  switch (aspectRatio) {
+    case "16:9":
+      return "landscape_16_9";
+    case "9:16":
+      return { width: 1024, height: 1824 };
+    case "4:5":
+      return { width: 1088, height: 1360 };
+    case "3:2":
+      return { width: 1536, height: 1024 };
+    case "1:1":
+    default:
+      return "square_hd";
+  }
+}
+
+function buildFalGenerationInput(input: {
+  model: string;
+  prompt: string;
+  aspectRatio: string;
+  numImages: number;
+  referenceUrls?: string[];
+}) {
+  const referenceUrls = input.referenceUrls ?? [];
+
+  if (isGptImage2Model(input.model)) {
+    return {
+      prompt: input.prompt,
+      num_images: input.numImages,
+      image_size: resolveGptImage2Size(input.aspectRatio),
+      quality: "high" as const,
+      output_format: "png" as const,
+      ...(referenceUrls.length > 0 ? { image_urls: referenceUrls } : {})
+    };
+  }
+
+  return {
+    prompt: input.prompt,
+    aspect_ratio: input.aspectRatio,
+    num_images: input.numImages,
+    ...(referenceUrls.length > 0 ? { image_urls: referenceUrls } : {})
+  };
+}
+
 export async function submitStyleSeedGeneration(
   job: CreativeJobRecord,
   promptPackage: Pick<PromptPackage, "finalPrompt" | "aspectRatio"> | { prompt: string; aspectRatio: string },
@@ -89,31 +148,22 @@ export async function submitStyleSeedGeneration(
     return { request_id: `mock-style-seed-${job.id}` };
   }
 
-  const options: {
-    input: {
-      prompt: string;
-      aspect_ratio: string;
-      num_images: number;
-      image_urls?: string[];
-    };
-    webhookUrl?: string;
-  } = {
-    input: {
+  const model = referenceUrls.length > 0 ? env.FAL_FINAL_MODEL : env.FAL_STYLE_SEED_MODEL;
+  const options: { input: Record<string, unknown>; webhookUrl?: string } = {
+    input: buildFalGenerationInput({
+      model,
       prompt: "prompt" in promptPackage ? promptPackage.prompt : promptPackage.finalPrompt,
-      aspect_ratio: promptPackage.aspectRatio,
-      num_images: job.requestedCount
-    }
+      aspectRatio: promptPackage.aspectRatio,
+      numImages: job.requestedCount,
+      referenceUrls
+    })
   };
-
-  if (referenceUrls.length > 0) {
-    options.input.image_urls = referenceUrls;
-  }
 
   if (env.FAL_WEBHOOK_URL) {
     options.webhookUrl = `${env.FAL_WEBHOOK_URL}?jobId=${job.id}`;
   }
 
-  return fal.queue.submit(referenceUrls.length > 0 ? env.FAL_FINAL_MODEL : env.FAL_STYLE_SEED_MODEL, options);
+  return fal.queue.submit(model, options);
 }
 
 export async function submitFinalGeneration(
@@ -126,28 +176,21 @@ export async function submitFinalGeneration(
     return { request_id: `mock-final-${job.id}` };
   }
 
-  const options: {
-    input: {
-      prompt: string;
-      image_urls: string[];
-      num_images: number;
-      aspect_ratio: string;
-    };
-    webhookUrl?: string;
-  } = {
-    input: {
+  const model = referenceUrls.length > 0 ? env.FAL_FINAL_MODEL : env.FAL_STYLE_SEED_MODEL;
+  const options: { input: Record<string, unknown>; webhookUrl?: string } = {
+    input: buildFalGenerationInput({
+      model,
       prompt: "prompt" in promptPackage ? promptPackage.prompt : promptPackage.finalPrompt,
-      image_urls: referenceUrls,
-      num_images: job.requestedCount,
-      aspect_ratio: promptPackage.aspectRatio
-    }
+      aspectRatio: promptPackage.aspectRatio,
+      numImages: job.requestedCount,
+      referenceUrls
+    })
   };
 
   if (env.FAL_WEBHOOK_URL) {
     options.webhookUrl = `${env.FAL_WEBHOOK_URL}?jobId=${job.id}`;
   }
 
-  const model = referenceUrls.length > 0 ? env.FAL_FINAL_MODEL : env.FAL_STYLE_SEED_MODEL;
   return fal.queue.submit(model, options);
 }
 

@@ -76,7 +76,9 @@ export function compilePromptPackageMock(input: Input) {
   const chosenModel =
     env.IMAGE_GENERATION_PROVIDER === "openrouter"
       ? env.OPENROUTER_FINAL_MODEL
-      : env.FAL_FINAL_MODEL;
+      : env.IMAGE_GENERATION_PROVIDER === "openai"
+        ? env.OPENAI_FINAL_MODEL
+        : env.FAL_FINAL_MODEL;
   const templateType = input.brief.templateType;
   const briefDirective = input.brief.prompt.trim();
   const seriesOutputKind = input.brief.seriesOutputKind ?? "single_image";

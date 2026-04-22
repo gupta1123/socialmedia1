@@ -152,7 +152,8 @@ describe("compilePromptPackageV2 minimal worker output", () => {
     expect(output.variations).toHaveLength(1);
     expect(output.variations?.[0]?.title).toBe("Primary route");
     expect(output.variations?.[0]?.strategy).toBe("Hero-led invitation");
-    expect(output.variations?.[0]?.finalPrompt).toContain("Create a premium 1:1 site-visit invitation poster for social media");
+    expect(output.variations?.[0]?.finalPrompt).toContain("Create exactly one finished design: a premium 1:1 site-visit invitation poster");
+    expect(output.variations?.[0]?.finalPrompt).toContain("Create a premium 1:1 site-visit invitation image for social media");
     expect(output.variations?.[0]?.seedPrompt).toBe(output.variations?.[0]?.finalPrompt);
     expect(output.seedPrompt).toBe(output.finalPrompt);
     expect(output.finalPrompt).toBe(output.variations?.[0]?.finalPrompt);

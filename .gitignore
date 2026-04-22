@@ -19,3 +19,4 @@ local-playgrounds/
 Untitled39.ipynb
 scripts/payloads/
 *.zip
+.local/

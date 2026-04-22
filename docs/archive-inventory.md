@@ -10,16 +10,9 @@ This file records tracked code moved into `archive/legacy/` during runtime clean
 
 ## Archived items
 
-Pending completion of the runtime cleanup implementation:
-
-- `apps/api/agents/`
-- `skills/prompt/v1/`
-- `skills/prompt/v2/`
-- `skills/image-edit/v1/`
-
-Each item will be updated here with:
-
-- original path
-- archived path
-- reason it was removed from the active runtime
-- active replacement
+| Original path | Archived path | Reason | Active replacement |
+| --- | --- | --- | --- |
+| `apps/api/agents/` | `archive/legacy/apps/api/agents/` | API-local Python agents duplicated the deployed `services/socialpython` runtime and created ambiguous worker ownership. | `services/socialpython/agents/` |
+| `skills/prompt/v1/` | `archive/legacy/skills/prompt/v1/` | V1 prompt skills are no longer part of the active compile path. | `services/socialpython/skills/prompt/v2/` |
+| `skills/prompt/v2/` | `archive/legacy/skills/prompt/v2/` | Root prompt skills were a mirror of the service-owned runtime tree and caused drift. | `services/socialpython/skills/prompt/v2/` |
+| `skills/image-edit/v1/` | `archive/legacy/skills/image-edit/v1/` | Root image-edit skills duplicated the service-owned runtime tree. | `services/socialpython/skills/image-edit/v1/` |

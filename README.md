@@ -4,8 +4,8 @@ Brand-aware social creation lab for marketing teams. The stack is a `pnpm`-shape
 
 - `apps/web`: Next.js frontend for auth, brand setup, uploads, creative runs, and gallery.
 - `apps/api`: Fastify API for auth-aware orchestration, Supabase access, Fal job submission, and Agno prompt compilation.
+- `services/socialpython`: canonical Python runtime for prompt compilation and image-edit planning.
 - `packages/contracts`: shared Zod schemas and TypeScript contracts.
-- `skills/prompt/v1` and `skills/prompt/v2`: versioned Agno local skills for the legacy compiler and V2 bundle compiler.
 - `supabase`: local database, auth, storage, and RLS policies.
 
 ## Local setup
@@ -42,8 +42,9 @@ so you do not need a global `pnpm` install just to start the apps.
 4. Run the apps in separate terminals:
 
 ```bash
-npm run dev:api
-npm run dev:web
+pnpm run dev:socialpython
+pnpm run dev:api
+pnpm run dev:web
 ```
 
 ## Agno prompt compiler
@@ -54,7 +55,7 @@ The backend supports two prompt compiler modes:
 - `agno`: require the Python Agno runner.
 - `mock`: always use the deterministic compiler.
 
-Agno lives at [apps/api/agents/creative_director.py](/Users/shilpakambale/Desktop/Projects/Mar-26/Social%20Media/apps/api/agents/creative_director.py).
+The active Python compiler lives in [services/socialpython](/Users/shilpakambale/Desktop/Projects/Mar-26/Social%20Media/services/socialpython). The API targets that service over HTTP by default and can spawn the same service-owned agents in worker mode when explicitly configured.
 
 ## Fal flow
 

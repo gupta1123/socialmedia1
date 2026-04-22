@@ -12,6 +12,7 @@
     "dev:socialpython": "python3 services/socialpython/server.py",
     "dev:prompt-lab": "python3 services/socialpython/server.py",
     "build": "node scripts/run-pnpm.mjs --filter @image-lab/contracts build && node scripts/run-pnpm.mjs --filter @image-lab/api build && node scripts/run-pnpm.mjs --filter @image-lab/web build",
+    "check:runtime-ownership": "node scripts/check-runtime-ownership.mjs",
     "test": "node scripts/run-pnpm.mjs --filter @image-lab/api test && node scripts/run-pnpm.mjs --filter @image-lab/web test",
     "typecheck": "node scripts/run-pnpm.mjs --filter @image-lab/contracts typecheck && node scripts/run-pnpm.mjs --filter @image-lab/api typecheck && node scripts/run-pnpm.mjs --filter @image-lab/web typecheck",
     "flow:creative": "node scripts/run-creative-flow.mjs",

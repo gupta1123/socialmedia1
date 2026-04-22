@@ -1,11 +1,12 @@
 import type { CreativeJobRecord, PromptPackage } from "@image-lab/contracts";
 import { env } from "./config.js";
 import { submitFinalGeneration as submitFalFinalGeneration, submitStyleSeedGeneration as submitFalStyleSeedGeneration, uploadStoragePathToFal } from "./fal.js";
+import { generateOpenAiImages, type OpenAiGeneratedImage } from "./openai-images.js";
 import { generateOpenRouterImages, type OpenRouterGeneratedImage } from "./openrouter.js";
 
-export type ImageGenerationProvider = "fal" | "openrouter";
+export type ImageGenerationProvider = "fal" | "openrouter" | "openai";
 
-export type ProviderGeneratedImage = OpenRouterGeneratedImage;
+export type ProviderGeneratedImage = OpenRouterGeneratedImage | OpenAiGeneratedImage;
 
 export type ImageProviderSubmission = {
   provider: ImageGenerationProvider;
@@ -18,9 +19,17 @@ export function resolveImageGenerationProvider(): ImageGenerationProvider {
   return env.IMAGE_GENERATION_PROVIDER;
 }
 
+export function isImmediateImageProvider(provider: ImageGenerationProvider) {
+  return provider !== "fal";
+}
+
 export function getStyleSeedProviderModel(referenceCount: number) {
   if (env.IMAGE_GENERATION_PROVIDER === "openrouter") {
     return referenceCount > 0 ? env.OPENROUTER_FINAL_MODEL : env.OPENROUTER_STYLE_SEED_MODEL;
+  }
+
+  if (env.IMAGE_GENERATION_PROVIDER === "openai") {
+    return referenceCount > 0 ? env.OPENAI_FINAL_MODEL : env.OPENAI_STYLE_SEED_MODEL;
   }
 
   return referenceCount > 0 ? env.FAL_FINAL_MODEL : env.FAL_STYLE_SEED_MODEL;
@@ -29,6 +38,10 @@ export function getStyleSeedProviderModel(referenceCount: number) {
 export function getFinalProviderModel(referenceCount = 0) {
   if (env.IMAGE_GENERATION_PROVIDER === "openrouter") {
     return env.OPENROUTER_FINAL_MODEL;
+  }
+
+  if (env.IMAGE_GENERATION_PROVIDER === "openai") {
+    return env.OPENAI_FINAL_MODEL;
   }
 
   return referenceCount > 0 ? env.FAL_FINAL_MODEL : env.FAL_STYLE_SEED_MODEL;
@@ -44,6 +57,23 @@ export async function submitStyleSeedGeneration(
 
   if (provider === "openrouter") {
     const result = await generateOpenRouterImages({
+      model: providerModel,
+      prompt: "prompt" in promptPackage ? promptPackage.prompt : promptPackage.finalPrompt,
+      aspectRatio: promptPackage.aspectRatio,
+      count: job.requestedCount,
+      referencePaths
+    });
+
+    return {
+      provider,
+      providerModel,
+      request_id: result.request_id,
+      images: result.images
+    };
+  }
+
+  if (provider === "openai") {
+    const result = await generateOpenAiImages({
       model: providerModel,
       prompt: "prompt" in promptPackage ? promptPackage.prompt : promptPackage.finalPrompt,
       aspectRatio: promptPackage.aspectRatio,
@@ -82,6 +112,23 @@ export async function submitFinalGeneration(
 
   if (provider === "openrouter") {
     const result = await generateOpenRouterImages({
+      model: providerModel,
+      prompt: "prompt" in promptPackage ? promptPackage.prompt : promptPackage.finalPrompt,
+      aspectRatio: promptPackage.aspectRatio,
+      count: job.requestedCount,
+      referencePaths
+    });
+
+    return {
+      provider,
+      providerModel,
+      request_id: result.request_id,
+      images: result.images
+    };
+  }
+
+  if (provider === "openai") {
+    const result = await generateOpenAiImages({
       model: providerModel,
       prompt: "prompt" in promptPackage ? promptPackage.prompt : promptPackage.finalPrompt,
       aspectRatio: promptPackage.aspectRatio,
