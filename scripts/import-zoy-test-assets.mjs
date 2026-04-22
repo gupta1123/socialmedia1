@@ -57,6 +57,13 @@ const FILES = [
   }
 ];
 
+const ARCHIVED_ROOT_ASSET_DIR = path.resolve(process.cwd(), "archive/legacy/root-assets");
+const ARCHIVED_ASSET_SECTION_BY_FILE = new Map([
+  ["zoy.jpg", "project-images"],
+  ["template1.png", "template-images"],
+  ["template2.png", "template-images"]
+]);
+
 const MIME_BY_EXT = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -144,7 +151,12 @@ async function fetchPostTypeId(code) {
 }
 
 async function upsertReferenceAsset({ workspaceId, brandId, createdBy, fileName, label }) {
-  const filePath = path.resolve(process.cwd(), fileName);
+  const fileSection = ARCHIVED_ASSET_SECTION_BY_FILE.get(fileName);
+  if (!fileSection) {
+    throw new Error(`No archived asset mapping found for ${fileName}`);
+  }
+
+  const filePath = path.resolve(ARCHIVED_ROOT_ASSET_DIR, fileSection, fileName);
   const fileBuffer = await fs.readFile(filePath);
   const mimeType = getMimeType(fileName);
 

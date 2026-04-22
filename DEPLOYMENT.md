@@ -66,7 +66,7 @@ OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-4.1-mini
 ```
 
-Run the official local Python service with `pnpm run dev:socialpython`. `local-playgrounds/` is no longer an official runtime path. Use worker transport only when you intentionally want the API to spawn the canonical `services/socialpython` agent scripts directly.
+Run the official local Python service with `pnpm run dev:socialpython`. Historical playground code is preserved under `.local/root/playgrounds/` and is not part of the runtime. Use worker transport only when you intentionally want the API to spawn the canonical `services/socialpython` agent scripts directly.
 
 Image provider, choose one:
 

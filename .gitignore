@@ -15,7 +15,6 @@ apps/api/.env
 apps/web/.env.local
 untitled38.py
 current_data*.sql
-local-playgrounds/
 Untitled39.ipynb
 scripts/payloads/
 *.zip

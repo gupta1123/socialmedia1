@@ -38,6 +38,11 @@ const IMPORTS = [
   }
 ];
 
+const ARCHIVED_PROJECT_ASSET_DIR = path.resolve(
+  process.cwd(),
+  "archive/legacy/root-assets/project-images"
+);
+
 const MIME_BY_EXT = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -175,7 +180,7 @@ async function fetchCurrentProjectProfile(currentProfileVersionId, projectId) {
 }
 
 async function upsertProjectAsset({ workspaceId, brandId, projectId, createdBy, fileName, label }) {
-  const filePath = path.resolve(process.cwd(), fileName);
+  const filePath = path.resolve(ARCHIVED_PROJECT_ASSET_DIR, fileName);
   const fileBuffer = await fs.readFile(filePath);
   const mimeType = getMimeType(fileName);
 

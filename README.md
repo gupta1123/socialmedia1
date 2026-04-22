@@ -72,5 +72,5 @@ The generation loop is:
 
 - Browser code never sees Fal credentials or Supabase service-role credentials.
 - Every stored object path is prefixed with `workspace_id/brand_id/...`.
-- The existing notebook export in the repo root was left untouched and is not used by the new stack.
+- Local notebooks, exports, and ad hoc debug artifacts live under `.local/` and are not used by the new stack.
 - This repo uses a non-default local Supabase port range (`62021-62024`) to avoid conflicts with other local projects.

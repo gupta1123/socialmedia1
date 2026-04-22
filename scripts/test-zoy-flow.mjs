@@ -28,6 +28,8 @@ const compilePayload = {
 
 async function main() {
   const token = await createToken();
+  const outputDir = path.resolve(process.cwd(), ".local/root/generated/zoy-flow");
+  await fs.mkdir(outputDir, { recursive: true });
   const compiled = await request("/api/creative/compile", token, compilePayload);
 
   console.log("COMPILED");
@@ -81,7 +83,7 @@ async function main() {
   if (run.finalOutputs[0]?.previewUrl) {
     const response = await fetch(run.finalOutputs[0].previewUrl);
     const buffer = Buffer.from(await response.arrayBuffer());
-    const outputPath = path.resolve(process.cwd(), "tmp-zoy-output.jpg");
+    const outputPath = path.resolve(outputDir, "tmp-zoy-output.jpg");
     await fs.writeFile(outputPath, buffer);
     console.log(`DOWNLOADED_OUTPUT ${outputPath}`);
   }
@@ -89,7 +91,7 @@ async function main() {
   if (run.seedTemplates[0]?.previewUrl) {
     const response = await fetch(run.seedTemplates[0].previewUrl);
     const buffer = Buffer.from(await response.arrayBuffer());
-    const outputPath = path.resolve(process.cwd(), "tmp-zoy-seed.jpg");
+    const outputPath = path.resolve(outputDir, "tmp-zoy-seed.jpg");
     await fs.writeFile(outputPath, buffer);
     console.log(`DOWNLOADED_SEED ${outputPath}`);
   }

@@ -52,6 +52,11 @@ const TEMPLATE_IMAGES = [
   }
 ];
 
+const ARCHIVED_TEMPLATE_ASSET_DIR = path.resolve(
+  process.cwd(),
+  "archive/legacy/root-assets/template-images"
+);
+
 const MIME_BY_EXT = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -76,7 +81,7 @@ async function main() {
   const createdTemplates = [];
 
   for (const item of TEMPLATE_IMAGES) {
-    const filePath = path.resolve(process.cwd(), item.fileName);
+    const filePath = path.resolve(ARCHIVED_TEMPLATE_ASSET_DIR, item.fileName);
     const fileBuffer = await fs.readFile(filePath);
     const assetId = crypto.randomUUID();
     const templateId = crypto.randomUUID();

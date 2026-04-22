@@ -24,8 +24,8 @@ This repo has three active runtime surfaces. `services/socialpython` is the sing
 ## Legacy and local-only areas
 
 - `archive/legacy/`: tracked code kept for reference after runtime removal.
-- `.local/`: gitignored scratch space for ad hoc payloads, notebooks, temp outputs, and manual debug artifacts.
-- `local-playgrounds/`: local-only experiments. Not part of the official runtime.
+- `.local/`: gitignored scratch space for ad hoc payloads, notebooks, temp outputs, manual debug artifacts, and retired local experiments.
+- `.local/root/playgrounds/`: preserved local-only experiments. Not part of the official runtime.
 
 ## Compile flow
 
