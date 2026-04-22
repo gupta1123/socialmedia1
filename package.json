@@ -9,7 +9,8 @@
   "scripts": {
     "dev:web": "node scripts/run-pnpm.mjs --filter @image-lab/web dev",
     "dev:api": "node scripts/run-pnpm.mjs --filter @image-lab/api dev",
-    "dev:prompt-lab": "python3 local-playgrounds/agno-prompt-lab/server.py",
+    "dev:socialpython": "python3 services/socialpython/server.py",
+    "dev:prompt-lab": "python3 services/socialpython/server.py",
     "build": "node scripts/run-pnpm.mjs --filter @image-lab/contracts build && node scripts/run-pnpm.mjs --filter @image-lab/api build && node scripts/run-pnpm.mjs --filter @image-lab/web build",
     "test": "node scripts/run-pnpm.mjs --filter @image-lab/api test && node scripts/run-pnpm.mjs --filter @image-lab/web test",
     "typecheck": "node scripts/run-pnpm.mjs --filter @image-lab/contracts typecheck && node scripts/run-pnpm.mjs --filter @image-lab/api typecheck && node scripts/run-pnpm.mjs --filter @image-lab/web typecheck",

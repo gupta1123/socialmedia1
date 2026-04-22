@@ -13,8 +13,8 @@ This document covers the current deployment flow for Briefly Social.
 
 - `apps/web`: Next.js frontend
 - `apps/api`: Fastify backend
+- `services/socialpython`: Python compile and image-edit planning service
 - `packages/contracts`: shared schemas
-- `skills/prompt/v1` and `skills/prompt/v2`: versioned Agno prompt skills
 - `supabase`: database migrations
 
 ## Local development
@@ -23,8 +23,9 @@ Start the local stack:
 
 ```bash
 supabase start
-npm run dev:api
-npm run dev:web
+pnpm run dev:socialpython
+pnpm run dev:api
+pnpm run dev:web
 ```
 
 Important:
@@ -50,19 +51,22 @@ SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
 SUPABASE_JWT_SECRET=...
 SUPABASE_STORAGE_BUCKET=creative-assets
-CREATIVE_DIRECTOR_MODE=agno
 CREATIVE_DIRECTOR_V2_MODE=auto
-CREATIVE_DIRECTOR_V2_TRANSPORT=worker
+CREATIVE_DIRECTOR_V2_TRANSPORT=server
+AI_EDIT_DIRECTOR_MODE=auto
+AI_EDIT_DIRECTOR_TRANSPORT=server
 AGNO_PYTHON_BIN=python3
-AGNO_AGENT_SCRIPT=./agents/creative_director.py
-AGNO_AGENT_V2_SCRIPT=./agents/creative_director_v2.py
+AGNO_AGENT_V2_SCRIPT=../../services/socialpython/agents/creative_director_notebook.py
+AI_EDIT_DIRECTOR_SCRIPT=../../services/socialpython/agents/ai_edit_director.py
 AGNO_AGENT_V2_SERVER_URL=http://127.0.0.1:8787/api/compile-v2
+AI_EDIT_DIRECTOR_SERVER_URL=http://127.0.0.1:8787/api/image-edit-plan
 AGNO_AGENT_V2_SERVER_TIMEOUT_SEC=180
+AI_EDIT_DIRECTOR_SERVER_TIMEOUT_SEC=60
 OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-4.1-mini
 ```
 
-For local V2 prompt testing with the Python notebook server, set `CREATIVE_DIRECTOR_V2_TRANSPORT=server` and run `python3 local-playgrounds/agno-prompt-lab/server.py`. For Heroku, keep `CREATIVE_DIRECTOR_V2_TRANSPORT=worker` unless the Python server is deployed as a separate reachable process.
+Run the official local Python service with `pnpm run dev:socialpython`. `local-playgrounds/` is no longer an official runtime path. Use worker transport only when you intentionally want the API to spawn the canonical `services/socialpython` agent scripts directly.
 
 Image provider, choose one:
 
@@ -150,7 +154,7 @@ Symptom:
 
 Fix:
 
-- use fallback mode or install Python support in the runtime
+- install Python support in the runtime or point the API at a reachable `services/socialpython` deployment
 
 #### OpenAI structured output schema failure
 

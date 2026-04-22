@@ -1,11 +1,19 @@
 # Social Python
 
-Tracked Heroku deploy target for the Python prompt-planning service.
+Tracked Heroku deploy target and local source of truth for Python prompt compilation and image-edit planning.
 
 What it serves:
 - `POST /api/compile-v2`
 - `POST /api/image-edit-plan`
 - `GET /api/health`
+
+Local development:
+
+```bash
+pnpm run dev:socialpython
+```
+
+The API should target this service for both compile and edit planning. Worker mode, when used, should still resolve agent files from this subtree.
 
 Deploy flow from the monorepo:
 
