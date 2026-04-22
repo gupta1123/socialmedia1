@@ -74,3 +74,11 @@ The generation loop is:
 - Every stored object path is prefixed with `workspace_id/brand_id/...`.
 - Local notebooks, exports, and ad hoc debug artifacts live under `.local/` and are not used by the new stack.
 - This repo uses a non-default local Supabase port range (`62021-62024`) to avoid conflicts with other local projects.
+
+## Script layout
+
+- `scripts/ops`: repo operations, ownership checks, workspace helpers
+- `scripts/smoke`: end-to-end and route smoke runners plus payload fixtures
+- `scripts/import`: asset/template import helpers
+- `scripts/seed`: SQL seeding and reset scripts
+- `scripts/generate`: one-off template preview generation utilities

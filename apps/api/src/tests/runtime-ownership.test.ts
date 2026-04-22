@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, "../../../..");
-const scriptPath = path.join(repoRoot, "scripts/check-runtime-ownership.mjs");
+const scriptPath = path.join(repoRoot, "scripts/ops/check-runtime-ownership.mjs");
 
 describe("runtime ownership guard", () => {
   it("rejects active references to archived runtime trees", () => {

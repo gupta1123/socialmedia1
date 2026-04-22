@@ -24,7 +24,7 @@ const allowedPrefixes = ["archive/legacy/"];
 const allowedFiles = new Set([
   "docs/archive-inventory.md",
   "docs/runtime-map.md",
-  "scripts/check-runtime-ownership.mjs",
+  "scripts/ops/check-runtime-ownership.mjs",
   "services/socialpython/.env.example"
 ]);
 

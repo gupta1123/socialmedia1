@@ -31,7 +31,7 @@ const config = {
 async function main() {
   if (!payloadPath) {
     throw new Error(
-      "Missing --payload <file>. Pass a CreativeBrief JSON file. Example: node scripts/run-creative-flow.mjs --payload tmp/brief.json --prompts-only"
+      "Missing --payload <file>. Pass a CreativeBrief JSON file. Example: node scripts/smoke/run-creative-flow.mjs --payload tmp/brief.json --prompts-only"
     );
   }
 

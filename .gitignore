@@ -16,6 +16,5 @@ apps/web/.env.local
 untitled38.py
 current_data*.sql
 Untitled39.ipynb
-scripts/payloads/
 *.zip
 .local/
