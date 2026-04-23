@@ -297,6 +297,7 @@ export default function CreatePage() {
   const [runError, setRunError] = useState<string | null>(null);
   const [runRefreshToken, setRunRefreshToken] = useState(0);
   const [pendingCanvasAction, setPendingCanvasAction] = useState<"explore" | null>(null);
+  const [pendingGenerationTargetCount, setPendingGenerationTargetCount] = useState<number | null>(null);
   const [activePicker, setActivePicker] = useState<CreatePicker | null>(null);
   const [pickerQuery, setPickerQuery] = useState("");
   const [postTaskStatusFilter, setPostTaskStatusFilter] = useState<PostTaskPickerStatusFilter>("all");
@@ -1113,17 +1114,18 @@ export default function CreatePage() {
   const hasActiveSeedJob = Boolean(latestActiveSeedJob);
   const hasActiveFinalJob = Boolean(latestActiveFinalJob);
   const activeFinalTemplateId = latestActiveFinalJob?.selectedTemplateId ?? null;
+  const optimisticGenerationTargetCount = pendingGenerationTargetCount ?? styleVariationCount;
   const directionTargetCount =
     latestActiveSeedJob?.requestedCount ??
     (hasActiveSeedJob || pendingCanvasAction === "explore" || pendingAction === "generate-seeds"
-      ? styleVariationCount
+      ? optimisticGenerationTargetCount
       : promptPackage?.variations.length || styleVariationCount);
   const optionTargetCount = isOneStageV2
     ? latestActiveFinalJob?.requestedCount ??
       (hasActiveFinalJob || pendingCanvasAction === "explore" || pendingAction === "generate-seeds"
-        ? styleVariationCount
+        ? optimisticGenerationTargetCount
         : promptPackage?.variations.length || runDetail?.promptPackage.variations.length || styleVariationCount)
-    : latestActiveFinalJob?.requestedCount ?? styleVariationCount;
+    : latestActiveFinalJob?.requestedCount ?? optimisticGenerationTargetCount;
   const remainingDirectionSlots = latestActiveSeedJob
     ? Math.max(directionTargetCount - currentSeedTemplates.length, 0)
     : 0;
@@ -1444,8 +1446,13 @@ export default function CreatePage() {
       return;
     }
 
+    setPendingGenerationTargetCount(styleVariationCount);
     const submitted = await generateFinalImagesForPackage(compiled.id, selectedTemplateId);
-    if (submitted) rearmRunPolling();
+    if (submitted) {
+      rearmRunPolling();
+    } else {
+      setPendingGenerationTargetCount(null);
+    }
   }
 
   async function handleExploreDirections() {
@@ -1469,6 +1476,7 @@ export default function CreatePage() {
       );
       return;
     }
+    setPendingGenerationTargetCount(styleVariationCount);
     setPendingCanvasAction("explore");
     const compiled =
       canReuseCompiledPromptPackage
@@ -1476,6 +1484,7 @@ export default function CreatePage() {
         : await compilePromptPackage({ silentSuccess: true });
     if (!compiled) {
       setPendingCanvasAction(null);
+      setPendingGenerationTargetCount(null);
       return;
     }
     const submitted = await generateSeedsForPackage(compiled.id, compiled);
@@ -1483,6 +1492,7 @@ export default function CreatePage() {
       rearmRunPolling();
     } else {
       setPendingCanvasAction(null);
+      setPendingGenerationTargetCount(null);
     }
   }
 
@@ -1492,8 +1502,13 @@ export default function CreatePage() {
       return;
     }
     if (!promptPackage || hasActiveSeedJob || hasActiveFinalJob) return;
+    setPendingGenerationTargetCount(styleVariationCount);
     const submitted = await generateFinalImagesForPackage(promptPackage.id, selectedTemplateId);
-    if (submitted) rearmRunPolling();
+    if (submitted) {
+      rearmRunPolling();
+    } else {
+      setPendingGenerationTargetCount(null);
+    }
   }
 
   function handleProjectChange(projectId: string) {
