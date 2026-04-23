@@ -831,59 +831,6 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       log: backgroundLog
     });
 
-    void fetch(`${env.SUPABASE_URL}/functions/v1/process-compile-jobs`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-        apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ jobId })
-    })
-      .then(async (response) => {
-        if (response.ok) {
-          return;
-        }
-
-        const errorText = await response.text().catch(() => "");
-        request.log.error(
-          {
-            jobId,
-            status: response.status,
-            body: errorText
-          },
-          "failed to trigger process-compile-jobs edge function"
-        );
-
-        await supabaseAdmin
-          .from("compile_jobs")
-          .update({
-            status: "failed",
-            error_json: {
-              message:
-                `Failed to trigger async compile worker: ${response.status}` +
-                (errorText ? ` - ${errorText}` : "")
-            },
-            updated_at: new Date().toISOString()
-          })
-          .eq("id", jobId);
-      })
-      .catch(async (error) => {
-        request.log.error({ error, jobId }, "failed to reach process-compile-jobs edge function");
-        await supabaseAdmin
-          .from("compile_jobs")
-          .update({
-            status: "failed",
-            error_json: {
-              message: error instanceof Error
-                ? `Failed to trigger async compile worker: ${error.message}`
-                : "Failed to trigger async compile worker"
-            },
-            updated_at: new Date().toISOString()
-          })
-          .eq("id", jobId);
-      });
-
     return { jobId, status: "pending" };
   });
 

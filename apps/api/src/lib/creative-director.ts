@@ -425,6 +425,15 @@ async function runAgnoCreativeDirectorV2OneShot(input: Input) {
 
 async function runAgnoCreativeDirectorV2Server(input: Input) {
   const payload = await buildV2AgentPayload(input);
+  const asyncUrl = getAgnoAsyncCompileUrl(env.AGNO_AGENT_V2_SERVER_URL);
+  if (asyncUrl) {
+    return runAgnoCreativeDirectorV2ServerAsync(input, payload, asyncUrl);
+  }
+
+  return runAgnoCreativeDirectorV2ServerSync(input, payload, env.AGNO_AGENT_V2_SERVER_URL);
+}
+
+async function runAgnoCreativeDirectorV2ServerSync(input: Input, payload: V2AgentPayload, url: string) {
   const controller = new AbortController();
   const timeoutSeconds = env.AGNO_AGENT_V2_SERVER_TIMEOUT_SEC;
   const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
@@ -434,17 +443,17 @@ async function runAgnoCreativeDirectorV2Server(input: Input) {
   try {
     console.log("[runAgnoCreativeDirectorV2Server] requesting", {
       transport: env.CREATIVE_DIRECTOR_V2_TRANSPORT,
-      url: env.AGNO_AGENT_V2_SERVER_URL,
+      url,
       timeoutSeconds
     });
-    const response = await fetch(env.AGNO_AGENT_V2_SERVER_URL, {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ payload }),
       signal: controller.signal
     });
     console.log("[runAgnoCreativeDirectorV2Server] response", {
-      url: env.AGNO_AGENT_V2_SERVER_URL,
+      url,
       status: response.status,
       ok: response.ok,
       durationMs: Date.now() - startedAt
@@ -474,18 +483,18 @@ async function runAgnoCreativeDirectorV2Server(input: Input) {
   } catch (error) {
     if (isAbortError(error)) {
       console.error("[runAgnoCreativeDirectorV2Server] timeout", {
-        url: env.AGNO_AGENT_V2_SERVER_URL,
+        url,
         timeoutSeconds,
         durationMs: Date.now() - startedAt
       });
       throw new Error(
-        `Agno v2 server timed out after ${timeoutSeconds}s at ${env.AGNO_AGENT_V2_SERVER_URL}. ` +
+        `Agno v2 server timed out after ${timeoutSeconds}s at ${url}. ` +
           "Increase AGNO_AGENT_V2_SERVER_TIMEOUT_SEC or check the prompt-lab/OpenAI run latency."
       );
     }
 
     console.error("[runAgnoCreativeDirectorV2Server] failed", {
-      url: env.AGNO_AGENT_V2_SERVER_URL,
+      url,
       durationMs: Date.now() - startedAt,
       error: error instanceof Error ? error.message : String(error)
     });
@@ -493,6 +502,151 @@ async function runAgnoCreativeDirectorV2Server(input: Input) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function runAgnoCreativeDirectorV2ServerAsync(
+  input: Input,
+  payload: V2AgentPayload,
+  asyncUrl: string
+) {
+  const startedAt = Date.now();
+  const timeoutSeconds = env.AGNO_AGENT_V2_SERVER_TIMEOUT_SEC;
+  const deadline = startedAt + timeoutSeconds * 1000;
+
+  console.log("[runAgnoCreativeDirectorV2Server] requesting async job", {
+    transport: env.CREATIVE_DIRECTOR_V2_TRANSPORT,
+    url: asyncUrl,
+    timeoutSeconds
+  });
+
+  const start = await fetchAgnoServerJson(asyncUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ payload })
+  });
+
+  if (!start.response.ok) {
+    throw new Error(
+      `Agno v2 async server failed to start with ${start.response.status}: ${extractAgnoError(start.parsed, start.raw)}`
+    );
+  }
+
+  const jobId = asString((start.parsed as { jobId?: unknown }).jobId);
+  if (!jobId) {
+    throw new Error("Agno v2 async server response did not include jobId");
+  }
+
+  const statusUrl = `${asyncUrl}/${encodeURIComponent(jobId)}`;
+  while (Date.now() < deadline) {
+    await delay(2000);
+    const statusResponse = await fetchAgnoServerJson(statusUrl, {
+      method: "GET",
+      headers: { Accept: "application/json" }
+    });
+
+    if (!statusResponse.response.ok) {
+      throw new Error(
+        `Agno v2 async server status failed with ${statusResponse.response.status}: ${extractAgnoError(
+          statusResponse.parsed,
+          statusResponse.raw
+        )}`
+      );
+    }
+
+    const status = asString((statusResponse.parsed as { status?: unknown }).status);
+    if (status === "completed") {
+      if (!statusResponse.parsed || typeof statusResponse.parsed !== "object" || !("result" in statusResponse.parsed)) {
+        throw new Error("Agno v2 async server completed without result");
+      }
+
+      console.log("[runAgnoCreativeDirectorV2Server] async response", {
+        url: asyncUrl,
+        jobId,
+        status,
+        durationMs: Date.now() - startedAt
+      });
+      return normalizeV2AgnoResult((statusResponse.parsed as { result: CompilerResult }).result, input);
+    }
+
+    if (status === "failed") {
+      throw new Error(`Agno v2 async compile failed: ${extractAgnoError(statusResponse.parsed, statusResponse.raw)}`);
+    }
+
+    if (status !== "pending" && status !== "processing" && status !== "queued") {
+      throw new Error(`Agno v2 async compile returned unknown status: ${status || "missing"}`);
+    }
+  }
+
+  throw new Error(`Agno v2 async compile timed out after ${timeoutSeconds}s at ${asyncUrl}`);
+}
+
+function getAgnoAsyncCompileUrl(url: string) {
+  let normalizedUrl = url;
+  while (normalizedUrl.endsWith("/")) {
+    normalizedUrl = normalizedUrl.slice(0, -1);
+  }
+
+  const asyncSuffix = "/api/compile-v2-async";
+  if (normalizedUrl.endsWith(asyncSuffix)) {
+    return normalizedUrl;
+  }
+
+  const syncSuffix = "/api/compile-v2";
+  if (!normalizedUrl.endsWith(syncSuffix)) {
+    return null;
+  }
+
+  return `${normalizedUrl.slice(0, -syncSuffix.length)}${asyncSuffix}`;
+}
+
+async function fetchAgnoServerJson(url: string, init: RequestInit) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25_000);
+  timeout.unref?.();
+
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: controller.signal
+    });
+    const raw = await response.text();
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new Error(`Agno v2 server returned invalid JSON from ${url}: ${raw.slice(0, 500)}`);
+    }
+
+    return { response, raw, parsed };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractAgnoError(parsed: unknown, raw: string) {
+  if (parsed && typeof parsed === "object") {
+    const error = (parsed as { error?: unknown }).error;
+    if (typeof error === "string") {
+      return error;
+    }
+    if (error && typeof error === "object") {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === "string") {
+        return message;
+      }
+    }
+    const message = (parsed as { message?: unknown }).message;
+    if (typeof message === "string") {
+      return message;
+    }
+  }
+
+  return raw.slice(0, 500);
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isAbortError(error: unknown) {

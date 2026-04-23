@@ -5,6 +5,8 @@ import json
 import os
 import sys
 import threading
+import time
+import uuid
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -133,6 +135,9 @@ LOOKUPS = LookupState(
 
 AGENT = None
 AGENT_LOCK = threading.Lock()
+COMPILE_JOBS: dict[str, dict[str, Any]] = {}
+COMPILE_JOBS_LOCK = threading.Lock()
+COMPILE_JOB_TTL_SECONDS = int(os.getenv("AGNO_COMPILE_JOB_TTL_SECONDS", "1800"))
 SKILLS_DIR = Path(getattr(CREATIVE_DIRECTOR, "SKILLS_DIR", PROMPT_SKILLS_DIR))
 CANONICAL_TRUTH_BUNDLE_KEYS = (
     "requestContext",
@@ -1130,23 +1135,134 @@ def log_trace(request_path: str, payload: dict[str, Any], runtime: dict[str, Any
             print(analyst_output.strip(), flush=True)
 
 
+def compile_v2_envelope(body: dict[str, Any], request_path: str) -> dict[str, Any]:
+    payload = body.get("payload", body)
+    if not isinstance(payload, dict):
+        raise ValueError("Expected a compiler payload object.")
+    payload, contract_mode = normalize_compile_v2_payload(payload)
+    print(
+        json.dumps(
+            {
+                "path": request_path,
+                "requestContractMode": contract_mode,
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
+
+    log_request_start(request_path, payload)
+    result, trace, runtime = execute_payload_with_trace(payload)
+    log_trace(request_path, payload, runtime, trace, result)
+    compiler_trace = result.get("compilerTrace")
+    if not isinstance(compiler_trace, dict):
+        compiler_trace = {}
+    result["compilerTrace"] = {
+        **compiler_trace,
+        **trace,
+        "runtime": runtime,
+        "requestContract": {"mode": contract_mode},
+        "runtimeEvents": {
+            "available": bool(trace.get("eventCount")),
+            "reason": "V2 captures Agno workflow executor tool calls from WorkflowRunOutput.step_executor_runs.",
+        },
+        "pipeline": trace.get("pipeline", compiler_trace.get("pipeline", "v2-notebook")),
+        "pythonServer": {
+            "url": f"http://{HOST}:{PORT}",
+            "agentScript": os.getenv("AGNO_PROMPT_LAB_AGENT_SCRIPT", os.getenv("AGNO_AGENT_V2_SCRIPT")),
+        },
+    }
+    return {"ok": True, "result": result, "runtime": runtime, "trace": trace}
+
+
+def prune_compile_jobs() -> None:
+    cutoff = time.time() - COMPILE_JOB_TTL_SECONDS
+    with COMPILE_JOBS_LOCK:
+        for job_id, job in list(COMPILE_JOBS.items()):
+            if float(job.get("updatedAtEpoch", job.get("createdAtEpoch", 0))) < cutoff:
+                COMPILE_JOBS.pop(job_id, None)
+
+
+def update_compile_job(job_id: str, patch: dict[str, Any]) -> None:
+    with COMPILE_JOBS_LOCK:
+        job = COMPILE_JOBS.get(job_id)
+        if job is None:
+            return
+        job.update({**patch, "updatedAtEpoch": time.time()})
+
+
+def run_compile_job(job_id: str, body: dict[str, Any]) -> None:
+    try:
+        envelope = compile_v2_envelope(body, "/api/compile-v2-async")
+        update_compile_job(
+            job_id,
+            {
+                "status": "completed",
+                "result": envelope.get("result"),
+                "runtime": envelope.get("runtime"),
+                "trace": envelope.get("trace"),
+                "error": None,
+            },
+        )
+    except ValueError as exc:
+        update_compile_job(
+            job_id,
+            {
+                "status": "failed",
+                "error": {"message": str(exc), "statusCode": HTTPStatus.BAD_REQUEST.value},
+            },
+        )
+    except Exception as exc:  # pragma: no cover - background server handler
+        update_compile_job(
+            job_id,
+            {
+                "status": "failed",
+                "error": {"message": describe_runtime_failure(exc), "statusCode": HTTPStatus.SERVICE_UNAVAILABLE.value},
+            },
+        )
+
+
+def create_compile_job(body: dict[str, Any]) -> str:
+    prune_compile_jobs()
+    job_id = str(uuid.uuid4())
+    now = time.time()
+    with COMPILE_JOBS_LOCK:
+        COMPILE_JOBS[job_id] = {
+            "id": job_id,
+            "status": "processing",
+            "createdAtEpoch": now,
+            "updatedAtEpoch": now,
+            "result": None,
+            "runtime": None,
+            "trace": None,
+            "error": None,
+        }
+    thread = threading.Thread(target=run_compile_job, args=(job_id, body), daemon=True)
+    thread.start()
+    return job_id
+
+
 class PromptLabHandler(BaseHTTPRequestHandler):
     server_version = "AgnoPromptLab/0.1"
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path in ("/", "/index.html"):
+        request_path = urlparse(self.path).path
+        if request_path.startswith("/api/compile-v2-async/"):
+            self._handle_compile_v2_async_status(request_path)
+            return
+        if request_path in ("/", "/index.html"):
             self._serve_file("index.html", "text/html; charset=utf-8")
             return
-        if self.path == "/styles.css":
+        if request_path == "/styles.css":
             self._serve_file("styles.css", "text/css; charset=utf-8")
             return
-        if self.path == "/app.js":
+        if request_path == "/app.js":
             self._serve_file("app.js", "application/javascript; charset=utf-8")
             return
-        if self.path == "/api/options":
+        if request_path == "/api/options":
             self._send_json(HTTPStatus.OK, options_payload())
             return
-        if self.path == "/api/health":
+        if request_path == "/api/health":
             self._send_json(
                 HTTPStatus.OK,
                 {
@@ -1162,7 +1278,7 @@ class PromptLabHandler(BaseHTTPRequestHandler):
                 }
             )
             return
-        if self.path == "/favicon.ico":
+        if request_path == "/favicon.ico":
             self.send_response(HTTPStatus.NO_CONTENT)
             self.end_headers()
             return
@@ -1170,11 +1286,16 @@ class PromptLabHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path == "/api/compile-v2":
+        request_path = urlparse(self.path).path
+        if request_path == "/api/compile-v2":
             self._handle_compile_v2()
             return
 
-        if self.path != "/api/chat":
+        if request_path == "/api/compile-v2-async":
+            self._handle_compile_v2_async_start()
+            return
+
+        if request_path != "/api/chat":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
 
@@ -1210,47 +1331,66 @@ class PromptLabHandler(BaseHTTPRequestHandler):
     def _handle_compile_v2(self) -> None:
         try:
             body = self._read_json()
-            payload = body.get("payload", body)
-            if not isinstance(payload, dict):
-                raise ValueError("Expected a compiler payload object.")
-            payload, contract_mode = normalize_compile_v2_payload(payload)
-            print(
-                json.dumps(
-                    {
-                        "path": "/api/compile-v2",
-                        "requestContractMode": contract_mode,
-                    },
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-
-            log_request_start("/api/compile-v2", payload)
-            result, trace, runtime = execute_payload_with_trace(payload)
-            log_trace("/api/compile-v2", payload, runtime, trace, result)
-            compiler_trace = result.get("compilerTrace")
-            if not isinstance(compiler_trace, dict):
-                compiler_trace = {}
-            result["compilerTrace"] = {
-                **compiler_trace,
-                **trace,
-                "runtime": runtime,
-                "requestContract": {"mode": contract_mode},
-                "runtimeEvents": {
-                    "available": bool(trace.get("eventCount")),
-                    "reason": "V2 captures Agno workflow executor tool calls from WorkflowRunOutput.step_executor_runs.",
-                },
-                "pipeline": trace.get("pipeline", compiler_trace.get("pipeline", "v2-notebook")),
-                "pythonServer": {
-                    "url": f"http://{HOST}:{PORT}",
-                    "agentScript": os.getenv("AGNO_PROMPT_LAB_AGENT_SCRIPT", os.getenv("AGNO_AGENT_V2_SCRIPT")),
-                },
-            }
-            self._send_json(HTTPStatus.OK, {"ok": True, "result": result, "runtime": runtime, "trace": trace})
+            self._send_json(HTTPStatus.OK, compile_v2_envelope(body, "/api/compile-v2"))
         except ValueError as exc:
             self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
         except Exception as exc:  # pragma: no cover - interactive lab handler
             self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": describe_runtime_failure(exc)})
+
+    def _handle_compile_v2_async_start(self) -> None:
+        try:
+            body = self._read_json()
+            payload = body.get("payload", body)
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a compiler payload object.")
+            job_id = create_compile_job(body)
+            self._send_json(
+                HTTPStatus.ACCEPTED,
+                {"ok": True, "jobId": job_id, "status": "processing"},
+            )
+        except ValueError as exc:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+        except Exception as exc:  # pragma: no cover - interactive lab handler
+            self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": describe_runtime_failure(exc)})
+
+    def _handle_compile_v2_async_status(self, request_path: str) -> None:
+        job_id = request_path.rsplit("/", 1)[-1]
+        prune_compile_jobs()
+        with COMPILE_JOBS_LOCK:
+            job = dict(COMPILE_JOBS.get(job_id) or {})
+
+        if not job:
+            self._send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "Compile job not found"})
+            return
+
+        status = job.get("status")
+        if status == "completed":
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "jobId": job_id,
+                    "status": "completed",
+                    "result": job.get("result"),
+                    "runtime": job.get("runtime"),
+                    "trace": job.get("trace"),
+                },
+            )
+            return
+
+        if status == "failed":
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": False,
+                    "jobId": job_id,
+                    "status": "failed",
+                    "error": job.get("error") or {"message": "Compile job failed"},
+                },
+            )
+            return
+
+        self._send_json(HTTPStatus.OK, {"ok": True, "jobId": job_id, "status": status or "processing"})
 
     def log_message(self, format: str, *args: Any) -> None:
         return
