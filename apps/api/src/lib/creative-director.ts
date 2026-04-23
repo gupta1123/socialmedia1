@@ -1999,6 +1999,7 @@ function buildV2CompactGuardrailClauses(input: Input) {
     "CRITICAL: The brief is the source of truth. Follow the brief's explicit requirements exactly (mood, lighting, colors, atmosphere, style). Playbook skill rules are defaults that apply only when the brief does NOT specify.",
     "Lead with subject truth and scene logic before typography or overlays.",
     "Use only the facts that materially affect subject, environment, and required text.",
+    "Do not include phone numbers, WhatsApp numbers, website URLs, email addresses, social handles, RERA numbers, or contact details unless they are explicitly supplied in exact text or the brief.",
     "If any supplied reference is an amenity image, use exactly one amenity image as the subject-truth reference for that output. Do not merge multiple amenity references or different facilities into the same scene.",
     buildBrandPaletteClause(input),
     buildBrandTypographyClause(input),

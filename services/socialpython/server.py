@@ -433,7 +433,8 @@ def build_prompt_guardrails(post_type_code: str | None, include_brand_logo: bool
     ]
     final_clauses = [
         "Return one finished design per image.",
-        "Preserve only the facts and controls that materially affect composition, subject truth, and required copy."
+        "Preserve only the facts and controls that materially affect composition, subject truth, and required copy.",
+        "Do not include phone numbers, WhatsApp numbers, website URLs, email addresses, social handles, RERA numbers, or contact details unless they are explicitly supplied in exact requested text or the brief."
     ]
 
     if post_type_code == "festive-greeting":
@@ -443,6 +444,9 @@ def build_prompt_guardrails(post_type_code: str | None, include_brand_logo: bool
     if include_brand_logo:
         seed_clauses.append("If logo use is enabled, keep a small footer or signature zone reserved for the supplied logo asset.")
         final_clauses.append("If logo use is enabled, preserve the supplied logo exactly or leave the zone blank.")
+    else:
+        seed_clauses.append("Do not reserve or invent a logo area when logo use is not enabled.")
+        final_clauses.append("Do not include any logo, brand mark, emblem, monogram, watermark, or invented branding asset.")
 
     if include_rera_qr:
         seed_clauses.append("If RERA QR use is enabled, reserve a small clean compliance zone without inventing a fake QR.")

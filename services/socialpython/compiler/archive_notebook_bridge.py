@@ -554,6 +554,8 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "Every prompt must remain a finished social poster, not a scenic base-image prompt.",
             "Do not mention aspect ratio, dimensions, or canvas size in the prompt.",
             "Do not invent address lines, street names, RERA, contact details, or location facts that are not grounded in the brief analysis.",
+            "Do not include phone numbers, WhatsApp numbers, website URLs, email addresses, social handles, RERA numbers, or contact details unless they are explicitly supplied in exact requested text or the brief.",
+            "Do not include a logo, brand mark, emblem, monogram, watermark, or invented branding asset unless an exact logo is supplied in the input.",
             "Treat project_name strictly as the project display name, not as a city or geographic setting. If the name could be a place name, write 'project named <project_name>' and keep actual location context separate.",
             "For each variation, provide title, strategy, poster_archetype, prompt, negative, and difference_from_others.",
         ]
@@ -570,6 +572,8 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "Keep exactly requested_variation_count variations unless a route is impossible to salvage.",
             "Every kept variation must stay grounded in the same project truth and reference truth.",
             "Every kept variation must preserve exact text obligations and must not invent address lines, street names, location facts, contact details, or RERA details.",
+            "Every kept variation must omit phone numbers, WhatsApp numbers, website URLs, email addresses, social handles, RERA numbers, and contact details unless exact requested text or the brief supplies them.",
+            "Every kept variation must omit logos, brand marks, emblems, monograms, watermarks, and invented branding assets unless an exact logo is supplied in the input.",
             "Every kept variation must treat project_name as a display name only. Revise wording like 'in <project_name>' or '<project_name> project' when it could imply location.",
             "Every kept variation must feel poster-grade, not scenic-render-grade.",
             "",
@@ -1393,7 +1397,7 @@ def build_fallback_route_prompt(analysis: dict[str, Any], route_context: dict[st
         f"Finished social poster for {project_name}. Use a {hero} hero treatment with a "
         f"{layout} composition and a {mood} mood. Preserve the supplied project reference as truth. "
         f"Keep the result premium, poster-grade, and grounded in the same project identity. "
-        f"Do not invent address lines, contact details, or RERA information."
+        f"Do not invent address lines, contact details, RERA information, website URLs, phone numbers, or logos."
     ).strip()
 
 
@@ -1593,7 +1597,12 @@ def normalize_notebook_bridge_result(
     if verified_variations:
         for index, route in enumerate(verified_variations, start=1):
             route_prompt = sanitize_public_prompt_text(str(route.get("revised_prompt") or "").strip(), payload)
-            route_negative = sanitize_public_prompt_text(str(route.get("revised_negative") or "").strip(), payload)
+            route_negative = sanitize_public_prompt_text(
+                str(route.get("revised_negative") or "").strip(),
+                payload,
+                include_identity_guardrail=False,
+                include_output_guardrails=False,
+            )
             route_final_prompt = (
                 f"{route_prompt} Negative prompt: {route_negative}".strip()
                 if route_negative
@@ -1649,7 +1658,12 @@ def normalize_notebook_bridge_result(
 
     if not normalized_variations:
         clean_prompt = sanitize_public_prompt_text(str(verified.get("revised_prompt") or "").strip(), payload)
-        clean_negative = sanitize_public_prompt_text(str(verified.get("revised_negative") or "").strip(), payload)
+        clean_negative = sanitize_public_prompt_text(
+            str(verified.get("revised_negative") or "").strip(),
+            payload,
+            include_identity_guardrail=False,
+            include_output_guardrails=False,
+        )
         final_prompt = f"{clean_prompt} Negative prompt: {clean_negative}".strip() if clean_negative else clean_prompt
         normalized_variations.append(
             {
@@ -1679,6 +1693,7 @@ def normalize_notebook_bridge_result(
         str(verified.get("prompt_summary") or "").strip(),
         payload,
         include_identity_guardrail=False,
+        include_output_guardrails=False,
     )
     prompt_summary = prompt_summary or build_prompt_summary(first_variation["finalPrompt"], analysis)
 
@@ -1767,6 +1782,7 @@ def sanitize_public_prompt_text(
     prompt: str,
     payload: dict[str, Any],
     include_identity_guardrail: bool = True,
+    include_output_guardrails: bool = True,
 ) -> str:
     bundle = payload.get("truthBundle") or {}
     text = prompt.strip()
@@ -1796,6 +1812,8 @@ def sanitize_public_prompt_text(
     text = normalize_project_name_location_phrasing(text, payload)
     if include_identity_guardrail:
         text = append_project_identity_guardrail(text, payload)
+    if include_output_guardrails:
+        text = append_output_authenticity_guardrails(text, payload)
     text = strip_explicit_aspect_ratio_mentions(text)
     return re.sub(r"\s{2,}", " ", text).strip()
 
@@ -1855,6 +1873,30 @@ def append_project_identity_guardrail(text: str, payload: dict[str, Any]) -> str
         return f"{before.strip()} {guardrail} {negative_marker}{after}".strip()
 
     return f"{text} {guardrail}".strip()
+
+
+def append_output_authenticity_guardrails(text: str, payload: dict[str, Any]) -> str:
+    clauses = [
+        "Do not include phone numbers, WhatsApp numbers, website URLs, email addresses, social handles, RERA numbers, or contact details unless they are explicitly supplied in exact requested text or the brief.",
+    ]
+
+    if not has_exact_logo_input(payload):
+        clauses.append(
+            "Do not include any logo, brand mark, emblem, monogram, watermark, or invented branding asset."
+        )
+
+    output = text
+    for clause in clauses:
+        if clause not in output:
+            output = f"{output} {clause}".strip()
+    return output
+
+
+def has_exact_logo_input(payload: dict[str, Any]) -> bool:
+    bundle = payload.get("truthBundle") or {}
+    request_context = bundle.get("requestContext") or {}
+    exact_assets = bundle.get("exactAssetContract") or {}
+    return bool(request_context.get("includeBrandLogo") and exact_assets.get("logoAssetId"))
 
 
 def get_project_display_name(payload: dict[str, Any]) -> str:
