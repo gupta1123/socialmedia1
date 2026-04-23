@@ -29,6 +29,7 @@ import {
   submitFeedback,
   uploadBrandAsset
 } from "../../lib/api";
+import { shouldUseAsyncCompileByDefault } from "../../lib/compile-mode";
 import { supabase } from "../../lib/supabase-browser";
 
 const defaultProfile: BrandProfile = {
@@ -716,7 +717,10 @@ export function StudioProvider({
         referenceAssetIds: briefForm.selectedReferenceAssetIds
       };
 
-      const useAsyncV2 = options?.useAsync ?? process.env.NEXT_PUBLIC_USE_ASYNC_COMPILE === "true";
+      const useAsyncV2 = options?.useAsync ?? shouldUseAsyncCompileByDefault({
+        apiUrl: process.env.NEXT_PUBLIC_API_URL ?? null,
+        envValue: process.env.NEXT_PUBLIC_USE_ASYNC_COMPILE ?? null
+      });
 
       if (useAsyncV2) {
         // Use async endpoint with polling to avoid Heroku 30s timeout

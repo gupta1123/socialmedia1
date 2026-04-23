@@ -411,6 +411,58 @@ function buildPreviewV2PromptPackage(
   });
 }
 
+async function processCompileJobLocally(params: {
+  jobId: string;
+  compileInput: ReturnType<typeof buildPreparedV2CompileInput>;
+  log: { error: (payload: unknown, message?: string) => void };
+}) {
+  const processingTimestamp = new Date().toISOString();
+  const { data: claimedJob, error: claimError } = await supabaseAdmin
+    .from("compile_jobs")
+    .update({
+      status: "processing",
+      updated_at: processingTimestamp
+    })
+    .eq("id", params.jobId)
+    .eq("status", "pending")
+    .select("id")
+    .maybeSingle();
+
+  if (claimError) {
+    params.log.error({ error: claimError, jobId: params.jobId }, "failed to claim async compile job locally");
+    return;
+  }
+
+  if (!claimedJob) {
+    return;
+  }
+
+  try {
+    const result = await compilePromptPackageV2(params.compileInput);
+    await supabaseAdmin
+      .from("compile_jobs")
+      .update({
+        status: "completed",
+        result,
+        completed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", params.jobId);
+  } catch (error) {
+    params.log.error({ error, jobId: params.jobId }, "async compile job failed locally");
+    await supabaseAdmin
+      .from("compile_jobs")
+      .update({
+        status: "failed",
+        error_json: {
+          message: error instanceof Error ? error.message : "Async compile failed"
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", params.jobId);
+  }
+}
+
 function selectReraQrAssetForProject(
   assets: BrandAssetRecord[],
   projectId?: string | null,
@@ -771,6 +823,13 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     }
 
     const jobId = compileJob.id;
+    const backgroundLog = request.log.child({ jobId, route: "compile-v2-async" });
+
+    void processCompileJobLocally({
+      jobId,
+      compileInput,
+      log: backgroundLog
+    });
 
     void fetch(`${env.SUPABASE_URL}/functions/v1/process-compile-jobs`, {
       method: "POST",
