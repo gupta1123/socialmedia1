@@ -316,6 +316,10 @@ def execute_with_trace(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[st
                 template_note=build_template_note(bundle),
                 logo_image_path=derive_logo_image_url(payload),
                 logo_note=build_logo_note(bundle),
+                canonical_project_name=get_project_display_name(payload),
+                exact_text_supplied=has_exact_text_input(payload),
+                exact_logo_supplied=has_exact_logo_input(payload),
+                exact_rera_qr_supplied=has_exact_rera_qr_input(payload),
                 requested_variation_count=derive_requested_variation_count(payload),
                 print_steps=False,
             )
@@ -549,6 +553,7 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "Every variation must use a different poster_archetype.",
             "Do not create superficial copies with renamed titles.",
             "Route 1 may keep the analyst's selected archetype when it fits. Remaining routes must choose other compatible archetypes for the same asset and business job.",
+            "For project_launch and site_visit_invite, every registered poster_archetype is allowed. Rank by asset fit and business job, but do not treat post type alone as a blocker.",
             "All variations must preserve the same project truth, asset truth, and text-policy obligations.",
             "If the asset limits possible diversity, choose the nearest distinct compatible archetypes instead of forcing invalid styles.",
             "Every prompt must remain a finished social poster, not a scenic base-image prompt.",
@@ -556,6 +561,14 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "Do not invent address lines, street names, RERA, contact details, or location facts that are not grounded in the brief analysis.",
             "Do not include phone numbers, WhatsApp numbers, website URLs, email addresses, social handles, RERA numbers, or contact details unless they are explicitly supplied in exact requested text or the brief.",
             "Do not include a logo, brand mark, emblem, monogram, watermark, or invented branding asset unless an exact logo is supplied in the input.",
+            "Do not invent asset filenames, reference filenames, filepaths, or hero image names. If asset_decision.filename is null, describe the visual subject without naming a file.",
+            "Do not write literal placeholder labels such as Address, Headline, Call to Action, Contact Details, Phone, Website, RERA, Logo, or Brand Mark.",
+            "If brief_analysis.exact_text_supplied is false, do not name text fields. Use generic copy language like short invitation line or minimal copy block.",
+            "If exact logo or RERA QR assets are not supplied, do not mention logo, brand mark, watermark, QR, or RERA in the prompt or negative prompt.",
+            "Keep the negative prompt visual-only. Do not put compliance, contact, logo, URL, email, phone, RERA, placeholder, or address words in negative.",
+            "Do not expose internal labels such as Business job, Text architecture, Layout, Voice, Brand visibility, Density, or Visual mode in the prompt. Translate them into natural visual direction.",
+            "If copy is not supplied, describe the hierarchy generically without naming unavailable text fields.",
+            "For site-visit creatives, the invitation CTA may be implied compositionally, but do not request contact details unless supplied.",
             "Treat project_name strictly as the project display name, not as a city or geographic setting. If the name could be a place name, write 'project named <project_name>' and keep actual location context separate.",
             "For each variation, provide title, strategy, poster_archetype, prompt, negative, and difference_from_others.",
         ]
@@ -574,6 +587,19 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "Every kept variation must preserve exact text obligations and must not invent address lines, street names, location facts, contact details, or RERA details.",
             "Every kept variation must omit phone numbers, WhatsApp numbers, website URLs, email addresses, social handles, RERA numbers, and contact details unless exact requested text or the brief supplies them.",
             "Every kept variation must omit logos, brand marks, emblems, monograms, watermarks, and invented branding assets unless an exact logo is supplied in the input.",
+            "Every kept variation must omit invented asset filenames, filepaths, and hero image names. If no filename is supplied in asset_decision, never write one in prompt_summary, revised_prompt, or revised_negative.",
+            "Every kept variation must remove literal placeholder labels such as Address, Headline, Call to Action, Contact Details, Phone, Website, RERA, Logo, or Brand Mark.",
+            "If text is not supplied, keep copy direction generic and do not name unavailable text fields.",
+            "When brief_analysis.exact_text_supplied is false, prompt_summary, revised_prompt, and revised_negative must not contain address, headline, CTA, call to action, contact details, phone, website, email, RERA, logo, watermark, brand mark, or invented filenames.",
+            "If no exact text is supplied, revised_prompt must not contain field-label lists such as headline/location/CTA/contact/RERA. Rewrite them as a generic short invitation hierarchy.",
+            "If the crafted prompt asks for unavailable contact, compliance, logo, or placeholder text, you must rewrite the sentence instead of approving it.",
+            "Keep revised_negative visual-only. Do not use it for contact, compliance, logo, URL, email, phone, RERA, or placeholder restrictions.",
+            "revised_negative should be a short visual-quality list only, for example: low quality, clutter, harsh lighting, distorted architecture.",
+            "revised_negative must not contain these words: phone, website, email, contact, RERA, logo, watermark, placeholder, address, URL.",
+            "revised_prompt must not expose internal compiler labels such as Business job, Text architecture, Layout, Voice, Brand visibility, Density, Visual mode, or Hero presentation.",
+            "Translate internal text architecture into natural creative direction. If exact_text_supplied is false, use 'minimal invitation copy treatment' instead of address/headline/CTA wording.",
+            "Use 'contact info' rather than 'contact details' in any negative constraint that must refer to contact.",
+            "Use the project_name value from brief_analysis exactly. Do not spell-correct, expand, translate, or rename it.",
             "Every kept variation must treat project_name as a display name only. Revise wording like 'in <project_name>' or '<project_name> project' when it could imply location.",
             "Every kept variation must feel poster-grade, not scenic-render-grade.",
             "",
@@ -581,6 +607,7 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "- poster_archetypes must be distinct",
             "- prompts must not be near-duplicates with renamed labels",
             "- weak or invalid routes must be revised into clearly different compatible routes",
+            "- for project_launch and site_visit_invite, do not reject an archetype solely because it is unusual for the post type",
             "",
             "Per-route checks:",
             "- truthfulness and recognisability",
@@ -682,6 +709,10 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
         template_note: str | None = None,
         logo_image_path: str | None = None,
         logo_note: str | None = None,
+        canonical_project_name: str | None = None,
+        exact_text_supplied: bool = False,
+        exact_logo_supplied: bool = False,
+        exact_rera_qr_supplied: bool = False,
         requested_variation_count: int = 1,
         session_id: str | None = None,
         print_steps: bool = True,
@@ -707,8 +738,29 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
         if analyst_images:
             analyst_kwargs["images"] = analyst_images
         analyst_response = analyst.run(**analyst_kwargs)
-        analysis = repair_analysis_grounding(analyst_response.content)
+        analysis_content = coerce_notebook_model_content(
+            analyst_response.content,
+            namespace.get("BriefAnalysis"),
+            "analyst",
+        )
+        analysis = repair_analysis_grounding(analysis_content)
         analysis_payload = to_jsonable_model(analysis)
+        if canonical_project_name:
+            analysis_payload["project_name"] = canonical_project_name
+        analysis_payload["exact_text_supplied"] = exact_text_supplied
+        analysis_payload["exact_logo_supplied"] = exact_logo_supplied
+        analysis_payload["exact_rera_qr_supplied"] = exact_rera_qr_supplied
+        if not exact_text_supplied:
+            if analysis_payload.get("text_architecture") in {"address_first", "footer_heavy"}:
+                analysis_payload["text_architecture"] = "slogan_first"
+            analysis_payload["required_data"] = [
+                item
+                for item in coerce_string_list(analysis_payload.get("required_data"))
+                if normalize_choice_token(item) not in {"address", "rera", "rera_number", "contact", "contact_details", "phone", "website", "email"}
+            ]
+            analysis_payload["copy_availability_note"] = (
+                "No exact copy was supplied. Do not name unavailable text fields; use a minimal invitation copy treatment."
+            )
         variation_count = clamp_requested_variation_count(requested_variation_count)
 
         crafter_response = crafter.run(
@@ -774,6 +826,10 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
         template_note: str | None = None,
         logo_image_path: str | None = None,
         logo_note: str | None = None,
+        canonical_project_name: str | None = None,
+        exact_text_supplied: bool = False,
+        exact_logo_supplied: bool = False,
+        exact_rera_qr_supplied: bool = False,
         requested_variation_count: int = 1,
         session_id: str | None = None,
         print_steps: bool = True,
@@ -789,6 +845,10 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
             template_note=template_note,
             logo_image_path=logo_image_path,
             logo_note=logo_note,
+            canonical_project_name=canonical_project_name,
+            exact_text_supplied=exact_text_supplied,
+            exact_logo_supplied=exact_logo_supplied,
+            exact_rera_qr_supplied=exact_rera_qr_supplied,
             requested_variation_count=requested_variation_count,
             session_id=session_id,
             print_steps=print_steps,
@@ -834,6 +894,42 @@ def to_jsonable_model(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
     return value
+
+
+def coerce_notebook_model_content(content: Any, model_cls: Any, stage_name: str) -> Any:
+    if model_cls is None or isinstance(content, model_cls):
+        return content
+    if isinstance(content, dict):
+        return model_cls.model_validate(content)
+    if isinstance(content, str):
+        parsed = parse_json_object_from_text(content)
+        if isinstance(parsed, dict):
+            return model_cls.model_validate(parsed)
+        excerpt = content.strip().replace("\n", " ")[:300]
+        raise RuntimeError(f"{stage_name} returned non-structured content: {excerpt}")
+    return content
+
+
+def parse_json_object_from_text(text: str) -> Any:
+    stripped = text.strip()
+    if not stripped:
+        return None
+    for candidate in (stripped, extract_braced_json_candidate(stripped)):
+        if not candidate:
+            continue
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def extract_braced_json_candidate(text: str) -> str | None:
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    return text[start : end + 1]
 
 
 def sync_notebook_runtime_data(namespace: dict[str, Any], payload: dict[str, Any]) -> None:
@@ -1286,6 +1382,29 @@ def rank_archetypes_for_analysis(analysis: dict[str, Any]) -> list[str]:
                 "organic_shape_launch",
                 "watermark_catalog",
                 "inset_image_card",
+            ]
+        )
+    elif post_type == "site_visit_invite":
+        ranked.extend(
+            [
+                "documentary_presence",
+                "side_crop_premium_tower",
+                "clear_sky_statement",
+                "footer_builder_campaign",
+                "centered_monolith",
+                "white_space_editorial_statement",
+                "philosophy_open_field",
+                "swiss_grid_premium",
+                "soft_editorial_cutout",
+                "inset_image_card",
+                "watermark_catalog",
+                "organic_shape_launch",
+                "dusk_emotional_crop",
+                "masterplan_scale_reveal",
+                "quote_led_editorial",
+                "symbolic_festive_field",
+                "scarcity_panel",
+                "ultra_minimal_address",
             ]
         )
     elif post_type == "construction_update":
@@ -1877,12 +1996,13 @@ def append_project_identity_guardrail(text: str, payload: dict[str, Any]) -> str
 
 def append_output_authenticity_guardrails(text: str, payload: dict[str, Any]) -> str:
     clauses = [
-        "Do not include phone numbers, WhatsApp numbers, website URLs, email addresses, social handles, RERA numbers, or contact details unless they are explicitly supplied in exact requested text or the brief.",
+        "Do not add unsupplied phone, WhatsApp, website, email, social, RERA, or contact info.",
+        "Do not add unavailable field-label text or placeholder copy.",
     ]
 
     if not has_exact_logo_input(payload):
         clauses.append(
-            "Do not include any logo, brand mark, emblem, monogram, watermark, or invented branding asset."
+            "Do not add logos, brand marks, emblems, monograms, or watermarks unless a logo asset is supplied."
         )
 
     output = text
@@ -1897,6 +2017,18 @@ def has_exact_logo_input(payload: dict[str, Any]) -> bool:
     request_context = bundle.get("requestContext") or {}
     exact_assets = bundle.get("exactAssetContract") or {}
     return bool(request_context.get("includeBrandLogo") and exact_assets.get("logoAssetId"))
+
+
+def has_exact_rera_qr_input(payload: dict[str, Any]) -> bool:
+    bundle = payload.get("truthBundle") or {}
+    request_context = bundle.get("requestContext") or {}
+    exact_assets = bundle.get("exactAssetContract") or {}
+    return bool(request_context.get("includeReraQr") and exact_assets.get("reraQrAssetId"))
+
+
+def has_exact_text_input(payload: dict[str, Any]) -> bool:
+    request_context = (payload.get("truthBundle") or {}).get("requestContext") or {}
+    return bool(str(request_context.get("exactText") or "").strip())
 
 
 def get_project_display_name(payload: dict[str, Any]) -> str:
