@@ -40,7 +40,7 @@ import {
 } from "../lib/deliverables-repository.js";
 import { createSignedImageUrls } from "../lib/storage.js";
 import { supabaseAdmin } from "../lib/supabase.js";
-import { randomId } from "../lib/utils.js";
+import { deriveAspectRatio, randomId } from "../lib/utils.js";
 import {
   getFinalProviderModel,
   getStyleSeedProviderModel,
@@ -289,6 +289,7 @@ function buildPreparedV2CompileInput(context: any) {
     brandAssets: context.allAssets,
     projectId: context.project?.id ?? null,
     projectName: context.project?.name ?? null,
+    projectSlug: context.project?.slug ?? null,
     projectStage: context.project?.stage ?? null,
     projectProfile: context.projectProfileVersion?.profile ?? null,
     festival: context.festival,
@@ -304,6 +305,7 @@ function buildPreparedV2CompileInput(context: any) {
           channel: context.reusableTemplate.channel,
           format: context.reusableTemplate.format,
           basePrompt: context.reusableTemplate.basePrompt,
+          previewStoragePath: context.reusableTemplate.previewStoragePath,
           config: context.reusableTemplate.config,
           linkedAssets: context.reusableTemplateAssets.map((asset: any) => ({
             assetId: asset.assetId,
@@ -364,6 +366,7 @@ function buildPreviewV2PromptPackage(
     creativeRequestId: randomId(),
     brandProfileVersionId: context.brandProfileVersion.id,
     promptSummary: compiled.promptSummary,
+    seedPrompt: compiled.seedPrompt,
     finalPrompt: compiled.finalPrompt,
     aspectRatio: compiled.aspectRatio,
     chosenModel: compiled.chosenModel,
@@ -739,7 +742,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const compileInput = buildPreparedV2CompileInput(prepared.context);
     const preparedPayload = {
       sourceBrief: prepared.context.sourceBriefSnapshot,
-      payload: buildCanonicalV2AgentPayload(compileInput),
+      payload: await buildCanonicalV2AgentPayload(compileInput),
       meta: {
         autoCopyStripped: prepared.context.autoCopyStripped,
         brandProfileVersionId: prepared.context.brandProfileVersion.id,
@@ -1000,7 +1003,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         creative_request_id: promptPackage.creativeRequestId,
         brand_profile_version_id: promptPackage.brandProfileVersionId,
         prompt_summary: promptPackage.promptSummary,
-        seed_prompt: promptPackage.finalPrompt,
+        seed_prompt: promptPackage.seedPrompt ?? promptPackage.finalPrompt,
         final_prompt: promptPackage.finalPrompt,
         aspect_ratio: promptPackage.aspectRatio,
         chosen_model: promptPackage.chosenModel,
@@ -1120,7 +1123,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const referenceStoragePaths = collectReferenceStoragePaths(referencePlan);
     const filteredRefs = filterReferenceStoragePathsForPrompt(
       referencePlan,
-      variations[0]?.finalPrompt ?? "",
+      variations[0]?.seedPrompt ?? variations[0]?.finalPrompt ?? promptPackage.seedPrompt ?? promptPackage.finalPrompt,
       getPostTypeCode(promptPackage) ?? "default"
     );
     const finalReferenceCount = filteredRefs.length;
@@ -1129,10 +1132,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const v2OptionBatchId = randomId();
     const preparedOptionJobs = variations.map((variation) => {
       const jobId = randomId();
-      const optionPromptWithRoles =
-        finalReferenceCount > 0
-          ? buildV2RoleAwarePrompt(variation.finalPrompt, referencePlan, "final", getPostTypeCode(promptPackage))
-          : variation.finalPrompt;
+      const optionPrompt = variation.seedPrompt ?? variation.finalPrompt;
       const optionJob: CreativeJobRecord = {
         id: jobId,
         workspaceId: promptPackage.workspaceId,
@@ -1144,7 +1144,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         calendarItemId: promptPackage.calendarItemId,
         promptPackageId: promptPackage.id,
         selectedTemplateId: null,
-        jobType: "final" as const,
+        jobType: "option" as const,
         status: "queued" as const,
         provider: optionProvider,
         providerModel: optionProviderModel,
@@ -1160,7 +1160,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         variationId: variation.id,
         variationTitle: variation.title,
         variationStrategy: variation.strategy,
-        optionPromptWithRoles,
+        optionPrompt,
         optionJob
       };
     });
@@ -1179,7 +1179,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
             actorUserId: viewer.userId,
             metadata: {
               endpoint: "/api/creative/options",
-              jobType: "final",
+              jobType: "option",
               promptPackageId: promptPackage.id,
               variationId: option.variationId
             }
@@ -1211,7 +1211,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     }
 
     const { error } = await supabaseAdmin.from("creative_jobs").insert(
-      preparedOptionJobs.map(({ jobId, variationId, variationTitle, variationStrategy, optionPromptWithRoles }) => ({
+      preparedOptionJobs.map(({ jobId, variationId, variationTitle, variationStrategy, optionPrompt }) => ({
         id: jobId,
         workspace_id: promptPackage.workspaceId,
         brand_id: promptPackage.brandId,
@@ -1222,13 +1222,13 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         calendar_item_id: promptPackage.calendarItemId,
         prompt_package_id: promptPackage.id,
         selected_template_id: null,
-        job_type: "final",
+        job_type: "option",
         status: "queued",
         provider: optionProvider,
         provider_model: optionProviderModel,
         requested_count: 1,
         request_payload: {
-          prompt: optionPromptWithRoles,
+          prompt: optionPrompt,
           aspectRatio: promptPackage.aspectRatio,
           count: 1,
           v2OptionBatchId,
@@ -1259,7 +1259,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const jobs: Array<{ id: string; variationId: string; variationTitle: string; requestId: string | null }> = [];
 
     if (isImmediateImageProvider(optionProvider)) {
-      for (const { jobId, variationId, variationTitle, optionPromptWithRoles, optionJob } of preparedOptionJobs) {
+      for (const { jobId, variationId, variationTitle, optionPrompt, optionJob } of preparedOptionJobs) {
         let requestInfo: { request_id: string } | null = null;
 
         requestInfo = { request_id: `${optionProvider}-v2-option-${jobId}` };
@@ -1290,7 +1290,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
             providerRequestId: requestInfo.request_id,
             status: "processing"
           },
-          prompt: optionPromptWithRoles,
+          prompt: optionPrompt,
           aspectRatio: promptPackage.aspectRatio,
           referenceStoragePaths,
           mode: "final",
@@ -1326,12 +1326,12 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
       // FAL option submissions are more reliable when serialized. The single-option
       // paths already behave this way; only multi-option generation was fan-out parallel.
-      for (const { jobId, variationId, variationTitle, optionPromptWithRoles, optionJob } of preparedOptionJobs) {
+      for (const { jobId, variationId, variationTitle, optionPrompt, optionJob } of preparedOptionJobs) {
         try {
           const requestInfo = await submitFinalGeneration(
             optionJob,
             {
-              prompt: optionPromptWithRoles,
+              prompt: optionPrompt,
               aspectRatio: promptPackage.aspectRatio
             },
             filteredRefs
@@ -1519,12 +1519,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     };
     const referenceStoragePaths = collectReferenceStoragePaths(referencePlan);
     const seedReferenceCount = referenceStoragePaths.length;
-    const seedPromptWithRoles =
-      seedReferenceCount > 0
-        ? isV2PromptPackage(promptPackage)
-          ? buildV2RoleAwarePrompt(promptPackage.finalPrompt, referencePlan, "seed", getPostTypeCode(promptPackage))
-          : buildRoleAwarePrompt(promptPackage.finalPrompt, referencePlan, "seed")
-        : promptPackage.finalPrompt;
+    const seedPrompt = promptPackage.seedPrompt ?? promptPackage.finalPrompt;
     const seedProvider = resolveImageGenerationProvider();
     const seedProviderModel = getStyleSeedProviderModel(seedReferenceCount);
     const jobId = randomId();
@@ -1598,7 +1593,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       provider_model: seedProviderModel,
       requested_count: body.count,
       request_payload: {
-        prompt: seedPromptWithRoles,
+        prompt: seedPrompt,
         aspectRatio: promptPackage.aspectRatio,
         count: body.count,
         referenceCount: seedReferenceCount,
@@ -1665,7 +1660,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           providerRequestId: requestInfo.request_id,
           status: "processing"
         },
-        prompt: seedPromptWithRoles,
+        prompt: seedPrompt,
         aspectRatio: promptPackage.aspectRatio,
         referenceStoragePaths,
         mode: "seed",
@@ -1673,12 +1668,12 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         postTypeCode: getPostTypeCode(promptPackage)
       });
     } else {
-      const filteredRefs = filterReferenceStoragePathsForPrompt(referencePlan, seedPromptWithRoles, getPostTypeCode(promptPackage) ?? "default");
+      const filteredRefs = filterReferenceStoragePathsForPrompt(referencePlan, seedPrompt, getPostTypeCode(promptPackage) ?? "default");
       try {
         requestInfo = await submitStyleSeedGeneration(
           styleSeedJob,
           {
-            prompt: seedPromptWithRoles,
+            prompt: seedPrompt,
             aspectRatio: promptPackage.aspectRatio
           },
           filteredRefs
@@ -1836,13 +1831,11 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         storagePath: asset.storagePath
       }))
     };
-    const finalPromptWithRoles = isV2PromptPackage(promptPackage)
-      ? buildV2RoleAwarePrompt(promptPackage.finalPrompt, referencePlan, "final", getPostTypeCode(promptPackage))
-      : buildRoleAwarePrompt(promptPackage.finalPrompt, referencePlan, "final");
+    const finalPrompt = promptPackage.finalPrompt;
     const referenceStoragePaths = collectReferenceStoragePaths(referencePlan);
     const filteredRefs = filterReferenceStoragePathsForPrompt(
       referencePlan,
-      finalPromptWithRoles,
+      finalPrompt,
       getPostTypeCode(promptPackage) ?? "default"
     );
     const expectedReferenceCount = filteredRefs.length;
@@ -1918,7 +1911,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       provider_model: finalProviderModel,
       requested_count: body.count,
       request_payload: {
-        prompt: finalPromptWithRoles,
+        prompt: finalPrompt,
         aspectRatio: promptPackage.aspectRatio,
         count: body.count,
         selectedTemplateId: body.selectedTemplateId ?? null,
@@ -1982,7 +1975,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           providerRequestId: requestInfo.request_id,
           status: "processing"
         },
-        prompt: finalPromptWithRoles,
+        prompt: finalPrompt,
         aspectRatio: promptPackage.aspectRatio,
         referenceStoragePaths,
         mode: "final",
@@ -1994,7 +1987,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         requestInfo = await submitFinalGeneration(
           finalJobRecord,
           {
-            prompt: finalPromptWithRoles,
+            prompt: finalPrompt,
             aspectRatio: promptPackage.aspectRatio
           },
           filteredRefs
@@ -2466,308 +2459,6 @@ function sortAssetsByIdOrder<T extends { id: string }>(assets: T[], orderedIds: 
   return [...assets].sort((left, right) => (rank.get(left.id) ?? 999) - (rank.get(right.id) ?? 999));
 }
 
-function buildRoleAwarePrompt(
-  basePrompt: string,
-  plan: RoleAwareReferencePlan,
-  mode: "seed" | "final"
-) {
-  const roleLines: string[] = [];
-
-  if (plan.primaryAnchor?.role === "template") {
-    roleLines.push(
-      `Image 1 is the master template anchor (${plan.primaryAnchor.label}). Use it for layout language, spacing, hierarchy, safe zones, and overall design system. Do not copy its exact text, logo, or content.`
-    );
-  } else if (plan.primaryAnchor?.role === "source_post") {
-    roleLines.push(
-      "Image 1 is the source post. Preserve its core subject, framing intent, and visual identity while creating a refined new version."
-    );
-  }
-
-  if (plan.sourcePost) {
-    const sourcePostIndex = plan.primaryAnchor ? 2 : 1;
-    roleLines.push(
-      `Image ${sourcePostIndex} is the source post. Preserve its core subject and message, but restyle it using the primary template anchor.`
-    );
-  }
-
-  if (plan.amenityAnchor) {
-    roleLines.push(
-      `Use the amenity as the hero subject. Preserve its function, spatial cues, materiality, and lifestyle context. Do not switch to a different facility or amenity type.`
-    );
-  }
-
-  if (plan.projectAnchor) {
-    roleLines.push(
-      plan.amenityAnchor
-        ? `Use the project reference for building identity and architectural context only. It must not replace the amenity as the hero subject.`
-        : `Use the project building reference for subject truth. Preserve its tower identity, facade rhythm, massing, proportions, podium composition, balcony language, and overall silhouette.`
-    );
-  }
-
-  if (plan.brandLogo) {
-    roleLines.push(
-      `Use the brand logo as a small integrated footer/signature element. Match the exact lockup, shape, colors, and spacing. Blend it into a quiet designed logo zone with proper margin, scale, and tonal harmony so it feels part of the composition, never like a pasted sticker or floating overlay. Do not redraw, stylize, or invent a replacement.`
-    );
-  }
-
-  if (plan.complianceQr) {
-    roleLines.push(
-      `Use the RERA QR as a small compliance element. Match the exact QR matrix. Keep it flat, unobstructed, and legible. Do not stylize or decorate.`
-    );
-  }
-
-  if (plan.references.length > 0) {
-    roleLines.push(
-      `Use any additional references only for architecture, materials, lighting, mood, and context. Do not let them override the hero subject.`
-    );
-  }
-
-  if (plan.amenityAnchor && plan.projectAnchor) {
-    roleLines.push(
-      "Use the amenity reference for the hero subject and the project reference only for brand-truth context."
-    );
-  } else if (plan.projectAnchor) {
-    roleLines.push(
-      "When images conflict, preserve the project reference for subject truth first, then use other references only for mood, realism, and finishing detail."
-    );
-  } else {
-    roleLines.push(
-      "When images conflict, follow the template or source anchor for structure first, then use supporting references for subject detail and realism."
-    );
-  }
-
-  if (plan.brandLogo) {
-    roleLines.push(
-      mode === "seed"
-        ? "During style exploration, either place the supplied logo exactly as provided inside a quiet integrated footer/signature zone or keep its reserved area blank. It must never feel like a pasted sticker, floating badge, or top-layer overlay. Never generate a mock logo, substitute emblem, or placeholder footer mark."
-        : "Use the supplied logo only in a quiet integrated footer/signature zone with proper margin, scale, and tonal harmony. It must feel built into the layout, not pasted on top. If it cannot be rendered cleanly, keep it small and simple rather than inventing a distorted or incorrect logo mark."
-    );
-  }
-
-  if (plan.complianceQr) {
-    roleLines.push(
-      mode === "seed"
-        ? "During style exploration, either place the supplied RERA QR exactly as provided or keep its reserved area blank. Never generate a fake QR, barcode, badge, or placeholder compliance block."
-        : "Treat the RERA QR as a compliance artifact, not decoration. Keep a quiet surrounding area so it remains scannable."
-    );
-  }
-
-  if (mode === "seed") {
-    roleLines.push(
-      "This is a style exploration image. Prioritize composition, mood, pacing, and graphic language over dense copy."
-    );
-    roleLines.push(
-      "Each output image must contain one complete concept only. Do not return a contact sheet, multi-panel board, tiled grid, collage of alternatives, or several poster variations inside a single frame."
-    );
-    roleLines.push(
-      "Keep any on-canvas text extremely sparse. Do not include sample website text, page numbers, mock social handles, placeholder logos, or copied slogans from the input images."
-    );
-    if (plan.projectAnchor) {
-      roleLines.push(
-        "Even during style exploration, keep the actual building recognizable. Do not drift into a different generic tower or invented property facade."
-      );
-    }
-    if (plan.amenityAnchor) {
-      roleLines.push(
-        "Even during style exploration, keep the same amenity type. Do not turn the chosen lounge, pool, gym, or terrace into a different facility."
-      );
-    }
-  } else {
-    roleLines.push(
-      "Return one finished design per output image. Never create multiple alternate posters, tiled mini-designs, contact sheets, mood boards, or side-by-side concepts inside the same frame."
-    );
-    roleLines.push(
-      "Treat any text, logos, URLs, page numbers, handles, and placeholder brand names visible in the template, source-post, project, or supporting reference images as scaffolding only. Do not reproduce or remix them in the output. The only exceptions are the dedicated supplied brand logo and dedicated supplied RERA QR reference images, which must be used exactly as provided when enabled."
-    );
-    roleLines.push(
-      "Do not include sample website text, pagination markers, mock social handles, placeholder logos, or copied slogans from the reference images."
-    );
-    roleLines.push(
-      "Keep on-canvas typography minimal, clean, and legible. If supporting copy cannot be rendered cleanly, omit it instead of generating garbled text."
-    );
-    roleLines.push(
-      "Only render new text that matches the requested concept. Never copy literal words from the input images unless the prompt explicitly asks for them or they are part of the dedicated supplied brand logo / compliance reference assets."
-    );
-    if (plan.projectAnchor) {
-      roleLines.push(
-        "Do not replace the supplied project tower or facade with a different generic building. Keep the property identity visibly recognizable."
-      );
-    }
-    if (plan.amenityAnchor) {
-      roleLines.push(
-        "Do not swap the supplied amenity for a different one. Keep the chosen amenity visibly consistent with the reference."
-      );
-    }
-  }
-
-  roleLines.push("Keep the number of visual anchors low and synthesize them into one coherent output.");
-
-  return `${basePrompt} ${roleLines.join(" ")}`.trim();
-}
-
-function isV2PromptPackage(promptPackage: { compilerTrace?: Record<string, unknown> }) {
-  const trace = promptPackage.compilerTrace ?? {};
-  return (
-    trace.endpoint === "/api/creative/compile-v2" ||
-    trace.pipeline === "v2-notebook-two-agent" ||
-    trace.pipeline === "agno-sequential-workflow-v2" ||
-    trace.v2PostOptionGeneration === true ||
-    trace.v2StyleSeedGeneration === true
-  );
-}
-
-function stripInactiveLogoInstructions(prompt: string) {
-  return prompt
-    .split(/(?<=[.!?])\s+/)
-    .filter((sentence) => !/\b(?:logo|logomark|brand mark|brand signature|branding signature|transparent branding signature|signature element)\b/i.test(sentence))
-    .join(" ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
-function sanitizeFontNameAsHeadlineText(prompt: string) {
-  return prompt
-    .replace(/\b(?:bold|large|clean|premium|main)?\s*['"]Gotham['"]\s+(headline|title|text|copy)\b/gi, "premium concise $1")
-    .replace(/\bheadline\s+(?:reads|says)\s+['"]Gotham['"]\b/gi, "headline uses concise campaign copy")
-    .replace(/\btitle\s+(?:reads|says)\s+['"]Gotham['"]\b/gi, "title uses concise campaign copy");
-}
-
-function buildV2RoleAwarePrompt(
-  basePrompt: string,
-  plan: RoleAwareReferencePlan,
-  mode: "seed" | "final",
-  postTypeCode?: string
-) {
-  const roleLines: string[] = [];
-  const resolvedPostTypeCode = postTypeCode ?? "default";
-  const activeReferencePaths = new Set(
-    filterReferenceStoragePathsForPrompt(plan, basePrompt, resolvedPostTypeCode)
-  );
-  const hasActivePrimaryAnchor =
-    typeof plan.primaryAnchor?.storagePath === "string" &&
-    activeReferencePaths.has(plan.primaryAnchor.storagePath);
-  const hasActiveAmenityAnchor =
-    typeof plan.amenityAnchor?.storagePath === "string" &&
-    activeReferencePaths.has(plan.amenityAnchor.storagePath);
-  const hasActiveProjectAnchor =
-    typeof plan.projectAnchor?.storagePath === "string" &&
-    activeReferencePaths.has(plan.projectAnchor.storagePath);
-  const hasActiveBrandLogo =
-    typeof plan.brandLogo?.storagePath === "string" &&
-    activeReferencePaths.has(plan.brandLogo.storagePath);
-  const hasActiveComplianceQr =
-    typeof plan.complianceQr?.storagePath === "string" &&
-    activeReferencePaths.has(plan.complianceQr.storagePath);
-  const activeSecondaryReferences = plan.references.filter((reference) =>
-    activeReferencePaths.has(reference.storagePath)
-  );
-  const sanitizedBasePrompt = sanitizeFontNameAsHeadlineText(
-    hasActiveBrandLogo ? basePrompt : stripInactiveLogoInstructions(basePrompt)
-  );
-
-  const heroRef = getHeroReferenceForPostType(plan, resolvedPostTypeCode).filter((storagePath) =>
-    activeReferencePaths.has(storagePath)
-  );
-  const firstHeroRef = heroRef[0];
-  const heroAsset = firstHeroRef ? getAssetForPath(plan, firstHeroRef) : null;
-
-  if (heroAsset) {
-    const asset = heroAsset;
-    if (asset.role === "amenity_image") {
-      roleLines.push(
-        `Use the amenity as the hero subject. Preserve its function, spatial cues, materiality, and lifestyle context. Do not switch to a different facility or amenity type.`
-      );
-    } else if (asset.role === "project_image") {
-      roleLines.push(
-        `Use the project building as the primary reference. Preserve its tower identity, facade rhythm, massing, proportions, and overall silhouette.`
-      );
-    } else if (asset.role === "template") {
-      roleLines.push(
-        `Use the template for layout rhythm and safe-zone discipline.`
-      );
-    } else if (asset.role === "source_post") {
-      roleLines.push(
-        `Preserve the source post's core subject and framing intent.`
-      );
-    }
-  }
-
-  if (hasActivePrimaryAnchor && plan.primaryAnchor?.role === "template") {
-    roleLines.push(
-      `Use the template reference (${plan.primaryAnchor.label}) for layout rhythm, safe-zone planning, overlay discipline, spacing, and footer structure only. Do not copy its literal text, brand names, or placeholder content.`
-    );
-  } else if (hasActivePrimaryAnchor && plan.primaryAnchor?.role === "source_post") {
-    roleLines.push(
-      `Use the source-post reference (${plan.primaryAnchor.label}) only for framing intent and compositional structure. Do not copy its literal text or branding.`
-    );
-  }
-
-  if (resolvedPostTypeCode === "amenity-spotlight" && !hasActiveAmenityAnchor) {
-    roleLines.push(
-      "No exact amenity reference image was supplied for the requested facility. Generate the amenity scene without using a mismatched amenity or building image as the hero reference."
-    );
-    roleLines.push(
-      "Do not substitute a different amenity, facility, park, lawn, pool, plaza, or building facade from any reference image."
-    );
-  } else if (hasActiveProjectAnchor && hasActiveAmenityAnchor) {
-    roleLines.push(
-      "Use the amenity reference for the hero subject and use the project reference only for brand-truth context."
-    );
-  } else if (hasActiveProjectAnchor && !heroAsset) {
-    roleLines.push(
-      `Use the project building reference (${plan.projectAnchor?.label ?? "project reference"}) for project identity and architectural context.`
-    );
-  }
-
-  if (hasActiveAmenityAnchor && resolvedPostTypeCode === "amenity-spotlight") {
-    roleLines.push(
-      "Treat the chosen amenity reference as the sole visual truth anchor for the scene. Do not let generic building, lawn, clubhouse, or project-context imagery replace or dominate it."
-    );
-  }
-
-  if (hasActiveBrandLogo) {
-    roleLines.push(
-      `Use the brand logo (${plan.brandLogo?.label ?? "brand logo"}) as a small integrated footer/signature element. Match the exact lockup, shape, colors, and spacing. Blend it into a quiet designed logo zone with proper margin, scale, and tonal harmony so it feels built into the layout, never pasted on top.`
-    );
-  }
-
-  if (hasActiveComplianceQr) {
-    roleLines.push(
-      `Use the RERA QR (${plan.complianceQr?.label ?? "RERA QR"}) as a small compliance element if needed.`
-    );
-  }
-
-  if (activeSecondaryReferences.length > 0) {
-    roleLines.push(
-      "If an additional style or context reference is supplied, use it only for layout rhythm, overlay discipline, material language, atmosphere, or premium finishing detail. It must never override the hero subject."
-    );
-  }
-
-  roleLines.push(
-    mode === "seed"
-      ? "One complete style direction only; no grid, collage, contact sheet, or multiple poster options."
-      : "One finished design only; keep text minimal, clean, and legible."
-  );
-
-  if (hasActiveProjectAnchor) {
-    roleLines.push("Do not replace the supplied project with a different generic building.");
-  }
-
-  return `${sanitizedBasePrompt} ${roleLines.join(" ")}`.trim();
-}
-
-function getAssetForPath(plan: RoleAwareReferencePlan, storagePath: string): { role: string; label: string } | null {
-  if (plan.primaryAnchor?.storagePath === storagePath) return { role: plan.primaryAnchor.role, label: plan.primaryAnchor.label };
-  if (plan.sourcePost?.storagePath === storagePath) return { role: plan.sourcePost.role, label: plan.sourcePost.label };
-  if (plan.amenityAnchor?.storagePath === storagePath) return { role: "amenity_image", label: plan.amenityAnchor.label };
-  if (plan.projectAnchor?.storagePath === storagePath) return { role: "project_image", label: plan.projectAnchor.label };
-  if (plan.brandLogo?.storagePath === storagePath) return { role: "brand_logo", label: plan.brandLogo.label };
-  if (plan.complianceQr?.storagePath === storagePath) return { role: "rera_qr", label: plan.complianceQr.label };
-  const reference = plan.references.find((entry) => entry.storagePath === storagePath);
-  if (reference) return { role: "reference", label: reference.label };
-  return null;
-}
-
 function getPostTypeCode(promptPackage: { postType?: { code: string }; resolvedConstraints?: Record<string, unknown>; compilerTrace?: Record<string, unknown>; postTypeId?: string | null }): string {
   if (promptPackage.postType?.code) {
     return promptPackage.postType.code;
@@ -2868,50 +2559,6 @@ function filterReferenceStoragePathsForPrompt(
   return result;
 }
 
-function getHeroReferenceForPostType(plan: RoleAwareReferencePlan, postTypeCode: string): string[] {
-  switch (postTypeCode) {
-    case "amenity-spotlight":
-      return plan.amenityAnchor?.storagePath 
-        ? [plan.amenityAnchor.storagePath]
-        : [];
-    
-    case "construction-update":
-    case "project-launch":
-      return plan.projectAnchor?.storagePath
-        ? [plan.projectAnchor.storagePath]
-        : [];
-    
-    case "sample-flat-showcase":
-    case "site-visit-invite":
-      return plan.projectAnchor?.storagePath
-        ? [plan.projectAnchor.storagePath]
-        : [];
-
-    case "location-advantage":
-      return [
-        plan.projectAnchor?.storagePath,
-        plan.primaryAnchor?.storagePath
-      ].filter((v): v is string => typeof v === "string" && v.length > 0);
-
-    case "testimonial":
-      return [
-        plan.primaryAnchor?.storagePath,
-        plan.projectAnchor?.storagePath
-      ].filter((v): v is string => typeof v === "string" && v.length > 0);
-    
-    case "festive-greeting":
-      return plan.primaryAnchor?.storagePath
-        ? [plan.primaryAnchor.storagePath]
-        : [];
-    
-    default:
-      return [
-        plan.amenityAnchor?.storagePath,
-        plan.projectAnchor?.storagePath,
-        plan.primaryAnchor?.storagePath
-      ].filter((v): v is string => typeof v === "string" && v.length > 0);
-  }
-}
 
 async function runImmediateProviderJob({
   job,
@@ -3223,6 +2870,7 @@ function normalizeAsyncTemplateType(templateType: unknown) {
 function normalizeAsyncVariations(
   value: unknown,
   fallback: {
+    seedPrompt: string;
     finalPrompt: string;
   }
 ) {
@@ -3230,10 +2878,13 @@ function normalizeAsyncVariations(
   const normalized = rows
     .map((row, index) => {
       const record = asObject(row);
+      const seedPrompt =
+        asOptionalString(record.seedPrompt) ??
+        asOptionalString(record.finalPrompt);
       const finalPrompt =
         asOptionalString(record.finalPrompt) ??
         asOptionalString(record.seedPrompt);
-      if (!finalPrompt) {
+      if (!seedPrompt || !finalPrompt) {
         return null;
       }
 
@@ -3241,6 +2892,7 @@ function normalizeAsyncVariations(
         id: asOptionalString(record.id) ?? `variation_${index + 1}`,
         title: asOptionalString(record.title) ?? `Variation ${index + 1}`,
         strategy: asOptionalString(record.strategy) ?? "Distinct creative route",
+        seedPrompt,
         finalPrompt,
         resolvedConstraints: asObject(record.resolvedConstraints),
         compilerTrace: asObject(record.compilerTrace)
@@ -3257,6 +2909,7 @@ function normalizeAsyncVariations(
       id: "variation_1",
       title: "Primary route",
       strategy: "Primary route",
+      seedPrompt: fallback.seedPrompt,
       finalPrompt: fallback.finalPrompt,
       resolvedConstraints: {},
       compilerTrace: {}
@@ -3320,11 +2973,15 @@ async function buildAsyncV2PromptPackage(params: {
       : null;
 
   const referenceStrategy = normalizeAsyncReferenceStrategy(rawCompiled.referenceStrategy, referenceAssetIds);
+  const seedPrompt =
+    asOptionalString(rawCompiled.seedPrompt) ??
+    asOptionalString(rawCompiled.finalPrompt) ??
+    "";
   const finalPrompt =
     asOptionalString(rawCompiled.finalPrompt) ??
     asOptionalString(rawCompiled.seedPrompt) ??
     "";
-  if (!finalPrompt) {
+  if (!seedPrompt || !finalPrompt) {
     throw new Error("Async compile result is missing finalPrompt");
   }
 
@@ -3340,13 +2997,15 @@ async function buildAsyncV2PromptPackage(params: {
     creativeRequestId: params.compileJob.id,
     brandProfileVersionId: persistedBrandProfileVersionId ?? brandProfileVersion!.id,
     promptSummary: asOptionalString(rawCompiled.promptSummary) ?? "Compiled prompt package",
+    seedPrompt,
     finalPrompt,
-    aspectRatio: asOptionalString(rawCompiled.aspectRatio) ?? "1:1",
+    aspectRatio: deriveAspectRatio(sourceBrief.format),
     chosenModel: asOptionalString(rawCompiled.chosenModel) ?? "unknown",
     templateType: normalizeAsyncTemplateType(rawCompiled.templateType),
     referenceStrategy,
     referenceAssetIds,
     variations: normalizeAsyncVariations(rawCompiled.variations, {
+      seedPrompt,
       finalPrompt
     }),
     resolvedConstraints: {

@@ -175,7 +175,7 @@ export async function getFalResult(endpoint: string, requestId: string) {
 
 export async function uploadStoragePathToFal(path: string) {
   if (!env.FAL_KEY) {
-    throw new Error("FAL_KEY is required to upload references to Fal storage");
+    return `mock://fal-storage/${encodeURIComponent(path)}`;
   }
 
   const blob = await downloadStorageBlob(path);

@@ -1,0 +1,35 @@
+{
+  "brand_name": "Horizon Living",
+  "tagline": "Elevate Your Everyday",
+  "visual_positioning": "Premium editorial real-estate brand with warm, clean, uncluttered social visuals",
+  "architecture_style_brand_note": "Contemporary modern presentation; do not override project-specific architecture",
+  "primary_colors": [
+    "#1A3C5E",
+    "#C8A96E"
+  ],
+  "secondary_colors": [
+    "#F5F1EB",
+    "#2E2E2E"
+  ],
+  "typography_mood": "Minimal, modern, premium sans-serif",
+  "target_audience": "Urban Indian families, age 28-45, upper-middle to premium segment",
+  "people_representation": "Natural Indian families or professionals, warm and believable, not stock-photo stiff",
+  "text_policy_default": "exact_text",
+  "visual_donts": [
+    "Do not invent logos",
+    "Do not force heavy text into the generated image unless explicitly requested",
+    "Do not use cartoon or illustrated style",
+    "Do not use neon or oversaturated colors",
+    "Do not use cluttered brochure-style layouts",
+    "Do not let brand styling override project truth",
+    "Do not generate a plain hero image with normal text on top",
+    "Do not treat empty sky or generic clean space as poster composition",
+    "Do not produce scenic base visuals when a finished social poster is expected"
+  ],
+  "default_aspect_ratios": {
+    "social_post": "1:1",
+    "story": "9:16",
+    "banner": "16:9"
+  },
+  "delivery_mode_default": "finished_poster"
+}

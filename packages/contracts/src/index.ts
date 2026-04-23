@@ -89,7 +89,7 @@ export const JobStatusSchema = z.enum([
   "failed",
   "cancelled"
 ]);
-export const JobTypeSchema = z.enum(["style_seed", "final"]);
+export const JobTypeSchema = z.enum(["style_seed", "option", "final"]);
 export const OutputVerdictSchema = z.enum(["approved", "close", "off-brand", "wrong-layout", "wrong-text"]);
 export const OutputReviewStateSchema = z.enum(["pending_review", "approved", "needs_revision", "closed"]);
 export const CreditLedgerDirectionSchema = z.enum(["credit", "debit"]);
@@ -692,6 +692,7 @@ export const PromptVariationSchema = z.object({
   id: z.string(),
   title: z.string(),
   strategy: z.string(),
+  seedPrompt: z.string().optional(),
   finalPrompt: z.string(),
   resolvedConstraints: z.record(z.string(), z.unknown()).default({}),
   compilerTrace: z.record(z.string(), z.unknown()).default({})
@@ -709,6 +710,7 @@ export const PromptPackageSchema = z.object({
   creativeRequestId: z.string().uuid(),
   brandProfileVersionId: z.string().uuid(),
   promptSummary: z.string(),
+  seedPrompt: z.string().optional(),
   finalPrompt: z.string(),
   aspectRatio: z.string(),
   chosenModel: z.string(),

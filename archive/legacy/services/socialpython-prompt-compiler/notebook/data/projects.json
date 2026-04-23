@@ -1,0 +1,186 @@
+{
+  "horizon-heights": {
+    "project_name": "Horizon Heights",
+    "location": "Whitefield, Bangalore",
+    "type": "Premium Residential Tower",
+    "floors": 32,
+    "units": "2 BHK, 3 BHK, 4 BHK",
+    "status": "Under Construction \u2014 18 floors completed",
+    "completion_date": "Q4 2027",
+    "usp": "Rooftop infinity pool, sky lounge, EV charging on every floor",
+    "architecture_description": "Sleek glass-and-steel tower with a curved facade, vertical garden strips on alternating floors, grand double-height entrance lobby with water feature",
+    "rera_number": "PRM/KA/RERA/1251/446/PR/220101/004567",
+    "contact": "+91 98765 43210",
+    "amenities": [
+      "Infinity swimming pool (rooftop)",
+      "Sky lounge (32nd floor)",
+      "Fully equipped gymnasium",
+      "Landscaped central garden with jogging track",
+      "Kids' adventure play zone",
+      "Co-working lounge",
+      "Mini theatre",
+      "EV charging stations"
+    ],
+    "brand_assets": {
+      "logo_primary": {
+        "available": true,
+        "filename": "HH_LOGO_PRIMARY.png",
+        "description": "Primary Horizon Heights logo lockup on transparent background"
+      }
+    },
+    "image_library": {
+      "main_building_exterior": {
+        "available": true,
+        "filename": "HH_EXTERIOR_01.png",
+        "description": "Front elevation render of the 32-story tower at twilight, glass facade lit up, entrance lobby visible"
+      },
+      "aerial_view": {
+        "available": true,
+        "filename": "HH_AERIAL_01.png",
+        "description": "Drone shot from 200m showing the tower, surrounding landscaping, and nearby tech park"
+      },
+      "construction_progress": {
+        "available": true,
+        "filename": "HH_CONSTRUCTION_01.png",
+        "description": "Site photo showing 18 completed floors, crane on top, blue safety nets, workers visible on upper deck"
+      },
+      "entrance_gate": {
+        "available": true,
+        "filename": "HH_ENTRANCE_01.png",
+        "description": "Grand double-height entrance lobby with water feature and landscaped driveway"
+      },
+      "swimming_pool": {
+        "available": true,
+        "filename": "HH_POOL_01.png",
+        "description": "Rooftop infinity pool render with city skyline in background, sun loungers, potted palms, dusk lighting"
+      },
+      "sky_lounge": {
+        "available": true,
+        "filename": "HH_SKYLOUNGE_01.png",
+        "description": "32nd floor sky lounge interior with floor-to-ceiling windows, city panorama, warm pendant lighting, leather seating"
+      },
+      "gymnasium": {
+        "available": true,
+        "filename": "HH_GYM_01.png",
+        "description": "Modern gym interior with floor-to-ceiling windows overlooking the garden"
+      },
+      "sample_flat_living_room": {
+        "available": true,
+        "filename": "HH_LIVING_01.png",
+        "description": "Spacious living room with large windows, modern furniture, warm lighting, city view"
+      },
+      "sales_gallery": {
+        "available": true,
+        "filename": "HH_SALES_01.png",
+        "description": "Sales gallery interior with scale model of the tower, reception desk, brochure display"
+      }
+    }
+  },
+  "horizon-greens": {
+    "project_name": "Horizon Greens",
+    "location": "Sarjapur Road, Bangalore",
+    "type": "Integrated Township",
+    "floors": "G+14 (8 towers)",
+    "units": "1 BHK, 2 BHK, 3 BHK",
+    "status": "Newly Launched",
+    "completion_date": "Q2 2029",
+    "usp": "35 acres of green township with 70% open space, pet-friendly zones, organic community farm",
+    "architecture_description": "Cluster of eight pastel-toned mid-rise towers arranged around a massive central park, each tower with a distinct earthy color accent, wide tree-lined internal roads",
+    "rera_number": "PRM/KA/RERA/1251/446/PR/230715/006789",
+    "contact": "+91 98765 12345",
+    "amenities": [
+      "Olympic-size swimming pool",
+      "Clubhouse with banquet hall",
+      "Cricket practice nets",
+      "Yoga and meditation pavilion",
+      "Cycling and jogging loop (1.2 km)",
+      "Organic community farm",
+      "Pet park with agility course",
+      "Senior citizen garden with reflexology path"
+    ],
+    "brand_assets": {
+      "logo_primary": {
+        "available": true,
+        "filename": "HG_LOGO_PRIMARY.png",
+        "description": "Primary Horizon Greens logo lockup on transparent background"
+      }
+    },
+    "image_library": {
+      "main_building_exterior": {
+        "available": true,
+        "filename": "HG_TOWER_A_01.png",
+        "description": "Front elevation of Tower A, pastel terracotta tone, balconies with planters, ground-floor retail visible"
+      },
+      "aerial_view": {
+        "available": true,
+        "filename": "HG_AERIAL_01.png",
+        "description": "Drone shot of the full 35-acre township, all 8 towers visible, central park in the middle, tree-lined roads"
+      },
+      "township_overview": {
+        "available": true,
+        "filename": "HG_TOWNSHIP_01.png",
+        "description": "Wide-angle ground-level view of the township entrance with multiple towers in background, landscaped boulevard"
+      },
+      "construction_progress": {
+        "available": false,
+        "filename": null,
+        "description": null
+      },
+      "entrance_gate": {
+        "available": true,
+        "filename": "HG_ENTRANCE_01.png",
+        "description": "Grand township entrance gate with security booth, wide road, avenue trees, welcome signage"
+      },
+      "swimming_pool": {
+        "available": true,
+        "filename": "HG_POOL_01.png",
+        "description": "Olympic-size swimming pool with lane markers, poolside cabanas, clubhouse building in background"
+      },
+      "clubhouse": {
+        "available": true,
+        "filename": "HG_CLUB_01.png",
+        "description": "Two-story clubhouse exterior with glass facade, banquet hall visible on upper floor, landscaped forecourt"
+      },
+      "garden_jogging_track": {
+        "available": true,
+        "filename": "HG_JOGTRACK_01.png",
+        "description": "1.2 km cycling and jogging loop winding through landscaped gardens with distance markers"
+      },
+      "yoga_pavilion": {
+        "available": true,
+        "filename": "HG_YOGA_01.png",
+        "description": "Open-air yoga pavilion with wooden deck, surrounded by bamboo groves, morning mist, calm meditative atmosphere"
+      },
+      "organic_farm": {
+        "available": true,
+        "filename": "HG_FARM_01.png",
+        "description": "Community organic farm with raised beds, families gardening, small greenhouse in corner"
+      },
+      "pet_park": {
+        "available": true,
+        "filename": "HG_PETPARK_01.png",
+        "description": "Fenced pet park with agility course obstacles, dogs playing, owners on benches"
+      },
+      "sample_flat_living_room": {
+        "available": true,
+        "filename": "HG_LIVING_01.png",
+        "description": "Open-plan living and dining area with balcony overlooking the central park, earthy tones"
+      },
+      "sample_flat_bedroom": {
+        "available": true,
+        "filename": "HG_BEDROOM_01.png",
+        "description": "Compact master bedroom with built-in wardrobe, large window with garden view"
+      },
+      "sample_flat_kitchen": {
+        "available": true,
+        "filename": "HG_KITCHEN_01.png",
+        "description": "Modular kitchen with breakfast counter, pastel cabinetry, window above sink"
+      },
+      "sales_gallery": {
+        "available": true,
+        "filename": "HG_SALES_01.png",
+        "description": "Sales gallery with large township scale model, interactive screens, lounge seating"
+      }
+    }
+  }
+}

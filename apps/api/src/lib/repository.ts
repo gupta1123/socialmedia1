@@ -859,6 +859,7 @@ export async function getPromptPackage(promptPackageId: string): Promise<PromptP
     creativeRequestId: row.creative_request_id,
     brandProfileVersionId: row.brand_profile_version_id,
     promptSummary: row.prompt_summary,
+    seedPrompt: row.seed_prompt,
     finalPrompt: row.final_prompt,
     aspectRatio: row.aspect_ratio,
     chosenModel: row.chosen_model,

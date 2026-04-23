@@ -1040,6 +1040,9 @@ def log_trace(request_path: str, payload: dict[str, Any], runtime: dict[str, Any
     loaded_skill_names = runtime.get("loadedSkillNames") or []
     skill_tool_calls = trace.get("skillToolCalls") or []
     tool_calls = trace.get("toolCalls") or []
+    resolved_constraints = result.get("resolvedConstraints") or {}
+    compiler_trace = result.get("compilerTrace") or {}
+    analyst_output = compiler_trace.get("analystOutput") or {}
     used_skill_names: list[str] = []
 
     for call in skill_tool_calls:
@@ -1066,6 +1069,12 @@ def log_trace(request_path: str, payload: dict[str, Any], runtime: dict[str, Any
             "projectAnchor": exact_asset_contract.get("requiredProjectAnchorAssetId"),
             "logo": exact_asset_contract.get("logoAssetId"),
             "reraQr": exact_asset_contract.get("reraQrAssetId"),
+        },
+        "route": {
+            "posterArchetype": resolved_constraints.get("posterArchetype") or analyst_output.get("poster_archetype"),
+            "heroPresentation": resolved_constraints.get("heroPresentation") or analyst_output.get("hero_presentation"),
+            "layoutGeometry": resolved_constraints.get("layoutGeometry") or analyst_output.get("layout_geometry"),
+            "textArchitecture": resolved_constraints.get("textArchitecture") or analyst_output.get("text_architecture"),
         },
         "promptSummary": result.get("promptSummary"),
     }

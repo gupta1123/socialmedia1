@@ -97,7 +97,7 @@ async function submitOpenAiEditRequest({
 
   for (const referencePath of referencePaths) {
     const blob = await downloadStorageBlob(referencePath);
-    body.append("image", blob, fileNameFromStoragePath(referencePath, blob.type));
+    body.append("image[]", blob, fileNameFromStoragePath(referencePath, blob.type));
   }
 
   return fetch(`${resolveOpenAiBaseUrl()}/images/edits`, {

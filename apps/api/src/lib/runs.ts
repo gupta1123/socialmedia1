@@ -378,6 +378,7 @@ function mapPromptPackageRow(row: PromptPackageRow): PromptPackage {
     creativeRequestId: row.creative_request_id,
     brandProfileVersionId: row.brand_profile_version_id,
     promptSummary: row.prompt_summary,
+    seedPrompt: row.seed_prompt,
     finalPrompt: row.final_prompt,
     aspectRatio: row.aspect_ratio,
     chosenModel: row.chosen_model,
@@ -429,7 +430,7 @@ function buildRunSummary(
       ? pkg.variations.length
       : templatedSeedOutputIds.size > 0
         ? templatedSeedOutputIds.size
-      : jobs.filter((job) => job.job_type === "final").length;
+        : jobs.filter((job) => job.job_type === "option").length;
 
   return {
     id: pkg.id,
@@ -493,10 +494,10 @@ function getLatestStyleSeedJobIds(jobs: JobRow[], promptPackage: PromptPackageRo
 }
 
 function getLatestFinalJobIds(jobs: JobRow[]) {
-  const sortedFinalJobs = [...jobs]
-    .filter((job) => job.job_type === "final")
+  const sortedRenderableJobs = [...jobs]
+    .filter((job) => job.job_type === "option" || job.job_type === "final")
     .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime());
-  const latestFinalJob = sortedFinalJobs[0];
+  const latestFinalJob = sortedRenderableJobs[0];
 
   if (!latestFinalJob) {
     return [];
@@ -504,7 +505,7 @@ function getLatestFinalJobIds(jobs: JobRow[]) {
 
   const latestBatchId = getV2OptionBatchId(latestFinalJob);
   if (latestBatchId) {
-    return sortedFinalJobs
+    return sortedRenderableJobs
       .filter((job) => getV2OptionBatchId(job) === latestBatchId)
       .sort(compareJobsChronologically)
       .map((job) => job.id);

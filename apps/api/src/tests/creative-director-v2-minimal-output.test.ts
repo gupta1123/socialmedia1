@@ -256,4 +256,95 @@ describe("compilePromptPackageV2 minimal worker output", () => {
     expect(output.finalPrompt).not.toMatch(/\bbranding signature\b/i);
     expect(output.finalPrompt).toContain("Do not include any logo, brand mark, emblem, monogram, watermark, or invented branding asset.");
   });
+
+  it("preserves the frontend-selected portrait format even if the compiler returns 1:1", async () => {
+    process.env.CREATIVE_DIRECTOR_V2_MODE = "agno";
+    process.env.CREATIVE_DIRECTOR_V2_TRANSPORT = "server";
+    process.env.AGNO_AGENT_V2_SERVER_URL = "http://agno.local/api/compile-v2";
+    process.env.IMAGE_GENERATION_PROVIDER = "openai";
+    process.env.OPENAI_FINAL_MODEL = "gpt-image-2";
+
+    const fetchMock = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          result: {
+            promptSummary: "Notebook bridge route.",
+            aspectRatio: "1:1",
+            finalPrompt: "A finished poster for a portrait social post.",
+            variations: [
+              {
+                title: "Primary route",
+                strategy: "Notebook bridge output",
+                finalPrompt: "A finished poster for a portrait social post."
+              }
+            ],
+            compilerTrace: {
+              pipeline: "archived-notebook-bridge-v1"
+            },
+            resolvedConstraints: {
+              compilerMode: "archived-notebook-bridge"
+            }
+          }
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      )
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { compilePromptPackageV2 } = await import("../lib/creative-director.js");
+
+    const output = await compilePromptPackageV2({
+      brandName: "Briefly Social Demo",
+      brandProfile: buildBrandProfile(),
+      variationCount: 1,
+      brief: {
+        brandId: "brand-1",
+        createMode: "post",
+        copyMode: "auto",
+        projectId: "project-1",
+        postTypeId: "post-type-1",
+        channel: "instagram-feed",
+        format: "portrait",
+        goal: "Drive enquiries",
+        prompt: "Create a premium portrait post with one hero tower image.",
+        audience: "Homebuyers",
+        offer: "",
+        exactText: "",
+        referenceAssetIds: [],
+        includeBrandLogo: false,
+        includeReraQr: false,
+        logoAssetId: null,
+        templateType: "hero"
+      },
+      referenceLabels: [],
+      projectName: "Zoy+",
+      projectProfile: null,
+      festival: null,
+      postType: {
+        code: "project-launch",
+        name: "Project launch",
+        config: {
+          defaultChannels: ["instagram-feed"],
+          allowedFormats: ["portrait"],
+          recommendedTemplateTypes: ["hero"],
+          requiredBriefFields: ["goal", "prompt"],
+          safeZoneGuidance: ["Keep the building unobstructed"],
+          ctaStyle: "restrained",
+          copyDensity: "minimal"
+        }
+      },
+      template: null,
+      series: null,
+      calendarItem: null,
+      deliverableSnapshot: null
+    });
+
+    expect(output.aspectRatio).toBe("4:5");
+  });
 });

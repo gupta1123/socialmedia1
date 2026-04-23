@@ -29,6 +29,7 @@ import { buildFestivalPromptGuidance } from "./festival-prompt-guidance.js";
 import { compilePromptPackageMock } from "./mock-creative-director.js";
 import { buildPostTypePromptGuidance } from "./post-type-prompt-guidance.js";
 import { buildProjectPromptGuidance } from "./project-prompt-guidance.js";
+import { createSignedUrl } from "./storage.js";
 import { deriveAspectRatio } from "./utils.js";
 
 export type CreativeDirectorInput = {
@@ -41,12 +42,13 @@ export type CreativeDirectorInput = {
   templateAssets?: Array<Pick<CreativeTemplateAssetRecord, "assetId" | "role">>;
   variationCount?: number;
   projectName?: string | null;
+  projectSlug?: string | null;
   projectId?: string | null;
   projectStage?: ProjectRecord["stage"] | null;
   projectProfile?: ProjectProfile | null;
   festival?: Pick<FestivalRecord, "id" | "code" | "name" | "category" | "community" | "regions" | "meaning" | "dateLabel" | "nextOccursOn"> | null;
   postType?: Pick<PostTypeRecord, "code" | "name" | "config"> | null;
-  template?: (Pick<CreativeTemplateRecord, "id" | "name" | "channel" | "format" | "basePrompt" | "config"> & {
+  template?: (Pick<CreativeTemplateRecord, "id" | "name" | "channel" | "format" | "basePrompt" | "previewStoragePath" | "config"> & {
     linkedAssets?: Array<Pick<CreativeTemplateAssetRecord, "assetId" | "role">>;
   }) | null;
   series?: {
@@ -143,6 +145,26 @@ type WorkerResponse = {
 type V2AgentPayload = {
   truthBundle: CreativeTruthBundle;
   projectId?: string | null;
+  projectSlug?: string | null;
+  mediaContext?: {
+    referenceImages: Array<{
+      assetId: string;
+      label: string;
+      storagePath: string;
+      url: string;
+    }>;
+    templateImage?: {
+      templateId?: string | null;
+      storagePath: string;
+      url: string;
+    } | null;
+    logoImage?: {
+      assetId: string;
+      label: string;
+      storagePath: string;
+      url: string;
+    } | null;
+  };
 };
 
 type PendingRequest = {
@@ -334,7 +356,7 @@ async function runAgnoCreativeDirectorV2(input: Input) {
 async function runAgnoCreativeDirectorV2Persistent(input: Input) {
   const state = getV2WorkerState();
   const requestId = `v2_req_${Date.now()}_${v2WorkerRequestCount++}`;
-  const payload = buildV2AgentPayload(input);
+  const payload = await buildV2AgentPayload(input);
 
   return new Promise<CompilerResult>((resolve, reject) => {
     state.pending.set(requestId, {
@@ -353,7 +375,7 @@ async function runAgnoCreativeDirectorV2Persistent(input: Input) {
 
 async function runAgnoCreativeDirectorV2OneShot(input: Input) {
   const scriptPath = getV2WorkerScriptPath();
-  const payload = buildV2AgentPayload(input);
+  const payload = await buildV2AgentPayload(input);
 
   return new Promise<CompilerResult>((resolve, reject) => {
     const child = spawn(env.AGNO_PYTHON_BIN, [scriptPath], {
@@ -402,7 +424,7 @@ async function runAgnoCreativeDirectorV2OneShot(input: Input) {
 }
 
 async function runAgnoCreativeDirectorV2Server(input: Input) {
-  const payload = buildV2AgentPayload(input);
+  const payload = await buildV2AgentPayload(input);
   const controller = new AbortController();
   const timeoutSeconds = env.AGNO_AGENT_V2_SERVER_TIMEOUT_SEC;
   const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
@@ -839,6 +861,11 @@ function normalizeCompilerVariations(
   const normalized: PromptVariationResult[] = [];
 
   for (const [index, variation] of candidates.slice(0, requestedCount).entries()) {
+    const seedPrompt = typeof variation.seedPrompt === "string"
+      ? variation.seedPrompt.trim()
+      : typeof raw.seedPrompt === "string"
+        ? raw.seedPrompt.trim()
+        : "";
     const finalPrompt = typeof variation.finalPrompt === "string"
       ? variation.finalPrompt.trim()
       : typeof variation.seedPrompt === "string"
@@ -848,9 +875,10 @@ function normalizeCompilerVariations(
           : typeof raw.seedPrompt === "string"
             ? raw.seedPrompt.trim()
             : "";
-    const seedPrompt = finalPrompt;
 
-    if (!seedPrompt || !finalPrompt) {
+    const normalizedSeedPrompt = seedPrompt || finalPrompt;
+
+    if (!normalizedSeedPrompt || !finalPrompt) {
       continue;
     }
 
@@ -866,7 +894,7 @@ function normalizeCompilerVariations(
         typeof variation.strategy === "string" && variation.strategy.trim()
           ? variation.strategy.trim()
           : "Distinct creative route",
-      seedPrompt: seedPrompt,
+      seedPrompt: normalizedSeedPrompt,
       finalPrompt: finalPrompt,
       referenceStrategy,
       resolvedConstraints:
@@ -892,6 +920,7 @@ function normalizeCompilerVariations(
 
 function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResult {
   const truthBundle = buildV2CreativeTruthBundle(input);
+  const preserveCompilerPromptText = shouldPreserveCompilerPromptText(raw);
   const promptGuardrails = buildV2CompactGuardrailClauses(input);
   const brandGuidance = buildBrandPromptGuidance({
     brandProfile: input.brandProfile
@@ -919,19 +948,23 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
     seedClauses: promptGuardrails.seedClauses,
     finalClauses: promptGuardrails.finalClauses,
     referenceStrategy
-  }).map((variation) => ({
-    ...variation,
-    seedPrompt: refineV2PromptForPostType(
-      variation.seedPrompt ?? variation.finalPrompt ?? raw.finalPrompt ?? raw.seedPrompt ?? "",
-      input,
-      truthBundle
-    ),
-    finalPrompt: refineV2PromptForPostType(
-      variation.finalPrompt ?? variation.seedPrompt ?? raw.finalPrompt ?? raw.seedPrompt ?? "",
-      input,
-      truthBundle
-    ),
-  }));
+  }).map((variation) =>
+    preserveCompilerPromptText
+      ? variation
+      : {
+          ...variation,
+          seedPrompt: refineV2PromptForPostType(
+            variation.seedPrompt ?? variation.finalPrompt ?? raw.finalPrompt ?? raw.seedPrompt ?? "",
+            input,
+            truthBundle
+          ),
+          finalPrompt: refineV2PromptForPostType(
+            variation.finalPrompt ?? variation.seedPrompt ?? raw.finalPrompt ?? raw.seedPrompt ?? "",
+            input,
+            truthBundle
+          ),
+        }
+  );
   const firstVariation = variations[0];
 
   const agentSelectedAmenity = typeof raw.selectedAmenity === "string" && raw.selectedAmenity.length > 0 ? raw.selectedAmenity : null;
@@ -978,7 +1011,7 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
       returnedVariationCount: variations.length,
       compactPromptMode: false,
       promptDetailMode: "poster-spec",
-      posterSpecGuardrails: promptGuardrails,
+      posterSpecGuardrails: preserveCompilerPromptText ? undefined : promptGuardrails,
       brandGuidanceManifest: brandGuidance.manifest,
       festivalGuidanceManifest: festivalGuidance.manifest,
       projectGuidanceManifest: projectGuidance.manifest,
@@ -1058,11 +1091,22 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
   };
 }
 
-function normalizeAspectRatio(aspectRatio: string | undefined, input: Input) {
-  if (typeof aspectRatio === "string" && /^\d+:\d+$/.test(aspectRatio.trim())) {
-    return aspectRatio.trim();
-  }
+function shouldPreserveCompilerPromptText(raw: CompilerResult) {
+  const compilerTrace =
+    raw.compilerTrace && typeof raw.compilerTrace === "object" ? raw.compilerTrace : {};
+  const pipeline =
+    typeof compilerTrace.pipeline === "string" ? compilerTrace.pipeline.trim().toLowerCase() : "";
+  const compilerMode =
+    raw.resolvedConstraints &&
+    typeof raw.resolvedConstraints === "object" &&
+    typeof raw.resolvedConstraints.compilerMode === "string"
+      ? raw.resolvedConstraints.compilerMode.trim().toLowerCase()
+      : "";
 
+  return pipeline === "archived-notebook-bridge-v1" || compilerMode === "archived-notebook-bridge";
+}
+
+function normalizeAspectRatio(aspectRatio: string | undefined, input: Input) {
   return deriveAspectRatio(input.brief.format);
 }
 
@@ -1621,15 +1665,93 @@ function buildTruthBundleAmenityResolution(
   };
 }
 
-function buildV2AgentPayload(input: Input): V2AgentPayload {
+async function buildV2AgentPayload(input: Input): Promise<V2AgentPayload> {
+  const truthBundle = buildV2CreativeTruthBundle(input);
+  const mediaContext = await buildV2CompileMediaContext(input, truthBundle);
   return {
-    truthBundle: buildV2CreativeTruthBundle(input),
-    ...(input.projectId !== undefined ? { projectId: input.projectId } : {})
+    truthBundle,
+    ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+    ...(input.projectSlug !== undefined ? { projectSlug: input.projectSlug } : {}),
+    ...(mediaContext ? { mediaContext } : {})
   };
 }
 
-export function buildCanonicalV2AgentPayload(input: CreativeDirectorInput): V2AgentPayload {
+export async function buildCanonicalV2AgentPayload(input: CreativeDirectorInput): Promise<V2AgentPayload> {
   return buildV2AgentPayload(normalizeCreativeDirectorInput(input));
+}
+
+async function buildV2CompileMediaContext(input: Input, truthBundle: CreativeTruthBundle): Promise<V2AgentPayload["mediaContext"] | undefined> {
+  const referenceAssetIds = dedupeStrings([
+    ...truthBundle.candidateAssets
+      .filter((asset) => asset.eligibility.isSelectedReference)
+      .map((asset) => asset.id),
+    truthBundle.exactAssetContract.requiredProjectAnchorAssetId ?? null,
+    ...(truthBundle.amenityResolution?.selectedAssetIds ?? []),
+  ]);
+
+  const candidateById = new Map(truthBundle.candidateAssets.map((asset) => [asset.id, asset]));
+
+  const referenceImages = (
+    await Promise.all(
+      referenceAssetIds.map(async (assetId) => {
+        const asset = candidateById.get(assetId);
+        if (!asset) {
+          return null;
+        }
+        try {
+          const url = await createSignedUrl(asset.storagePath);
+          return {
+            assetId: asset.id,
+            label: asset.label,
+            storagePath: asset.storagePath,
+            url,
+          };
+        } catch {
+          return null;
+        }
+      })
+    )
+  ).filter((value): value is NonNullable<typeof value> => Boolean(value));
+
+  const templateImage = input.template?.previewStoragePath
+    ? await createSignedUrl(input.template.previewStoragePath)
+        .then((url) => ({
+          templateId: input.template?.id ?? null,
+          storagePath: input.template!.previewStoragePath!,
+          url,
+        }))
+        .catch(() => null)
+    : null;
+
+  const logoImage = truthBundle.exactAssetContract.logoAssetId
+    ? await (async () => {
+        const asset = candidateById.get(truthBundle.exactAssetContract.logoAssetId!);
+        if (!asset) {
+          return null;
+        }
+        try {
+          const url = await createSignedUrl(asset.storagePath);
+          return {
+            assetId: asset.id,
+            label: asset.label,
+            storagePath: asset.storagePath,
+            url,
+          };
+        } catch {
+          return null;
+        }
+      })()
+    : null;
+
+  if (referenceImages.length === 0 && !templateImage && !logoImage) {
+    return undefined;
+  }
+
+  return {
+    referenceImages,
+    templateImage,
+    logoImage,
+  };
 }
 
 function buildBrandPaletteClause(input: Input) {

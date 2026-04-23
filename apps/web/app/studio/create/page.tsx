@@ -36,6 +36,7 @@ import {
   getSeries
 } from "../../../lib/api";
 import { deriveCreativeFormatFromDeliverable } from "../../../lib/deliverable-helpers";
+import { resolvePlacementForPostTypeSelection } from "../../../lib/create-post-type-selection";
 import {
   getAllowedFormats,
   getDefaultFormat,
@@ -1100,7 +1101,7 @@ export default function CreatePage() {
       const job = jobs[index];
       if (!job) continue;
       if (
-        job.jobType === "final" &&
+        (job.jobType === "option" || job.jobType === "final") &&
         (job.status === "queued" || job.status === "processing")
       ) {
         return job;
@@ -1523,10 +1524,14 @@ export default function CreatePage() {
       ? deliverables.find((item) => item.id === briefForm.deliverableId)
       : null;
     setBriefForm((state) => {
-      const nextChannel = selected?.config.defaultChannels[0] ?? state.channel;
-      const nextFormat =
-        selected?.config.allowedFormats[0] ??
-        (getPlacementSpec(nextChannel, state.format) ? state.format : getDefaultFormat(nextChannel));
+      const nextPlacement = resolvePlacementForPostTypeSelection({
+        current: {
+          channel: state.channel,
+          format: state.format,
+          templateType: state.templateType
+        },
+        postType: selected
+      });
       const nextFestival = nextIsFestiveGreeting
         ? festivals.find((festival) => festival.id === state.festivalId) ?? null
         : null;
@@ -1555,9 +1560,9 @@ export default function CreatePage() {
           selectedDeliverableRecord && postTypeId && selectedDeliverableRecord.postTypeId !== postTypeId
             ? undefined
             : state.deliverableId,
-        channel: nextChannel,
-        format: nextFormat,
-        templateType: selected?.config.recommendedTemplateTypes[0] ?? state.templateType,
+        channel: nextPlacement.channel,
+        format: nextPlacement.format,
+        templateType: nextPlacement.templateType,
         goal: shouldResetGoal ? getPostTypeGoal(selected, nextFestival) : state.goal,
         prompt: nextPrompt,
         offer: state.copyMode === "auto" ? "" : shouldResetOffer ? nextCopy.offer : state.offer,
@@ -2894,9 +2899,6 @@ export default function CreatePage() {
                   placeholder={getCreativeBriefPlaceholder(selectedPostType, selectedFestival)}
                   rows={4}
                 />
-                <span className="create-hint">
-                  Provide specific instructions. Brand, project, festival, and post-type rules are added automatically.
-                </span>
                 {promptTooShort ? (
                   <span className="create-field-warning">
                     Write at least {MIN_PROMPT_LENGTH} characters for a specific result.
@@ -3056,14 +3058,37 @@ export default function CreatePage() {
         {/* Muted breadcrumb run-bar */}
         {promptPackage && (
           <div className="create-run-bar">
-            <div className="create-run-breadcrumbs">
-              <span>{compiledPlacement?.recommendedSize}</span>
-              <span className="separator">/</span>
-              <span>{compiledPlacement?.channelLabel}</span>
-              <span className="separator">/</span>
-              <span>{compiledPlacement?.formatLabel}</span>
+            <div className="create-run-bar-main">
+              <div className="create-run-breadcrumbs">
+                <span>{compiledPlacement?.recommendedSize}</span>
+                <span className="separator">/</span>
+                <span>{compiledPlacement?.channelLabel}</span>
+                <span className="separator">/</span>
+                <span>{compiledPlacement?.formatLabel}</span>
+              </div>
+              {(currentFinalOutputs.length > 0 || hasActiveFinalJob || isGeneratingV2Options) && (
+                <div className="create-run-actions">
+                  {currentFinalOutputs.length > 0 && (
+                    <Link className="button button-ghost mini create-action-explore" href={currentReviewHref}>
+                      Review →
+                    </Link>
+                  )}
+                  {(isOneStageV2 || canCreateOptionsDirectly) && (
+                    <button
+                      className="button button-ghost mini create-action-explore"
+                      disabled={generationLocked}
+                      onClick={() => void handleGenerateCandidates()}
+                    >
+                      {hasActiveFinalJob || (isOneStageV2 && pendingAction === "generate-seeds")
+                        ? "Generating…"
+                        : isOneStageV2
+                          ? "Generate again"
+                          : "Generate more"}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
-            <p className="create-run-prompt-text">{promptPackage?.promptSummary}</p>
           </div>
         )}
 
@@ -3232,45 +3257,6 @@ export default function CreatePage() {
 
           {/* ── Final options section ── */}
           <section className="create-section-canvas">
-            {(currentFinalOutputs.length > 0 || hasActiveFinalJob || isGeneratingV2Options) && (
-              <div className="create-canvas-header">
-                <div className="create-canvas-heading">
-                  <h3 className="create-canvas-title">Post options</h3>
-                  <span className="create-canvas-subtle">
-                    {isOneStageV2 && (hasActiveFinalJob || isGeneratingV2Options)
-                      ? currentFinalOutputs.length > 0
-                        ? "Refreshing this set. New post options will replace it automatically."
-                        : `Rendering ${optionTargetCount} post option${optionTargetCount === 1 ? "" : "s"} now.`
-                      : hasActiveFinalJob
-                      ? currentFinalOutputs.length > 0
-                        ? "Refreshing this set. New options will replace it automatically."
-                        : `Rendering ${optionTargetCount} option${optionTargetCount === 1 ? "" : "s"} now.`
-                      : "Review the strongest option or generate another set."}
-                  </span>
-                </div>
-                <div className="create-canvas-actions">
-                  {currentFinalOutputs.length > 0 && (
-                    <Link className="button button-ghost mini create-action-explore" href={currentReviewHref}>
-                      Review →
-                    </Link>
-                  )}
-                  {promptPackage && (isOneStageV2 || canCreateOptionsDirectly) && (
-                    <button
-                      className="button button-ghost mini create-action-explore"
-                      disabled={generationLocked}
-                      onClick={() => void handleGenerateCandidates()}
-                    >
-                      {hasActiveFinalJob || (isOneStageV2 && pendingAction === "generate-seeds")
-                        ? "Generating…"
-                        : isOneStageV2
-                          ? "Generate again"
-                          : "Generate more"}
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
             {!promptPackage ? (
               <div className="create-empty-state">
                 <div className="create-empty-icon">
@@ -3290,12 +3276,12 @@ export default function CreatePage() {
                 </p>
               </div>
             ) : currentFinalOutputs.length === 0 && (hasActiveFinalJob || isGeneratingV2Options) ? (
-              <div className="candidate-grid create-processing-pulse">
+              <div className="candidate-grid create-final-options-grid create-processing-pulse">
                 {Array.from({ length: optionTargetCount }).map((_, index) => (
-                  <article className="candidate-card create-batch-placeholder" key={`option-pending-${index}`}>
+                  <article className="candidate-card create-final-option-card create-batch-placeholder" key={`option-pending-${index}`}>
                     <div
                       className="candidate-media create-generating-shimmer"
-                      style={{ aspectRatio: compiledPlacement?.aspectRatio === "9:16" ? "9/16" : "1/1" }}
+                      style={{ aspectRatio: getCanvasAspectRatioValue(compiledPlacement?.aspectRatio) }}
                     />
                     <div className="candidate-body create-batch-placeholder-copy">
                       <strong>Option {index + 1}</strong>
@@ -3322,14 +3308,16 @@ export default function CreatePage() {
                 </p>
               </div>
             ) : (
-              <div className={`candidate-grid ${hasActiveFinalJob ? "create-processing-pulse" : runLoading ? "create-processing-pulse" : ""}`}>
+              <div
+                className={`candidate-grid create-final-options-grid ${hasActiveFinalJob ? "create-processing-pulse" : runLoading ? "create-processing-pulse" : ""}`}
+              >
                 {currentFinalOutputs.map((output, idx) => (
-                  <article className="candidate-card" key={output.id || idx}>
+                  <article className="candidate-card create-final-option-card" key={output.id || idx}>
                     <div
                       className="candidate-media"
-                      style={{ aspectRatio: compiledPlacement?.aspectRatio === "9:16" ? "9/16" : "1/1" }}
+                      style={{ aspectRatio: getCanvasAspectRatioValue(compiledPlacement?.aspectRatio) }}
                     >
-                      {output.thumbnailUrl ?? output.previewUrl ? (
+                      {output.originalUrl ?? output.previewUrl ?? output.thumbnailUrl ? (
                         <ImagePreviewTrigger
                           alt={`Option ${output.outputIndex + 1} for ${promptPackage.promptSummary}`}
                           actions={[
@@ -3359,7 +3347,7 @@ export default function CreatePage() {
                           title={`Option ${output.outputIndex + 1}`}
                           meta={`Output ${output.outputIndex + 1}`}
                         >
-                          <img alt="" src={output.thumbnailUrl ?? output.previewUrl} />
+                          <img alt="" src={output.originalUrl ?? output.previewUrl ?? output.thumbnailUrl} />
                         </ImagePreviewTrigger>
                       ) : (
                         <div className="create-generating-shimmer" />
@@ -3368,27 +3356,16 @@ export default function CreatePage() {
                     <div className="candidate-body">
                       <div className="candidate-info">
                         <strong>Option {output.outputIndex + 1}</strong>
-                        <span>{output.reviewState.replace("_", " ")}</span>
                       </div>
-                      <span className="candidate-action-hint">
-                        {describeFinalOutputSource(
-                          output.jobId,
-                          runDetail?.jobs ?? [],
-                          seedTemplateLabelById,
-                          briefForm.selectedReferenceAssetIds.length,
-                          Boolean(briefForm.sourceOutputId),
-                          getTemplateFamilyLabel(selectedReusableTemplate)
-                        )}
-                      </span>
                     </div>
                   </article>
                 ))}
                 {hasActiveFinalJob &&
                   Array.from({ length: remainingOptionSlots }).map((_, index) => (
-                    <article className="candidate-card create-batch-placeholder" key={`option-refresh-${index}`}>
+                    <article className="candidate-card create-final-option-card create-batch-placeholder" key={`option-refresh-${index}`}>
                       <div
                         className="candidate-media create-generating-shimmer"
-                        style={{ aspectRatio: compiledPlacement?.aspectRatio === "9:16" ? "9/16" : "1/1" }}
+                        style={{ aspectRatio: getCanvasAspectRatioValue(compiledPlacement?.aspectRatio) }}
                       />
                       <div className="candidate-body create-batch-placeholder-copy">
                         <strong>Option {currentFinalOutputs.length + index + 1}</strong>
@@ -4441,6 +4418,21 @@ function describeFinalOutputSource(
   if (referenceAssetCount > 0) return "Created with selected references";
   if (reusableTemplateLabel) return `Created with ${reusableTemplateLabel}`;
   return "Created in this run";
+}
+
+function getCanvasAspectRatioValue(aspectRatio?: string | null) {
+  switch (aspectRatio) {
+    case "9:16":
+      return "9/16";
+    case "4:5":
+      return "4/5";
+    case "16:9":
+      return "16/9";
+    case "3:2":
+      return "3/2";
+    default:
+      return "1/1";
+  }
 }
 
 function getPickerEyebrow(activePicker: CreatePicker) {

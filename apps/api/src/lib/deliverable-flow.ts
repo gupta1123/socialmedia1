@@ -136,6 +136,7 @@ export async function compileDeliverablePromptPackage(params: {
     brandAssets: allAssets,
     projectId: project?.id ?? null,
     projectName: project?.name ?? null,
+    projectSlug: project?.slug ?? null,
     projectStage: project?.stage ?? null,
     projectProfile: projectProfileVersion?.profile ?? null,
     festival,
@@ -151,6 +152,7 @@ export async function compileDeliverablePromptPackage(params: {
           channel: reusableTemplate.channel,
           format: reusableTemplate.format,
           basePrompt: reusableTemplate.basePrompt,
+          previewStoragePath: reusableTemplate.previewStoragePath,
           config: reusableTemplate.config
         }
       : null,

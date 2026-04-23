@@ -75,7 +75,7 @@ export async function refreshJobOutputs(jobId: string) {
         calendar_item_id: string | null;
         prompt_package_id: string;
         selected_template_id: string | null;
-        job_type: "style_seed" | "final";
+        job_type: "style_seed" | "option" | "final";
         status: "queued" | "processing" | "completed" | "failed" | "cancelled";
         provider: string;
         provider_model: string;
@@ -275,7 +275,7 @@ type PersistableJobRow = {
   calendar_item_id: string | null;
   prompt_package_id: string;
   selected_template_id: string | null;
-  job_type: "style_seed" | "final";
+  job_type: "style_seed" | "option" | "final";
   status: "queued" | "processing" | "completed" | "failed" | "cancelled";
   provider: string;
   provider_model: string;
@@ -311,7 +311,7 @@ export async function persistCompletedJobImages(row: PersistableJobRow, images: 
         calendar_item_id: row.calendar_item_id,
         job_id: row.id,
         post_version_id: null,
-        kind: row.job_type,
+        kind: row.job_type === "style_seed" ? "style_seed" : "final",
         storage_path: storagePath,
         thumbnail_storage_path: thumbnail?.thumbnailStoragePath ?? null,
         thumbnail_width: thumbnail?.thumbnailWidth ?? null,
@@ -377,7 +377,7 @@ export async function getSignedPreview(storagePath: string, thumbnailStoragePath
   return createSignedPreviewUrl(storagePath, thumbnailStoragePath).catch(() => null);
 }
 
-function resolveFalEndpoint(jobType: "style_seed" | "final", providerModel: string) {
+function resolveFalEndpoint(jobType: "style_seed" | "option" | "final", providerModel: string) {
   if (providerModel.includes("/")) {
     return providerModel;
   }
