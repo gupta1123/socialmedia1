@@ -3334,15 +3334,12 @@ export default function CreatePage() {
                     >
                       {output.originalUrl ?? output.previewUrl ?? output.thumbnailUrl ? (
                         <ImagePreviewTrigger
-                          alt={`Option ${output.outputIndex + 1} for ${promptPackage.promptSummary}`}
+                          alt={`Generated post option ${output.outputIndex + 1}`}
                           actions={[
                             { href: `/studio/ai-edit?outputId=${output.id}`, label: "Open in Editor", tone: "primary" },
                             { href: currentReviewHref, label: "Open review", tone: "ghost" }
                           ]}
-                          badges={[
-                            `Option ${output.outputIndex + 1}`,
-                            output.reviewState.replaceAll("_", " ")
-                          ]}
+                          badges={[output.reviewState.replaceAll("_", " ")]}
                           details={[
                             { label: "State", value: output.reviewState.replaceAll("_", " ") },
                             {
@@ -3358,9 +3355,6 @@ export default function CreatePage() {
                             }
                           ]}
                           src={output.originalUrl ?? output.previewUrl}
-                          subtitle={promptPackage.promptSummary}
-                          title={`Option ${output.outputIndex + 1}`}
-                          meta={`Output ${output.outputIndex + 1}`}
                         >
                           <img alt="" src={output.originalUrl ?? output.previewUrl ?? output.thumbnailUrl} />
                         </ImagePreviewTrigger>
