@@ -26,16 +26,28 @@ from .schemas import (
 )
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-NOTEBOOK_PATH = (
-    PROJECT_ROOT
-    / "archive"
-    / "legacy"
-    / "services"
-    / "socialpython-prompt-compiler"
-    / "notebook"
-    / "working.ipynb"
-)
+APP_ROOT = Path(__file__).resolve().parents[1]
+MONOREPO_ROOT = APP_ROOT.parents[1] if len(APP_ROOT.parents) > 1 else APP_ROOT
+
+
+def resolve_notebook_path() -> Path:
+    candidates = (
+        APP_ROOT / "notebook" / "working.ipynb",
+        MONOREPO_ROOT
+        / "archive"
+        / "legacy"
+        / "services"
+        / "socialpython-prompt-compiler"
+        / "notebook"
+        / "working.ipynb",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+NOTEBOOK_PATH = resolve_notebook_path()
 PIPELINE_NAME = "archived-notebook-bridge-v1"
 
 NOTEBOOK_POST_TYPE_MAP = {
