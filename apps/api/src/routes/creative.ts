@@ -290,6 +290,8 @@ function buildPreparedV2CompileInput(context: any) {
     projectId: context.project?.id ?? null,
     projectName: context.project?.name ?? null,
     projectSlug: context.project?.slug ?? null,
+    projectCity: context.project?.city ?? null,
+    projectMicroLocation: context.project?.microLocation ?? null,
     projectStage: context.project?.stage ?? null,
     projectProfile: context.projectProfileVersion?.profile ?? null,
     festival: context.festival,

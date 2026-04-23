@@ -44,6 +44,8 @@ export type CreativeDirectorInput = {
   projectName?: string | null;
   projectSlug?: string | null;
   projectId?: string | null;
+  projectCity?: string | null;
+  projectMicroLocation?: string | null;
   projectStage?: ProjectRecord["stage"] | null;
   projectProfile?: ProjectProfile | null;
   festival?: Pick<FestivalRecord, "id" | "code" | "name" | "category" | "community" | "regions" | "meaning" | "dateLabel" | "nextOccursOn"> | null;
@@ -1684,6 +1686,8 @@ function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
             id: input.projectId,
             name: input.projectName,
             stage: input.projectStage,
+            city: input.projectCity ?? null,
+            microLocation: input.projectMicroLocation ?? null,
             tagline: input.projectProfile.tagline,
             positioning: input.projectProfile.positioning,
             lifestyleAngle: input.projectProfile.lifestyleAngle,

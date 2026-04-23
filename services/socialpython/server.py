@@ -789,6 +789,8 @@ def build_request_payload(body: dict[str, Any]) -> dict[str, Any]:
                 "id": project["id"],
                 "name": project["name"],
                 "stage": infer_project_stage(project),
+                "city": project.get("city"),
+                "microLocation": project.get("microLocation"),
                 "tagline": project["profile"].get("tagline"),
                 "positioning": project["profile"].get("positioning"),
                 "lifestyleAngle": project["profile"].get("lifestyleAngle"),

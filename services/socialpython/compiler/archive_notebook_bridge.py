@@ -554,6 +554,7 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "Every prompt must remain a finished social poster, not a scenic base-image prompt.",
             "Do not mention aspect ratio, dimensions, or canvas size in the prompt.",
             "Do not invent address lines, street names, RERA, contact details, or location facts that are not grounded in the brief analysis.",
+            "Treat project_name strictly as the project display name, not as a city or geographic setting. If the name could be a place name, write 'project named <project_name>' and keep actual location context separate.",
             "For each variation, provide title, strategy, poster_archetype, prompt, negative, and difference_from_others.",
         ]
 
@@ -569,6 +570,7 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "Keep exactly requested_variation_count variations unless a route is impossible to salvage.",
             "Every kept variation must stay grounded in the same project truth and reference truth.",
             "Every kept variation must preserve exact text obligations and must not invent address lines, street names, location facts, contact details, or RERA details.",
+            "Every kept variation must treat project_name as a display name only. Revise wording like 'in <project_name>' or '<project_name> project' when it could imply location.",
             "Every kept variation must feel poster-grade, not scenic-render-grade.",
             "",
             "Set-level checks:",
@@ -944,6 +946,7 @@ def build_notebook_projects(
     approved_claims = coerce_string_list(project.get("approvedClaims"))
     location_pieces = dedupe_strings(
         [
+            *project_location_fields(project),
             *coerce_string_list(project.get("locationAdvantages")),
             *coerce_string_list(project.get("nearbyLandmarks")),
         ]
@@ -1672,7 +1675,12 @@ def normalize_notebook_bridge_result(
         )
 
     first_variation = normalized_variations[0]
-    prompt_summary = str(verified.get("prompt_summary") or "").strip() or build_prompt_summary(first_variation["finalPrompt"], analysis)
+    prompt_summary = sanitize_public_prompt_text(
+        str(verified.get("prompt_summary") or "").strip(),
+        payload,
+        include_identity_guardrail=False,
+    )
+    prompt_summary = prompt_summary or build_prompt_summary(first_variation["finalPrompt"], analysis)
 
     compiler_trace = {
         "pipeline": PIPELINE_NAME,
@@ -1755,7 +1763,11 @@ def normalize_notebook_bridge_result(
     return result, compiler_trace
 
 
-def sanitize_public_prompt_text(prompt: str, payload: dict[str, Any]) -> str:
+def sanitize_public_prompt_text(
+    prompt: str,
+    payload: dict[str, Any],
+    include_identity_guardrail: bool = True,
+) -> str:
     bundle = payload.get("truthBundle") or {}
     text = prompt.strip()
     candidate_assets = bundle.get("candidateAssets") or []
@@ -1781,8 +1793,95 @@ def sanitize_public_prompt_text(prompt: str, payload: dict[str, Any]) -> str:
             url = item.get("url")
             if isinstance(url, str) and url:
                 text = text.replace(url, "the supplied asset")
+    text = normalize_project_name_location_phrasing(text, payload)
+    if include_identity_guardrail:
+        text = append_project_identity_guardrail(text, payload)
     text = strip_explicit_aspect_ratio_mentions(text)
     return re.sub(r"\s{2,}", " ", text).strip()
+
+
+def normalize_project_name_location_phrasing(text: str, payload: dict[str, Any]) -> str:
+    project_name = get_project_display_name(payload)
+    if not project_name:
+        return text
+
+    replacements = [
+        (f"for a {project_name} project launch", f"for the launch of project named {project_name}"),
+        (f"for an {project_name} project launch", f"for the launch of project named {project_name}"),
+        (f"for the {project_name} project launch", f"for the launch of project named {project_name}"),
+        (f"a {project_name} project launch", f"the launch of project named {project_name}"),
+        (f"an {project_name} project launch", f"the launch of project named {project_name}"),
+        (f"the {project_name} project launch", f"the launch of project named {project_name}"),
+        (f"for a project launch in {project_name}", f"for the launch of project named {project_name}"),
+        (f"for the project launch in {project_name}", f"for the launch of project named {project_name}"),
+        (f"project launch in {project_name}", f"launch for the project named {project_name}"),
+        (f"Project launch in {project_name}", f"Launch for the project named {project_name}"),
+        (f"launch in {project_name}", f"launch for the project named {project_name}"),
+        (f"Launch in {project_name}", f"Launch for the project named {project_name}"),
+        (f"for a {project_name} project", f"for the project named {project_name}"),
+        (f"for an {project_name} project", f"for the project named {project_name}"),
+        (f"for the {project_name} project", f"for the project named {project_name}"),
+        (f"the {project_name} project", f"the project named {project_name}"),
+        (f"a {project_name} project", f"a project named {project_name}"),
+        (f"an {project_name} project", f"a project named {project_name}"),
+        (f"{project_name} project launch", f"project named {project_name} launch"),
+        (f"{project_name} Project Launch", f"project named {project_name} launch"),
+    ]
+    normalized = text
+    for source, target in replacements:
+        normalized = normalized.replace(source, target)
+    return normalized
+
+
+def append_project_identity_guardrail(text: str, payload: dict[str, Any]) -> str:
+    project_name = get_project_display_name(payload)
+    if not project_name:
+        return text
+
+    location = get_project_location_context(payload)
+    if not location:
+        return text
+
+    guardrail = (
+        f"Project name: {project_name}. Actual location context: {location}. "
+        f"Use {project_name} only as the project name."
+    )
+    if guardrail in text:
+        return text
+
+    negative_marker = "Negative prompt:"
+    if negative_marker in text:
+        before, after = text.split(negative_marker, 1)
+        return f"{before.strip()} {guardrail} {negative_marker}{after}".strip()
+
+    return f"{text} {guardrail}".strip()
+
+
+def get_project_display_name(payload: dict[str, Any]) -> str:
+    project = ((payload.get("truthBundle") or {}).get("projectTruth") or {})
+    name = project.get("name")
+    return name.strip() if isinstance(name, str) else ""
+
+
+def get_project_location_context(payload: dict[str, Any]) -> str:
+    project = ((payload.get("truthBundle") or {}).get("projectTruth") or {})
+    location_values = dedupe_strings(
+        [
+            *project_location_fields(project),
+            *coerce_string_list(project.get("locationAdvantages")),
+            *coerce_string_list(project.get("nearbyLandmarks")),
+        ]
+    )
+    return ", ".join(location_values[:2])
+
+
+def project_location_fields(project: dict[str, Any]) -> list[str]:
+    micro_location = str(project.get("microLocation") or "").strip()
+    city = str(project.get("city") or "").strip()
+    values = [micro_location] if micro_location else []
+    if city and city.lower() not in micro_location.lower():
+        values.append(city)
+    return values
 
 
 def strip_explicit_aspect_ratio_mentions(text: str) -> str:

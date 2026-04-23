@@ -1026,6 +1026,8 @@ export const ProjectTruthSchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
   stage: ProjectStageSchema,
+  city: z.string().nullable().default(null),
+  microLocation: z.string().nullable().default(null),
   tagline: z.string().default(""),
   positioning: z.string().default(""),
   lifestyleAngle: z.string().default(""),
