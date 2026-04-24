@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { BrandAssetRecord, BrandProfile, ProjectProfile } from "@image-lab/contracts";
+import {
+  filterReferenceStoragePathsForPrompt,
+  type RoleAwareReferencePlan
+} from "../lib/creative-reference-plan.js";
 
 process.env.SUPABASE_URL ??= "https://example.supabase.co";
 process.env.SUPABASE_ANON_KEY ??= "test-anon-key";
@@ -773,42 +777,6 @@ describe("compilePromptPackageV2", () => {
   });
 
   it("filters references correctly for amenity spotlight", async () => {
-    type RoleAwareReferencePlan = {
-      primaryAnchor: { role: string; label: string; storagePath: string } | null;
-      sourcePost: { role: string; label: string; storagePath: string } | null;
-      amenityAnchor: { role: string; label: string; storagePath: string; amenityName?: string | null } | null;
-      projectAnchor: { role: string; label: string; storagePath: string } | null;
-      brandLogo: { role: string; label: string; storagePath: string } | null;
-      complianceQr: { role: string; label: string; storagePath: string } | null;
-      references: Array<{ role: string; label: string; storagePath: string }>;
-    };
-
-    function filterReferenceStoragePathsForPrompt(
-      plan: RoleAwareReferencePlan,
-      prompt: string,
-      postTypeCode: string
-    ): string[] {
-      const alwaysInclude = [
-        plan.brandLogo?.storagePath,
-        plan.complianceQr?.storagePath
-      ].filter((v): v is string => typeof v === "string" && v.length > 0);
-
-      const heroReference: string[] = [];
-      const secondaryReference: string[] = [];
-      const pushSecondary = (value: string | null | undefined) => {
-        if (!value || heroReference.includes(value) || secondaryReference.includes(value)) return;
-        secondaryReference.push(value);
-      };
-      if (postTypeCode === "amenity-spotlight") {
-        if (plan.amenityAnchor?.storagePath) {
-          heroReference.push(plan.amenityAnchor.storagePath);
-        }
-        pushSecondary(plan.projectAnchor?.storagePath);
-      }
-
-      return [...heroReference, ...secondaryReference.slice(0, 1), ...alwaysInclude];
-    }
-
     const plan: RoleAwareReferencePlan = {
       primaryAnchor: null,
       sourcePost: null,
@@ -823,17 +791,13 @@ describe("compilePromptPackageV2", () => {
     };
 
     const filtered = filterReferenceStoragePathsForPrompt(plan, "", "amenity-spotlight");
-    console.log("Filtered refs for amenity-spotlight:", filtered);
-    expect(filtered.length).toBe(3);
-    expect(filtered).toContain("amenities/pool.jpg");
-    expect(filtered).toContain("project/building.jpg");
-    expect(filtered).toContain("brand/logo.png");
+    expect(filtered).toEqual(["amenities/pool.jpg", "brand/logo.png"]);
 
     const noAmenityPlan: RoleAwareReferencePlan = {
       ...plan,
       amenityAnchor: null,
     };
     const filteredWithoutAmenity = filterReferenceStoragePathsForPrompt(noAmenityPlan, "", "amenity-spotlight");
-    expect(filteredWithoutAmenity).toEqual(["project/building.jpg", "brand/logo.png"]);
+    expect(filteredWithoutAmenity).toEqual(["brand/logo.png"]);
   });
 });

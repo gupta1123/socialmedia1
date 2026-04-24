@@ -212,6 +212,7 @@ export function buildProjectAmenityCatalog(input: {
 export function buildInferredReferenceSelection(input: InferredReferenceSelectionInput) {
   const explicitReferenceAssetIds = dedupeStrings(input.explicitReferenceAssetIds ?? []);
   const amenityFocused = isAmenityFocusedPostType(input.postTypeCode);
+  const sampleFlatFocused = isSampleFlatFocusedPostType(input.postTypeCode);
   if (input.isFestiveGreeting) {
     return {
       referenceAssetIds: explicitReferenceAssetIds,
@@ -240,18 +241,21 @@ export function buildInferredReferenceSelection(input: InferredReferenceSelectio
         !(input.allAssets ?? []).some((asset) => asset.id === assetId && isAmenityReferenceAsset(asset))
     )
   );
-  const hasAmenityRefs = amenityAssetIds.length > 0 || explicitAmenityAssetIds.length > 0;
 
   const referenceAssetIds = dedupeStrings([
     ...explicitNonAmenityAssetIds,
     ...explicitAmenityAssetIds,
     ...amenityAssetIds,
     ...(amenityFocused ? [] : input.projectImageAssetIds ?? []),
-    ...(amenityFocused ? [] : input.sampleFlatImageIds ?? []),
+    ...(amenityFocused || !sampleFlatFocused ? [] : input.sampleFlatImageIds ?? []),
     ...(input.brandReferenceAssetIds ?? []),
   ]);
 
   return { referenceAssetIds, amenityAssetIds };
+}
+
+export function isSampleFlatFocusedPostType(postTypeCode: string | null | undefined) {
+  return postTypeCode === "sample-flat-showcase";
 }
 
 function dedupeStrings(values: Array<string | null | undefined>) {

@@ -182,6 +182,41 @@ describe("creative reference selection", () => {
     expect(selection.referenceAssetIds).toEqual([]);
   });
 
+  it("does not mix sample-flat defaults into project launch reference selection", () => {
+    const projectImageId = crypto.randomUUID();
+    const sampleFlatId = crypto.randomUUID();
+    const brandReferenceId = crypto.randomUUID();
+
+    const selection = buildInferredReferenceSelection({
+      postTypeCode: "project-launch",
+      explicitReferenceAssetIds: [],
+      projectImageAssetIds: [projectImageId],
+      sampleFlatImageIds: [sampleFlatId],
+      brandReferenceAssetIds: [brandReferenceId],
+      allAssets: [],
+      projectId: crypto.randomUUID(),
+    });
+
+    expect(selection.referenceAssetIds).toEqual([projectImageId, brandReferenceId]);
+  });
+
+  it("keeps sample-flat defaults only for sample-flat showcase posts", () => {
+    const projectImageId = crypto.randomUUID();
+    const sampleFlatId = crypto.randomUUID();
+
+    const selection = buildInferredReferenceSelection({
+      postTypeCode: "sample-flat-showcase",
+      explicitReferenceAssetIds: [],
+      projectImageAssetIds: [projectImageId],
+      sampleFlatImageIds: [sampleFlatId],
+      brandReferenceAssetIds: [],
+      allAssets: [],
+      projectId: crypto.randomUUID(),
+    });
+
+    expect(selection.referenceAssetIds).toEqual([projectImageId, sampleFlatId]);
+  });
+
   it("builds a project-scoped amenity catalog from profile names and asset metadata", () => {
     const workspaceId = crypto.randomUUID();
     const brandId = crypto.randomUUID();

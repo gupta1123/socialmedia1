@@ -68,6 +68,12 @@ import {
   isAmenityFocusedPostType,
   isAmenityReferenceAsset
 } from "../lib/creative-reference-selection.js";
+import {
+  buildV2RoleAwarePrompt,
+  collectReferenceStoragePaths,
+  filterReferenceStoragePathsForPrompt,
+  type RoleAwareReferencePlan
+} from "../lib/creative-reference-plan.js";
 import { buildPostTypePromptGuidance } from "../lib/post-type-prompt-guidance.js";
 import { getCreativeRunDetail, listWorkspaceRuns } from "../lib/runs.js";
 import {
@@ -90,16 +96,6 @@ const CreativeOutputsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(48),
   offset: z.coerce.number().int().min(0).default(0)
 });
-
-type RoleAwareReferencePlan = {
-  primaryAnchor: { role: "template" | "source_post"; label: string; storagePath: string } | null;
-  sourcePost: { role: "source_post"; label: string; storagePath: string } | null;
-  amenityAnchor: { role: "amenity_image"; label: string; storagePath: string; amenityName: string | null } | null;
-  projectAnchor: { role: "project_image"; label: string; storagePath: string } | null;
-  brandLogo: { role: "brand_logo"; label: string; storagePath: string } | null;
-  complianceQr: { role: "rera_qr"; label: string; storagePath: string } | null;
-  references: Array<{ role: "reference"; label: string; storagePath: string }>;
-};
 
 async function prepareV2CompileContext(params: {
   parsedBrief: z.infer<typeof CreativeCompileV2RequestSchema>;
@@ -1128,19 +1124,22 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       }))
     };
 
-    const referenceStoragePaths = collectReferenceStoragePaths(referencePlan);
-    const filteredRefs = filterReferenceStoragePathsForPrompt(
-      referencePlan,
-      variations[0]?.seedPrompt ?? variations[0]?.finalPrompt ?? promptPackage.seedPrompt ?? promptPackage.finalPrompt,
-      getPostTypeCode(promptPackage) ?? "default"
-    );
-    const finalReferenceCount = filteredRefs.length;
     const optionProvider = resolveImageGenerationProvider();
-    const optionProviderModel = getFinalProviderModel(finalReferenceCount);
     const v2OptionBatchId = randomId();
+    const postTypeCode = getPostTypeCode(promptPackage) ?? "default";
     const preparedOptionJobs = variations.map((variation) => {
       const jobId = randomId();
-      const optionPrompt = variation.seedPrompt ?? variation.finalPrompt;
+      const optionPrompt = variation.finalPrompt ?? variation.seedPrompt;
+      const filteredReferenceStoragePaths = filterReferenceStoragePathsForPrompt(
+        referencePlan,
+        optionPrompt,
+        postTypeCode
+      );
+      const submissionPrompt =
+        filteredReferenceStoragePaths.length > 0
+          ? buildV2RoleAwarePrompt(optionPrompt, referencePlan, "final", postTypeCode)
+          : optionPrompt;
+      const optionProviderModel = getFinalProviderModel(filteredReferenceStoragePaths.length);
       const optionJob: CreativeJobRecord = {
         id: jobId,
         workspaceId: promptPackage.workspaceId,
@@ -1169,6 +1168,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         variationTitle: variation.title,
         variationStrategy: variation.strategy,
         optionPrompt,
+        submissionPrompt,
+        filteredReferenceStoragePaths,
         optionJob
       };
     });
@@ -1219,35 +1220,38 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     }
 
     const { error } = await supabaseAdmin.from("creative_jobs").insert(
-      preparedOptionJobs.map(({ jobId, variationId, variationTitle, variationStrategy, optionPrompt }) => ({
-        id: jobId,
-        workspace_id: promptPackage.workspaceId,
-        brand_id: promptPackage.brandId,
-        deliverable_id: promptPackage.deliverableId,
-        project_id: promptPackage.projectId,
-        post_type_id: promptPackage.postTypeId,
-        creative_template_id: promptPackage.creativeTemplateId,
-        calendar_item_id: promptPackage.calendarItemId,
-        prompt_package_id: promptPackage.id,
-        selected_template_id: null,
-        job_type: "option",
-        status: "queued",
-        provider: optionProvider,
-        provider_model: optionProviderModel,
-        requested_count: 1,
-        request_payload: {
-          prompt: optionPrompt,
-          aspectRatio: promptPackage.aspectRatio,
-          count: 1,
-          v2OptionBatchId,
-          variationId,
-          variationTitle,
-          variationStrategy,
-          referenceCount: finalReferenceCount
-        },
-        credit_reservation_id: optionReservationByJobId.get(jobId) ?? null,
-        created_by: viewer.userId
-      }))
+      preparedOptionJobs.map(
+        ({ jobId, variationId, variationTitle, variationStrategy, optionPrompt, submissionPrompt, filteredReferenceStoragePaths, optionJob }) => ({
+          id: jobId,
+          workspace_id: promptPackage.workspaceId,
+          brand_id: promptPackage.brandId,
+          deliverable_id: promptPackage.deliverableId,
+          project_id: promptPackage.projectId,
+          post_type_id: promptPackage.postTypeId,
+          creative_template_id: promptPackage.creativeTemplateId,
+          calendar_item_id: promptPackage.calendarItemId,
+          prompt_package_id: promptPackage.id,
+          selected_template_id: null,
+          job_type: "option",
+          status: "queued",
+          provider: optionProvider,
+          provider_model: optionJob.providerModel,
+          requested_count: 1,
+          request_payload: {
+            basePrompt: optionPrompt,
+            prompt: submissionPrompt,
+            aspectRatio: promptPackage.aspectRatio,
+            count: 1,
+            v2OptionBatchId,
+            variationId,
+            variationTitle,
+            variationStrategy,
+            referenceCount: filteredReferenceStoragePaths.length
+          },
+          credit_reservation_id: optionReservationByJobId.get(jobId) ?? null,
+          created_by: viewer.userId
+        })
+      )
     );
 
     if (error) {
@@ -1267,7 +1271,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const jobs: Array<{ id: string; variationId: string; variationTitle: string; requestId: string | null }> = [];
 
     if (isImmediateImageProvider(optionProvider)) {
-      for (const { jobId, variationId, variationTitle, optionPrompt, optionJob } of preparedOptionJobs) {
+      for (const { jobId, variationId, variationTitle, submissionPrompt, filteredReferenceStoragePaths, optionJob } of preparedOptionJobs) {
         let requestInfo: { request_id: string } | null = null;
 
         requestInfo = { request_id: `${optionProvider}-v2-option-${jobId}` };
@@ -1298,12 +1302,10 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
             providerRequestId: requestInfo.request_id,
             status: "processing"
           },
-          prompt: optionPrompt,
+          prompt: submissionPrompt,
           aspectRatio: promptPackage.aspectRatio,
-          referenceStoragePaths,
-          mode: "final",
-          referencePlan,
-          postTypeCode: getPostTypeCode(promptPackage)
+          referenceStoragePaths: filteredReferenceStoragePaths,
+          mode: "final"
         });
 
         jobs.push({
@@ -1334,15 +1336,15 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
       // FAL option submissions are more reliable when serialized. The single-option
       // paths already behave this way; only multi-option generation was fan-out parallel.
-      for (const { jobId, variationId, variationTitle, optionPrompt, optionJob } of preparedOptionJobs) {
+      for (const { jobId, variationId, variationTitle, submissionPrompt, filteredReferenceStoragePaths, optionJob } of preparedOptionJobs) {
         try {
           const requestInfo = await submitFinalGeneration(
             optionJob,
             {
-              prompt: optionPrompt,
+              prompt: submissionPrompt,
               aspectRatio: promptPackage.aspectRatio
             },
-            filteredRefs
+            filteredReferenceStoragePaths
           );
 
           const { error: optionJobUpdateError } = await supabaseAdmin
@@ -1840,12 +1842,15 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       }))
     };
     const finalPrompt = promptPackage.finalPrompt;
-    const referenceStoragePaths = collectReferenceStoragePaths(referencePlan);
     const filteredRefs = filterReferenceStoragePathsForPrompt(
       referencePlan,
       finalPrompt,
       getPostTypeCode(promptPackage) ?? "default"
     );
+    const submissionPrompt =
+      filteredRefs.length > 0
+        ? buildV2RoleAwarePrompt(finalPrompt, referencePlan, "final", getPostTypeCode(promptPackage) ?? "default")
+        : finalPrompt;
     const expectedReferenceCount = filteredRefs.length;
     const finalProvider = resolveImageGenerationProvider();
     const finalProviderModel = getFinalProviderModel(expectedReferenceCount);
@@ -1919,7 +1924,8 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       provider_model: finalProviderModel,
       requested_count: body.count,
       request_payload: {
-        prompt: finalPrompt,
+        basePrompt: finalPrompt,
+        prompt: submissionPrompt,
         aspectRatio: promptPackage.aspectRatio,
         count: body.count,
         selectedTemplateId: body.selectedTemplateId ?? null,
@@ -1983,19 +1989,17 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           providerRequestId: requestInfo.request_id,
           status: "processing"
         },
-        prompt: finalPrompt,
+        prompt: submissionPrompt,
         aspectRatio: promptPackage.aspectRatio,
-        referenceStoragePaths,
-        mode: "final",
-        referencePlan,
-        postTypeCode: getPostTypeCode(promptPackage)
+        referenceStoragePaths: filteredRefs,
+        mode: "final"
       });
     } else {
       try {
         requestInfo = await submitFinalGeneration(
           finalJobRecord,
           {
-            prompt: finalPrompt,
+            prompt: submissionPrompt,
             aspectRatio: promptPackage.aspectRatio
           },
           filteredRefs
@@ -2479,94 +2483,6 @@ function getPostTypeCode(promptPackage: { postType?: { code: string }; resolvedC
   }
   return "default";
 }
-
-function collectReferenceStoragePaths(plan: RoleAwareReferencePlan) {
-  return [
-    plan.primaryAnchor?.storagePath,
-    plan.sourcePost?.storagePath,
-    plan.amenityAnchor?.storagePath,
-    plan.projectAnchor?.storagePath,
-    plan.brandLogo?.storagePath,
-    plan.complianceQr?.storagePath,
-    ...plan.references.map((reference) => reference.storagePath)
-  ].filter((value): value is string => typeof value === "string" && value.length > 0);
-}
-
-function filterReferenceStoragePathsForPrompt(
-  plan: RoleAwareReferencePlan,
-  _prompt: string,
-  postTypeCode: string
-): string[] {
-  const alwaysInclude = [
-    plan.brandLogo?.storagePath,
-    plan.complianceQr?.storagePath
-  ].filter((v): v is string => typeof v === "string" && v.length > 0);
-
-  const heroReference: string[] = [];
-  const secondaryReference: string[] = [];
-  const pushSecondary = (value: string | null | undefined) => {
-    if (!value || heroReference.includes(value) || secondaryReference.includes(value)) {
-      return;
-    }
-    secondaryReference.push(value);
-  };
-  if (postTypeCode === "amenity-spotlight") {
-    if (plan.amenityAnchor?.storagePath) {
-      heroReference.push(plan.amenityAnchor.storagePath);
-    }
-  } else if (postTypeCode === "construction-update" || postTypeCode === "project-launch") {
-    if (plan.projectAnchor?.storagePath) {
-      heroReference.push(plan.projectAnchor.storagePath);
-    }
-    pushSecondary(plan.primaryAnchor?.storagePath);
-    if (secondaryReference.length === 0) {
-      pushSecondary(plan.references[0]?.storagePath);
-    }
-  } else if (postTypeCode === "sample-flat-showcase" || postTypeCode === "site-visit-invite") {
-    if (plan.projectAnchor?.storagePath) {
-      heroReference.push(plan.projectAnchor.storagePath);
-    }
-    pushSecondary(plan.primaryAnchor?.storagePath);
-    if (secondaryReference.length === 0) {
-      pushSecondary(plan.references[0]?.storagePath);
-    }
-  } else if (postTypeCode === "location-advantage") {
-    if (plan.projectAnchor?.storagePath) {
-      heroReference.push(plan.projectAnchor.storagePath);
-    }
-    pushSecondary(plan.primaryAnchor?.storagePath);
-    if (secondaryReference.length === 0) {
-      pushSecondary(plan.references[0]?.storagePath);
-    }
-  } else if (postTypeCode === "testimonial") {
-    if (plan.primaryAnchor?.storagePath) {
-      heroReference.push(plan.primaryAnchor.storagePath);
-    } else if (plan.projectAnchor?.storagePath) {
-      heroReference.push(plan.projectAnchor.storagePath);
-    }
-    if (secondaryReference.length === 0) {
-      pushSecondary(plan.references[0]?.storagePath);
-    }
-  } else if (postTypeCode === "festive-greeting") {
-    pushSecondary(plan.primaryAnchor?.storagePath);
-    if (secondaryReference.length === 0) {
-      pushSecondary(plan.references[0]?.storagePath);
-    }
-  } else {
-    // Default: include amenity and project
-    if (plan.amenityAnchor?.storagePath) heroReference.push(plan.amenityAnchor.storagePath);
-    if (plan.projectAnchor?.storagePath) heroReference.push(plan.projectAnchor.storagePath);
-    pushSecondary(plan.primaryAnchor?.storagePath);
-    if (secondaryReference.length === 0) {
-      pushSecondary(plan.references[0]?.storagePath);
-    }
-  }
-
-  const result = [...heroReference, ...secondaryReference.slice(0, 1), ...alwaysInclude];
-  console.log(`[filterReferenceStoragePathsForPrompt] postTypeCode=${postTypeCode}, heroRef=${heroReference.length}, alwaysInclude=${alwaysInclude.length}, total=${result.length}, paths=${JSON.stringify(result)}`);
-  return result;
-}
-
 
 async function runImmediateProviderJob({
   job,
