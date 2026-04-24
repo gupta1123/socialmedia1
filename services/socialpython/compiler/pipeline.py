@@ -335,8 +335,6 @@ def build_run_images(analyst_input: NotebookAnalystInput) -> list[Image]:
     ordered_paths.extend(analyst_input.reference_image_paths)
     if analyst_input.template_image_path:
         ordered_paths.append(analyst_input.template_image_path)
-    if analyst_input.logo_image_path:
-        ordered_paths.append(analyst_input.logo_image_path)
 
     images: list[Image] = []
     seen: set[str] = set()
@@ -799,8 +797,9 @@ def build_agents() -> dict[str, Any]:
                 "Return ONLY structured data matching the schema.",
                 "",
                 "You have access to Briefly Social skills.",
-                "Call get_skill_instructions('briefly-social-core') before deciding delivery_mode.",
-                "Call get_skill_instructions('briefly-social-archetypes') before choosing poster_archetype and lever bundle.",
+                "Skill usage is optional. If the summaries leave a real gap, call get_skill_instructions for briefly-social-core and briefly-social-archetypes at most once each.",
+                "Never retry a skill tool after it has returned content, failed, or hit a tool limit.",
+                "If a skill tool is unavailable or the tool limit is reached, continue from the available context without another skill call.",
                 "Do NOT call get_skill_script. There are no scripts in these skills.",
                 "",
                 "Workflow:",
@@ -808,10 +807,10 @@ def build_agents() -> dict[str, Any]:
                 "2. If selected_post_type is provided, use it. Otherwise infer post_type from the brief.",
                 "3. Call get_project_details(project_slug) and get_brand_guidelines().",
                 "4. If template_id is provided, call get_template_details(template_id).",
-                "5. The attached images correspond to reference_image_paths, template_image_path, and logo_image_path in the input.",
+                "5. The attached images correspond only to reference_image_paths and template_image_path in the input.",
                 "6. If reference_image_paths are provided, use vision to understand what the image(s) show, decide the strongest hero, and decide crop / angle / realism treatment.",
                 "7. Treat template_image_path as a style and composition cue only. It must not change project identity.",
-                "8. Treat logo_image_path as an exact brand mark. Preserve it faithfully.",
+                "8. Treat logo_image_path as exact brand-mark metadata for downstream placement; do not inspect it with vision in the analyst stage.",
                 "9. If reference_image_paths are provided, prefer uploaded_reference as the primary asset source unless the brief clearly needs a project-library asset instead.",
                 "10. If reference_image_paths are empty and the post type requires a truthful visual anchor, you must use a project-library asset when one exists.",
                 "11. For construction_update, if no uploaded reference image is provided, call list_asset_candidates(project_slug, post_type, specific_amenity, occasion, no_building_image, brief_text=user_brief) and choose the truthful construction_progress asset from the project library when available.",
@@ -859,14 +858,14 @@ def build_agents() -> dict[str, Any]:
                 "Return ONLY structured data matching the schema.",
                 "",
                 "You have access to Briefly Social skills.",
-                "Call get_skill_instructions('briefly-social-core') when needed.",
-                "Call get_skill_instructions('briefly-social-archetypes') when needed.",
+                "Skill usage is optional. Call get_skill_instructions only for a specific unresolved gap and at most once per skill name.",
+                "Never retry a skill tool after it has returned content, failed, or hit a tool limit.",
                 "Call get_skill_reference('briefly-social-core', 'style-primitive-matrix.md') only when needed.",
                 "Call get_skill_reference('briefly-social-archetypes', 'style-family-map.md') only when needed.",
                 "Do NOT call get_skill_script. There are no scripts in these skills.",
                 "",
                 "Rules:",
-                "- The attached images correspond to reference_image_paths, template_image_path, and logo_image_path in the analysis.",
+                "- The attached images correspond to reference_image_paths and template_image_path in the analysis. logo_image_path is exact brand-mark metadata, not a visual-analysis input.",
                 "- If asset_decision.reference_tag exists, start the prompt with it.",
                 "- If asset_decision.source='uploaded_reference', do not invent a filename; rely on the attached reference image and the reference_usage_plan.",
                 "- If asset_decision.source='project_library', the prompt must stay anchored to the selected category and reference_tag.",
@@ -920,6 +919,10 @@ def build_agents() -> dict[str, Any]:
         ),
         **verifier_output_options,
     )
+
+    analyst.tool_call_limit = 6
+    crafter.tool_call_limit = 2
+    verifier.tool_call_limit = 0
 
     return {
         "analyst": analyst,

@@ -503,8 +503,6 @@ def patch_notebook_image_helpers(namespace: dict[str, Any]) -> None:
         ordered_paths.extend(analyst_input.reference_image_paths or [])
         if analyst_input.template_image_path:
             ordered_paths.append(analyst_input.template_image_path)
-        if analyst_input.logo_image_path:
-            ordered_paths.append(analyst_input.logo_image_path)
 
         images: list[Any] = []
         for value in unique_paths(ordered_paths):
@@ -528,13 +526,24 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
         if scoped_skills is not None:
             analyst.skills = scoped_skills
         analyst.tool_call_limit = 6
+        analyst.instructions = filter_instruction_lines(
+            analyst.instructions,
+            [
+                "Call get_skill_instructions('briefly-social-core')",
+                "Call get_skill_instructions('briefly-social-archetypes')",
+                "Call get_skill_reference",
+                "Call get_skill_script",
+            ],
+        )
         analyst.instructions = append_instruction_lines(
             analyst.instructions,
             [
-                "Load only briefly-social-core and briefly-social-archetypes in this stage.",
-                "Load each required skill at most once.",
+                "Skill usage is optional in this stage. If the summaries leave a real gap, load only briefly-social-core and briefly-social-archetypes.",
+                "Call get_skill_instructions at most once per skill name and never retry a skill tool after it has returned content, failed, or hit a tool limit.",
+                "If a skill tool is unavailable or the tool limit is reached, continue from the available context without another skill call.",
                 "Do not load briefly-social-qa in this stage.",
                 "Do not call get_skill_reference unless the loaded skill text leaves a real ambiguity.",
+                "The logo_image_path is metadata for exact downstream logo placement. Do not inspect the logo with vision in the analyst stage.",
             ],
         )
 
