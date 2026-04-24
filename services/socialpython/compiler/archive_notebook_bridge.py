@@ -56,6 +56,8 @@ NOTEBOOK_POST_TYPE_MAP = {
     "festive-greeting": "festival_post",
     "amenity-spotlight": "amenity_spotlight",
     "site-visit-invite": "site_visit_invite",
+    "location-advantage": "location_advantage",
+    "testimonial": "testimonial",
 }
 ANALYST_SKILL_NAMES = (
     "briefly-social-core",
@@ -522,15 +524,16 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
     verifier = namespace.get("verifier")
 
     if analyst is not None:
-        scoped_skills = build_scoped_skills(namespace, runtime_dir, ANALYST_SKILL_NAMES)
-        if scoped_skills is not None:
-            analyst.skills = scoped_skills
+        analyst.skills = None
         analyst.tool_call_limit = 6
         analyst.instructions = filter_instruction_lines(
             analyst.instructions,
             [
+                "You have access to Briefly Social skills.",
+                "Skill usage is optional.",
                 "Call get_skill_instructions('briefly-social-core')",
                 "Call get_skill_instructions('briefly-social-archetypes')",
+                "Call get_skill_instructions",
                 "Call get_skill_reference",
                 "Call get_skill_script",
             ],
@@ -538,11 +541,7 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
         analyst.instructions = append_instruction_lines(
             analyst.instructions,
             [
-                "Skill usage is optional in this stage. If the summaries leave a real gap, load only briefly-social-core and briefly-social-archetypes.",
-                "Call get_skill_instructions at most once per skill name and never retry a skill tool after it has returned content, failed, or hit a tool limit.",
-                "If a skill tool is unavailable or the tool limit is reached, continue from the available context without another skill call.",
-                "Do not load briefly-social-qa in this stage.",
-                "Do not call get_skill_reference unless the loaded skill text leaves a real ambiguity.",
+                "Briefly Social skill guidance is already preloaded in this run. Do not call or request skill tools.",
                 "The logo_image_path is metadata for exact downstream logo placement. Do not inspect the logo with vision in the analyst stage.",
             ],
         )
@@ -562,7 +561,8 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "Every variation must use a different poster_archetype.",
             "Do not create superficial copies with renamed titles.",
             "Route 1 may keep the analyst's selected archetype when it fits. Remaining routes must choose other compatible archetypes for the same asset and business job.",
-            "For project_launch and site_visit_invite, every registered poster_archetype is allowed. Rank by asset fit and business job, but do not treat post type alone as a blocker.",
+            "For project_launch, site_visit_invite, location_advantage, and testimonial, every registered poster_archetype is allowed. Rank by asset fit and business job, but do not treat post type alone as a blocker.",
+            "If brief_analysis.post_type is testimonial, do not describe the creative as a project launch. The business job is social proof, trust, quote, resident/buyer proof, or experience-led credibility.",
             "All variations must preserve the same project truth, asset truth, and text-policy obligations.",
             "If the asset limits possible diversity, choose the nearest distinct compatible archetypes instead of forcing invalid styles.",
             "Every prompt must remain a finished social poster, not a scenic base-image prompt.",
@@ -572,7 +572,7 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "Do not include a logo, brand mark, emblem, monogram, watermark, or invented branding asset unless an exact logo is supplied in the input.",
             "Do not invent asset filenames, reference filenames, filepaths, or hero image names. If asset_decision.filename is null, describe the visual subject without naming a file.",
             "Do not write literal placeholder labels such as Address, Headline, Call to Action, Contact Details, Phone, Website, RERA, Logo, or Brand Mark.",
-            "If brief_analysis.exact_text_supplied is false, do not name text fields. Use generic copy language like short invitation line or minimal copy block.",
+            "If brief_analysis.exact_text_supplied is false, do not name text fields. Use post-type-aware generic copy language like minimal launch copy, minimal location/context copy, short invitation line, minimal testimonial/quote copy, or minimal copy block.",
             "If exact logo or RERA QR assets are not supplied, do not mention logo, brand mark, watermark, QR, or RERA in the prompt or negative prompt.",
             "Keep the negative prompt visual-only. Do not put compliance, contact, logo, URL, email, phone, RERA, placeholder, or address words in negative.",
             "Do not expose internal labels such as Business job, Text architecture, Layout, Voice, Brand visibility, Density, or Visual mode in the prompt. Translate them into natural visual direction.",
@@ -600,23 +600,24 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "Every kept variation must remove literal placeholder labels such as Address, Headline, Call to Action, Contact Details, Phone, Website, RERA, Logo, or Brand Mark.",
             "If text is not supplied, keep copy direction generic and do not name unavailable text fields.",
             "When brief_analysis.exact_text_supplied is false, prompt_summary, revised_prompt, and revised_negative must not contain address, headline, CTA, call to action, contact details, phone, website, email, RERA, logo, watermark, brand mark, or invented filenames.",
-            "If no exact text is supplied, revised_prompt must not contain field-label lists such as headline/location/CTA/contact/RERA. Rewrite them as a generic short invitation hierarchy.",
+            "If no exact text is supplied, revised_prompt must not contain field-label lists such as headline/location/CTA/contact/RERA. Rewrite them as a generic post-type-aware copy hierarchy.",
             "If the crafted prompt asks for unavailable contact, compliance, logo, or placeholder text, you must rewrite the sentence instead of approving it.",
             "Keep revised_negative visual-only. Do not use it for contact, compliance, logo, URL, email, phone, RERA, or placeholder restrictions.",
             "revised_negative should be a short visual-quality list only, for example: low quality, clutter, harsh lighting, distorted architecture.",
             "revised_negative must not contain these words: phone, website, email, contact, RERA, logo, watermark, placeholder, address, URL.",
             "revised_prompt must not expose internal compiler labels such as Business job, Text architecture, Layout, Voice, Brand visibility, Density, Visual mode, or Hero presentation.",
-            "Translate internal text architecture into natural creative direction. If exact_text_supplied is false, use 'minimal invitation copy treatment' instead of address/headline/CTA wording.",
+            "Translate internal text architecture into natural creative direction. If exact_text_supplied is false, use post-type-aware wording instead of address/headline/CTA wording. For location_advantage use 'minimal location/context copy treatment', not invitation wording. For testimonial use 'minimal testimonial/quote copy treatment', not launch wording.",
             "Use 'contact info' rather than 'contact details' in any negative constraint that must refer to contact.",
             "Use the project_name value from brief_analysis exactly. Do not spell-correct, expand, translate, or rename it.",
             "Every kept variation must treat project_name as a display name only. Revise wording like 'in <project_name>' or '<project_name> project' when it could imply location.",
+            "If brief_analysis.post_type is testimonial, prompt_summary, revised_prompt, and revised_negative must not call the output a project launch or launch poster.",
             "Every kept variation must feel poster-grade, not scenic-render-grade.",
             "",
             "Set-level checks:",
             "- poster_archetypes must be distinct",
             "- prompts must not be near-duplicates with renamed labels",
             "- weak or invalid routes must be revised into clearly different compatible routes",
-            "- for project_launch and site_visit_invite, do not reject an archetype solely because it is unusual for the post type",
+            "- for project_launch, site_visit_invite, location_advantage, and testimonial, do not reject an archetype solely because it is unusual for the post type",
             "",
             "Per-route checks:",
             "- truthfulness and recognisability",
@@ -768,7 +769,7 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
                 if normalize_choice_token(item) not in {"address", "rera", "rera_number", "contact", "contact_details", "phone", "website", "email"}
             ]
             analysis_payload["copy_availability_note"] = (
-                "No exact copy was supplied. Do not name unavailable text fields; use a minimal invitation copy treatment."
+                get_no_exact_copy_note(str(analysis_payload.get("post_type") or ""))
             )
         variation_count = clamp_requested_variation_count(requested_variation_count)
 
@@ -1256,6 +1257,25 @@ def build_user_brief(request_context: dict[str, Any]) -> str:
     return "\n".join(parts).strip() or "Create a strong real-estate social poster."
 
 
+def get_no_exact_copy_note(post_type: str) -> str:
+    if post_type == "site_visit_invite":
+        copy_treatment = "a short invitation copy treatment"
+    elif post_type == "location_advantage":
+        copy_treatment = "a minimal location/context copy treatment"
+    elif post_type == "project_launch":
+        copy_treatment = "a minimal launch copy treatment"
+    elif post_type == "amenity_spotlight":
+        copy_treatment = "a minimal amenity-benefit copy treatment"
+    elif post_type == "construction_update":
+        copy_treatment = "a minimal progress/update copy treatment"
+    elif post_type == "testimonial":
+        copy_treatment = "a minimal testimonial/quote copy treatment"
+    else:
+        copy_treatment = "a minimal copy treatment"
+
+    return f"No exact copy was supplied. Do not name unavailable text fields; use {copy_treatment}."
+
+
 def derive_reference_image_urls(payload: dict[str, Any]) -> list[str] | None:
     media_context = payload.get("mediaContext") or {}
     urls = [
@@ -1414,6 +1434,33 @@ def rank_archetypes_for_analysis(analysis: dict[str, Any]) -> list[str]:
                 "symbolic_festive_field",
                 "scarcity_panel",
                 "ultra_minimal_address",
+            ]
+        )
+    elif post_type == "location_advantage":
+        ranked.extend(
+            [
+                "masterplan_scale_reveal",
+                "philosophy_open_field",
+                "swiss_grid_premium",
+                "white_space_editorial_statement",
+                "side_crop_premium_tower",
+                "clear_sky_statement",
+                "footer_builder_campaign",
+                "soft_editorial_cutout",
+                "centered_monolith",
+                "organic_shape_launch",
+            ]
+        )
+    elif post_type == "testimonial":
+        ranked.extend(
+            [
+                "quote_led_editorial",
+                "inset_image_card",
+                "watermark_catalog",
+                "white_space_editorial_statement",
+                "soft_editorial_cutout",
+                "swiss_grid_premium",
+                "philosophy_open_field",
             ]
         )
     elif post_type == "construction_update":
@@ -1725,11 +1772,9 @@ def normalize_notebook_bridge_result(
     if verified_variations:
         for index, route in enumerate(verified_variations, start=1):
             route_prompt = sanitize_public_prompt_text(str(route.get("revised_prompt") or "").strip(), payload)
-            route_negative = sanitize_public_prompt_text(
+            route_negative = sanitize_negative_prompt_text(
                 str(route.get("revised_negative") or "").strip(),
                 payload,
-                include_identity_guardrail=False,
-                include_output_guardrails=False,
             )
             route_final_prompt = (
                 f"{route_prompt} Negative prompt: {route_negative}".strip()
@@ -1786,11 +1831,9 @@ def normalize_notebook_bridge_result(
 
     if not normalized_variations:
         clean_prompt = sanitize_public_prompt_text(str(verified.get("revised_prompt") or "").strip(), payload)
-        clean_negative = sanitize_public_prompt_text(
+        clean_negative = sanitize_negative_prompt_text(
             str(verified.get("revised_negative") or "").strip(),
             payload,
-            include_identity_guardrail=False,
-            include_output_guardrails=False,
         )
         final_prompt = f"{clean_prompt} Negative prompt: {clean_negative}".strip() if clean_negative else clean_prompt
         normalized_variations.append(
@@ -1817,13 +1860,7 @@ def normalize_notebook_bridge_result(
         )
 
     first_variation = normalized_variations[0]
-    prompt_summary = sanitize_public_prompt_text(
-        str(verified.get("prompt_summary") or "").strip(),
-        payload,
-        include_identity_guardrail=False,
-        include_output_guardrails=False,
-    )
-    prompt_summary = prompt_summary or build_prompt_summary(first_variation["finalPrompt"], analysis)
+    prompt_summary = build_variation_set_summary(analysis, normalized_variations)
 
     compiler_trace = {
         "pipeline": PIPELINE_NAME,
@@ -1946,6 +1983,70 @@ def sanitize_public_prompt_text(
     return re.sub(r"\s{2,}", " ", text).strip()
 
 
+def sanitize_negative_prompt_text(prompt: str, payload: dict[str, Any]) -> str:
+    cleaned = sanitize_public_prompt_text(
+        prompt,
+        payload,
+        include_identity_guardrail=False,
+        include_output_guardrails=False,
+    )
+    if not cleaned:
+        return ""
+
+    parts = [cleaned]
+    for separator in (",", ";", "\n"):
+        next_parts: list[str] = []
+        for part in parts:
+            next_parts.extend(part.split(separator))
+        parts = next_parts
+
+    banned_fragments = (
+        "phone",
+        "whatsapp",
+        "website",
+        "email",
+        "contact",
+        "rera",
+        "logo",
+        "brand mark",
+        "brand logos",
+        "watermark",
+        "placeholder",
+        "url",
+        "address",
+        "cta",
+        "call to action",
+        "field-label",
+        "field label",
+    )
+    remove_photo_negatives = has_truthful_visual_anchor(payload)
+    photo_conflict_fragments = (
+        "photograph",
+        "photo",
+        "photorealistic",
+        "existing building",
+        "building photo",
+    )
+
+    visual_parts: list[str] = []
+    seen: set[str] = set()
+    for raw_part in parts:
+        part = raw_part.strip(" .")
+        if not part:
+            continue
+        lowered = part.lower()
+        if any(fragment in lowered for fragment in banned_fragments):
+            continue
+        if remove_photo_negatives and any(fragment in lowered for fragment in photo_conflict_fragments):
+            continue
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        visual_parts.append(part)
+
+    return ", ".join(visual_parts)
+
+
 def normalize_project_name_location_phrasing(text: str, payload: dict[str, Any]) -> str:
     project_name = get_project_display_name(payload)
     if not project_name:
@@ -2019,6 +2120,16 @@ def append_output_authenticity_guardrails(text: str, payload: dict[str, Any]) ->
         if clause not in output:
             output = f"{output} {clause}".strip()
     return output
+
+
+def has_truthful_visual_anchor(payload: dict[str, Any]) -> bool:
+    bundle = payload.get("truthBundle") or {}
+    exact_assets = bundle.get("exactAssetContract") or {}
+    media_context = payload.get("mediaContext") or {}
+    return bool(
+        exact_assets.get("requiredProjectAnchorAssetId")
+        or (media_context.get("referenceImages") or [])
+    )
 
 
 def has_exact_logo_input(payload: dict[str, Any]) -> bool:
@@ -2134,6 +2245,30 @@ def build_seed_prompt(clean_prompt: str, analysis: dict[str, Any], bundle: dict[
 def build_prompt_summary(clean_prompt: str, analysis: dict[str, Any]) -> str:
     first_sentence = re.split(r"(?<=[.!?])\s+", clean_prompt.strip(), maxsplit=1)[0].strip()
     return first_sentence[:320] if first_sentence else str(analysis.get("objective_summary") or "").strip()
+
+
+def build_variation_set_summary(analysis: dict[str, Any], variations: list[dict[str, Any]]) -> str:
+    project_name = str(analysis.get("project_name") or "the project").strip()
+    post_type = str(analysis.get("post_type") or "social_post").replace("_", " ")
+    business_job = str(analysis.get("business_job") or analysis.get("objective_summary") or "").strip()
+    route_parts: list[str] = []
+    for variation in variations:
+        title = str(variation.get("title") or "").strip()
+        archetype = str((variation.get("resolvedConstraints") or {}).get("posterArchetype") or "").strip()
+        if title and archetype:
+            route_parts.append(f"{title} ({archetype})")
+        elif title:
+            route_parts.append(title)
+        elif archetype:
+            route_parts.append(archetype)
+
+    count = len(variations)
+    summary = f"{count} {post_type} variation{'s' if count != 1 else ''} for {project_name}"
+    if business_job:
+        summary = f"{summary}, focused on {business_job}"
+    if route_parts:
+        return f"{summary}. Routes: {'; '.join(route_parts)}."
+    return f"{summary}."
 
 
 def resolve_reference_strategy(payload: dict[str, Any]) -> str:

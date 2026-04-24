@@ -1199,6 +1199,49 @@ export default function CreatePage() {
   const currentReviewHref = activeReviewDeliverableId
     ? `/studio/review?deliverableId=${activeReviewDeliverableId}`
     : "/studio/review";
+  const previewBrief = runDetail?.brief ?? null;
+  const previewProjectId = previewBrief?.projectId ?? promptPackage?.projectId ?? briefForm.projectId;
+  const previewPostTypeId = previewBrief?.postTypeId ?? promptPackage?.postTypeId ?? briefForm.postTypeId;
+  const previewProjectName = previewProjectId ? projectMap.get(previewProjectId)?.name : null;
+  const previewPostTypeName = previewPostTypeId ? postTypeMap.get(previewPostTypeId)?.name : null;
+  const previewBriefSections = useMemo(
+    () => {
+      const brief = previewBrief ?? briefForm;
+      const placement =
+        getPlacementSpec(brief.channel, brief.format) ??
+        getPlacementSpec(briefForm.channel, briefForm.format) ??
+        compiledPlacement;
+      const briefItems = compactPreviewDetails([
+        { label: "Brief", value: brief.prompt },
+        { label: "Goal", value: brief.goal },
+        { label: "Audience", value: brief.audience },
+        { label: "Text mode", value: brief.copyMode === "auto" ? "AI decides text" : "Manual text" },
+        { label: "Exact text", value: brief.exactText }
+      ]);
+      const setupItems = compactPreviewDetails([
+        { label: "Project", value: previewProjectName },
+        { label: "Post type", value: previewPostTypeName },
+        { label: "Channel", value: placement?.channelLabel ?? startCase(brief.channel) },
+        { label: "Format", value: placement?.formatLabel ?? startCase(brief.format) },
+        { label: "Aspect ratio", value: promptPackage?.aspectRatio ?? runDetail?.run.aspectRatio ?? placement?.aspectRatio },
+        { label: "Creative family", value: brief.templateType ? startCase(brief.templateType) : null }
+      ]);
+
+      return [
+        { title: "Brief used", items: briefItems },
+        { title: "Setup", items: setupItems }
+      ].filter((section) => section.items.length > 0);
+    },
+    [
+      briefForm,
+      compiledPlacement,
+      previewBrief,
+      previewPostTypeName,
+      previewProjectName,
+      promptPackage?.aspectRatio,
+      runDetail?.run.aspectRatio
+    ]
+  );
 
   const promptLength = briefForm.prompt.trim().length;
   const hasBriefPrompt = promptLength >= MIN_PROMPT_LENGTH;
@@ -3354,6 +3397,7 @@ export default function CreatePage() {
                               )
                             }
                           ]}
+                          sections={previewBriefSections}
                           src={output.originalUrl ?? output.previewUrl}
                         >
                           <img alt="" src={output.originalUrl ?? output.previewUrl ?? output.thumbnailUrl} />
@@ -3679,7 +3723,7 @@ export default function CreatePage() {
                       {filteredPostTypes.map((postType, index) => (
                         <button
                           key={postType.id}
-                          className={`create-post-type-card ${briefForm.postTypeId === postType.id ? "is-selected" : ""}`}
+                          className={`create-post-type-card create-post-type-card-${postType.code} ${briefForm.postTypeId === postType.id ? "is-selected" : ""}`}
                           onClick={() => {
                             handlePostTypeChange(postType.id);
                             setActivePicker(null);
@@ -3712,38 +3756,52 @@ export default function CreatePage() {
                 ) : null}
 
                 {activePicker === "festival" ? (
-                  <div className="create-picker-list">
+                  <div className="create-festival-grid">
                     <button
-                      className={`create-picker-row ${!selectedFestival ? "is-selected" : ""}`}
+                      className={`create-festival-card create-festival-card-none ${!selectedFestival ? "is-selected" : ""}`}
                       onClick={() => {
                         handleFestivalChange("");
                         setActivePicker(null);
                       }}
                       type="button"
                     >
-                      <div className="create-picker-row-copy">
+                      <span className="create-festival-check" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none">
+                          <path d="m5 12 4 4L19 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </span>
+                      <span className="create-festival-illo create-festival-illo-empty" aria-hidden="true">None</span>
+                      <span className="create-festival-card-body">
                         <strong>No festival</strong>
-                      </div>
+                        <span>Use a general festive greeting brief.</span>
+                      </span>
                     </button>
                     {filteredFestivals.map((festival) => (
                       <button
                         key={festival.id}
-                        className={`create-picker-row ${briefForm.festivalId === festival.id ? "is-selected" : ""}`}
+                        className={`create-festival-card ${briefForm.festivalId === festival.id ? "is-selected" : ""}`}
                         onClick={() => {
                           handleFestivalChange(festival.id);
                           setActivePicker(null);
                         }}
                         type="button"
                       >
-                        <div className="create-picker-row-copy">
+                        <span className="create-festival-check" aria-hidden="true">
+                          <svg viewBox="0 0 24 24" fill="none">
+                            <path d="m5 12 4 4L19 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </span>
+                        <span className="create-festival-illo">
+                          <img alt="" src={getFestivalIllustrationSrc(festival.code)} />
+                        </span>
+                        <span className="create-festival-card-body">
                           <strong>{festival.name}</strong>
                           <span>
-                            {[festival.dateLabel, festival.community, festival.meaning]
+                            {[festival.dateLabel, festival.community ?? startCase(festival.category)]
                               .filter(Boolean)
                               .join(" · ")}
                           </span>
-                        </div>
-                        <span className="pill">{startCase(festival.category)}</span>
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -4192,6 +4250,15 @@ function startCase(value: string) {
     .join(" ");
 }
 
+function compactPreviewDetails(items: Array<{ label: string; value: string | null | undefined }>) {
+  return items
+    .map((item) => ({
+      label: item.label,
+      value: typeof item.value === "string" ? item.value.trim() : ""
+    }))
+    .filter((item) => item.value.length > 0);
+}
+
 function getGenericFestivePrompt(): string {
   return POST_TYPE_BRIEF_STARTERS["festive-greeting"] ?? defaultPromptText;
 }
@@ -4516,73 +4583,123 @@ function getPostTypeModalDescription(postType: Pick<PostTypeRecord, "code" | "de
 }
 
 function PostTypeIllustration({ code }: { code: string }) {
+  const pngSrc = getPostTypeIllustrationSrc(code);
+
+  if (pngSrc) {
+    return <img alt="" src={pngSrc} />;
+  }
+
   if (code === "construction-update") {
     return (
-      <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
-        <rect x="15" y="27" width="34" height="27" rx="3" fill="currentColor" opacity="0.12" />
-        <path d="M15 35h34M15 44h34M25 27v27M39 27v27" stroke="currentColor" strokeWidth="2" strokeDasharray="4 4" opacity="0.45" />
-        <path d="M32 27V9M32 9h21M50 9v12" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
-        <rect x="45" y="21" width="10" height="8" rx="2" fill="currentColor" opacity="0.72" />
+      <svg viewBox="0 0 180 150" fill="none" aria-hidden="true">
+        <path d="M20 147c18-36 50-53 96-51 30 2 50 12 64 30v21H20Z" fill="var(--post-type-wash)" />
+        <path d="M80 43h70M146 43v82M81 43l39-30 30 30M102 43v82M71 56h29" stroke="var(--post-type-accent)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M64 123h63V76H64v47Z" fill="var(--post-type-mid)" />
+        <path d="M73 87h16v18H73zM101 87h16v18h-16zM72 76v-9M95 76v-15M118 76v-11M55 123h82M47 123V94M143 123V86" stroke="var(--post-type-accent)" strokeWidth="4" strokeLinecap="round" />
+        <path d="M138 55h20v14h-20z" fill="var(--post-type-deep)" />
+        <path d="M142 82h24M148 94h18M152 106h14M46 101h16M46 112h16" stroke="var(--post-type-deep)" strokeWidth="3" strokeLinecap="round" opacity="0.55" />
       </svg>
     );
   }
 
   if (code === "festive-greeting") {
     return (
-      <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
-        <rect x="15" y="24" width="34" height="30" rx="3" fill="currentColor" opacity="0.12" />
-        <rect x="12" y="17" width="40" height="9" rx="2" fill="currentColor" opacity="0.48" />
-        <path d="M32 17c-8-12-18-4-3 0M32 17c8-12 18-4 3 0" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
-        <path d="M32 18v36" stroke="currentColor" strokeWidth="4" />
-        <circle cx="13" cy="12" r="3" fill="currentColor" opacity="0.38" />
-        <circle cx="51" cy="12" r="3" fill="currentColor" opacity="0.38" />
+      <svg viewBox="0 0 180 150" fill="none" aria-hidden="true">
+        <path d="M16 147c17-27 46-42 88-43 36-1 61 8 76 27v16H16Z" fill="var(--post-type-wash)" />
+        <path d="M75 80h75v52H75z" fill="var(--post-type-mid)" />
+        <path d="M70 67h85v19H70z" fill="var(--post-type-light)" />
+        <path d="M113 67c-16-28-40-10-7 0M113 67c16-28 40-10 7 0" stroke="var(--post-type-deep)" strokeWidth="8" strokeLinecap="round" />
+        <path d="M113 68v64M70 86h85" stroke="var(--post-type-deep)" strokeWidth="6" strokeLinecap="round" />
+        <path d="M44 28h14l5-16 5 16h14l-11 9 5 15-13-9-13 9 5-15-11-9ZM154 32l7 4 7-4-4 8 4 8-7-4-7 4 4-8-4-8ZM48 83l5 3 5-3-3 6 3 6-5-3-5 3 3-6-3-6Z" fill="var(--post-type-accent)" opacity="0.72" />
+        <path d="M145 49c14 17 16 41 6 70M156 60c-12 3-18 11-18 22M161 81c-13 1-21 8-24 19M151 105c-10-2-19 1-27 9" stroke="var(--post-type-deep)" strokeWidth="4" strokeLinecap="round" opacity="0.65" />
       </svg>
     );
   }
 
   if (code === "amenity-spotlight") {
     return (
-      <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
-        <rect x="10" y="35" width="44" height="15" rx="4" fill="currentColor" opacity="0.14" />
-        <rect x="18" y="24" width="28" height="17" rx="3" fill="currentColor" opacity="0.48" />
-        <path d="M16 50v7M48 50v7M54 57V14" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
-        <path d="m54 14 7 10H47l7-10Z" fill="currentColor" opacity="0.7" />
-        <circle cx="32" cy="28" r="3" fill="currentColor" opacity="0.85" />
+      <svg viewBox="0 0 180 150" fill="none" aria-hidden="true">
+        <path d="M10 147c21-38 54-53 98-46 29 5 53 20 72 46H10Z" fill="var(--post-type-wash)" />
+        <path d="M80 98h64c9 0 16 7 16 16v18H65v-19c0-8 7-15 15-15Z" fill="var(--post-type-mid)" />
+        <path d="M77 132v12M149 132v12" stroke="var(--post-type-deep)" strokeWidth="6" strokeLinecap="round" />
+        <path d="M99 75h50c7 0 12 5 12 12v24H88V86c0-6 5-11 11-11Z" fill="var(--post-type-light)" />
+        <path d="M56 90V48h38M94 48v29" stroke="var(--post-type-deep)" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M47 63h35l9-15H57l-10 15Z" fill="var(--post-type-accent)" opacity="0.55" />
+        <path d="M149 131c15-30 17-55 7-75M157 82c19-5 27-18 24-38-20 6-29 18-24 38ZM151 103c-17-7-29-2-37 15 18 5 30 0 37-15ZM157 66c-12-10-23-10-35 2 13 9 24 8 35-2Z" fill="var(--post-type-deep)" opacity="0.62" />
       </svg>
     );
   }
 
   if (code === "site-visit-invite") {
     return (
-      <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
-        <rect x="11" y="17" width="34" height="37" rx="4" fill="currentColor" opacity="0.12" />
-        <path d="M11 29h34M20 12v10M36 12v10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
-        <path d="m32 39 22-9 6 13-22 10-6-14Z" fill="var(--paper-soft)" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
-        <path d="m39 37 10-4M41 43l10-4" stroke="currentColor" strokeWidth="2" opacity="0.55" />
+      <svg viewBox="0 0 180 150" fill="none" aria-hidden="true">
+        <path d="M18 147c20-36 53-52 99-50 30 2 51 12 63 30v20H18Z" fill="var(--post-type-wash)" />
+        <rect x="73" y="45" width="75" height="84" rx="10" fill="var(--post-type-light)" />
+        <path d="M73 66h75" stroke="var(--post-type-deep)" strokeWidth="6" />
+        <path d="M92 35v20M129 35v20" stroke="var(--post-type-deep)" strokeWidth="8" strokeLinecap="round" />
+        <path d="M91 85h14M118 85h14M91 104h14M118 104h14" stroke="var(--post-type-accent)" strokeWidth="4" strokeLinecap="round" opacity="0.65" />
+        <path d="m118 98 45-14 14 39-45 14-14-39Z" fill="var(--post-type-mid)" />
+        <path d="m135 117 9 8 17-23" stroke="white" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M63 119c-16-4-29 0-41 13M151 95c18-12 26-26 24-42M60 101c-17-13-32-15-45-6" stroke="var(--post-type-accent)" strokeWidth="5" strokeLinecap="round" opacity="0.55" />
       </svg>
     );
   }
 
   if (code === "location-advantage") {
     return (
-      <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
-        <path d="m8 40 24 12 24-12-24-12L8 40Z" fill="currentColor" opacity="0.12" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
-        <path d="M20 34 44 46M44 34 20 46" stroke="currentColor" strokeWidth="2" strokeDasharray="4 4" opacity="0.38" />
-        <path d="M32 36s-10-11-10-20a10 10 0 1 1 20 0c0 9-10 20-10 20Z" fill="currentColor" opacity="0.78" />
-        <circle cx="32" cy="16" r="4" fill="var(--paper-soft)" />
+      <svg viewBox="0 0 180 150" fill="none" aria-hidden="true">
+        <path d="M11 147c28-34 64-50 108-47 27 2 47 12 61 30v17H11Z" fill="var(--post-type-wash)" />
+        <path d="m50 126 67-34 60 35-68 22-59-23Z" fill="var(--post-type-light)" />
+        <path d="M78 113 131 95M101 136l47-26M62 120l49 23M91 106l51 30" stroke="var(--post-type-accent)" strokeWidth="3" opacity="0.6" />
+        <path d="M105 98s-25-27-25-49a25 25 0 1 1 50 0c0 22-25 49-25 49Z" fill="var(--post-type-deep)" />
+        <circle cx="105" cy="49" r="10" fill="var(--paper-soft)" />
+        <path d="M31 82c12-10 24-10 36 0M138 75c10-7 20-7 29 0" stroke="var(--post-type-accent)" strokeWidth="4" strokeLinecap="round" opacity="0.45" />
+        <path d="M55 129v-19M142 130v-17" stroke="var(--post-type-deep)" strokeWidth="5" strokeLinecap="round" opacity="0.55" />
+      </svg>
+    );
+  }
+
+  if (code === "testimonial") {
+    return (
+      <svg viewBox="0 0 180 150" fill="none" aria-hidden="true">
+        <path d="M8 147c20-31 51-47 93-48 34-1 60 8 79 26v22H8Z" fill="var(--post-type-wash)" />
+        <path d="M71 61h87c11 0 20 9 20 20v34c0 11-9 20-20 20h-37l-25 14v-14H71c-11 0-20-9-20-20V81c0-11 9-20 20-20Z" fill="var(--post-type-light)" />
+        <path d="M86 88h50M86 103h58M86 118h46" stroke="var(--post-type-accent)" strokeWidth="5" strokeLinecap="round" opacity="0.72" />
+        <path d="M70 81c0-10 7-18 18-20v11c-5 2-8 5-8 9h10v18H70V81Zm25 0c0-10 7-18 18-20v11c-5 2-8 5-8 9h10v18H95V81Z" fill="var(--post-type-deep)" opacity="0.72" />
+        <circle cx="60" cy="119" r="27" fill="var(--post-type-mid)" />
+        <path d="M44 144c4-15 27-15 32 0M60 119c8 0 14-6 14-14s-6-14-14-14-14 6-14 14 6 14 14 14Z" fill="var(--post-type-deep)" opacity="0.7" />
       </svg>
     );
   }
 
   return (
-    <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
-      <path d="M32 6 42 21v23l-10 6-10-6V21L32 6Z" fill="currentColor" opacity="0.12" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
-      <path d="m22 34-9 13v4l9-6M42 34l9 13v4l-9-6" fill="currentColor" opacity="0.5" />
-      <circle cx="32" cy="23" r="5" fill="currentColor" opacity="0.8" />
-      <path d="M32 51v7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray="2 4" />
-      <path d="M23 57c2-5 16-5 18 0" stroke="currentColor" strokeWidth="3" strokeLinecap="round" opacity="0.24" />
+    <svg viewBox="0 0 180 150" fill="none" aria-hidden="true">
+      <path d="M12 147c18-34 50-51 96-51 31 0 55 10 72 30v21H12Z" fill="var(--post-type-wash)" />
+      <path d="M105 13 130 50v51l-25 16-25-16V50l25-37Z" fill="var(--post-type-light)" />
+      <path d="M80 92 47 127v13l33-20M130 92l33 35v13l-33-20" fill="var(--post-type-mid)" />
+      <circle cx="105" cy="55" r="13" fill="var(--post-type-deep)" />
+      <path d="M105 117v26M78 143c10-13 44-13 54 0" stroke="var(--post-type-accent)" strokeWidth="7" strokeLinecap="round" />
+      <path d="M62 37h18M70 28v18M144 28h15M151 20v17" stroke="var(--post-type-accent)" strokeWidth="5" strokeLinecap="round" opacity="0.62" />
     </svg>
   );
+}
+
+function getPostTypeIllustrationSrc(code: string) {
+  switch (code) {
+    case "amenity-spotlight":
+    case "construction-update":
+    case "festive-greeting":
+    case "location-advantage":
+    case "project-launch":
+    case "site-visit-invite":
+      return `/post-type-illustrations/${code}.png`;
+    default:
+      return null;
+  }
+}
+
+function getFestivalIllustrationSrc(code: string) {
+  return `/festival-illustrations/${code}.png`;
 }
 
 function getPickerPlaceholder(activePicker: CreatePicker) {

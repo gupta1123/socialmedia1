@@ -131,7 +131,10 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                       {details.length > 0 ? (
                         <div className="image-preview-details">
                           {details.map((detail) => (
-                            <div className="image-preview-detail-row" key={`${detail.label}-${detail.value}`}>
+                            <div
+                              className={`image-preview-detail-row ${isLongPreviewDetail(detail.value) ? "is-long" : ""}`}
+                              key={`${detail.label}-${detail.value}`}
+                            >
                               <span>{detail.label}</span>
                               <strong>{detail.value}</strong>
                             </div>
@@ -144,7 +147,10 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                           <div className="image-preview-section-title">{section.title}</div>
                           <div className="image-preview-section-body">
                             {section.items.map((item) => (
-                              <div className="image-preview-detail-row" key={`${section.title}-${item.label}-${item.value}`}>
+                              <div
+                                className={`image-preview-detail-row ${isLongPreviewDetail(item.value) ? "is-long" : ""}`}
+                                key={`${section.title}-${item.label}-${item.value}`}
+                              >
                                 <span>{item.label}</span>
                                 <strong>{item.value}</strong>
                               </div>
@@ -299,6 +305,10 @@ function hasInspectorContent(preview: ImagePreviewPayload) {
 
 function normalizeText(value?: string | null) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function isLongPreviewDetail(value: string) {
+  return value.length > 90;
 }
 
 function getPreviewSummary(preview: ImagePreviewPayload) {

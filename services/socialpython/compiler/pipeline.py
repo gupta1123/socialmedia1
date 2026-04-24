@@ -579,6 +579,65 @@ def sanitize_public_prompt_text(prompt: str, bundle: dict[str, Any]) -> str:
     return text
 
 
+def sanitize_negative_prompt_text(prompt: str, bundle: dict[str, Any]) -> str:
+    cleaned = sanitize_public_prompt_text(prompt, bundle)
+    if not cleaned:
+        return ""
+
+    parts = [cleaned]
+    for separator in (",", ";", "\n"):
+        next_parts: list[str] = []
+        for part in parts:
+            next_parts.extend(part.split(separator))
+        parts = next_parts
+
+    banned_fragments = (
+        "phone",
+        "whatsapp",
+        "website",
+        "email",
+        "contact",
+        "rera",
+        "logo",
+        "brand mark",
+        "brand logos",
+        "watermark",
+        "placeholder",
+        "url",
+        "address",
+        "cta",
+        "call to action",
+        "field-label",
+        "field label",
+    )
+    remove_photo_negatives = bool((bundle.get("exactAssetContract") or {}).get("requiredProjectAnchorAssetId"))
+    photo_conflict_fragments = (
+        "photograph",
+        "photo",
+        "photorealistic",
+        "existing building",
+        "building photo",
+    )
+
+    visual_parts: list[str] = []
+    seen: set[str] = set()
+    for raw_part in parts:
+        part = raw_part.strip(" .")
+        if not part:
+            continue
+        lowered = part.lower()
+        if any(fragment in lowered for fragment in banned_fragments):
+            continue
+        if remove_photo_negatives and any(fragment in lowered for fragment in photo_conflict_fragments):
+            continue
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        visual_parts.append(part)
+
+    return ", ".join(visual_parts)
+
+
 def build_seed_prompt(
     verified_prompt: str, analysis: NotebookBriefAnalysis, bundle: dict[str, Any]
 ) -> str:
@@ -648,7 +707,7 @@ def normalize_prompt_package(
     requested_variation_count = resolve_variation_count(payload)
 
     clean_prompt = sanitize_public_prompt_text(verified.revised_prompt, bundle)
-    clean_negative = sanitize_public_prompt_text(verified.revised_negative, bundle)
+    clean_negative = sanitize_negative_prompt_text(verified.revised_negative, bundle)
     final_prompt = clean_prompt
     if clean_negative:
         final_prompt = f"{clean_prompt} Negative prompt: {clean_negative}".strip()
@@ -773,7 +832,7 @@ def normalize_prompt_package(
 
 def build_agents() -> dict[str, Any]:
     model_kwargs = build_model_kwargs()
-    skills_runtime, skill_names = build_skills_runtime()
+    _skills_runtime, skill_names = build_skills_runtime()
     analyst_output_options = build_agent_output_options(NotebookBriefAnalysis)
     crafter_output_options = build_agent_output_options(NotebookCraftedPrompt)
     verifier_output_options = build_agent_output_options(NotebookVerificationResult)
@@ -788,7 +847,7 @@ def build_agents() -> dict[str, Any]:
             get_template_details,
             list_asset_candidates,
         ],
-        skills=skills_runtime,
+        skills=None,
         debug_mode=True,
         markdown=True,
         instructions=with_output_contract_instruction(
@@ -796,11 +855,7 @@ def build_agents() -> dict[str, Any]:
                 "You are a structured brief analyst for a real-estate social-media prompt pipeline.",
                 "Return ONLY structured data matching the schema.",
                 "",
-                "You have access to Briefly Social skills.",
-                "Skill usage is optional. If the summaries leave a real gap, call get_skill_instructions for briefly-social-core and briefly-social-archetypes at most once each.",
-                "Never retry a skill tool after it has returned content, failed, or hit a tool limit.",
-                "If a skill tool is unavailable or the tool limit is reached, continue from the available context without another skill call.",
-                "Do NOT call get_skill_script. There are no scripts in these skills.",
+                "Briefly Social skill guidance is preloaded for this run. Do not call or request skill tools.",
                 "",
                 "Workflow:",
                 "1. Read the supplied project_slug. It is canonical for this run.",
@@ -849,7 +904,7 @@ def build_agents() -> dict[str, Any]:
         name="Prompt Crafter",
         model=OpenAIResponses(**model_kwargs),
         input_schema=NotebookBriefAnalysis,
-        skills=skills_runtime,
+        skills=None,
         debug_mode=True,
         markdown=True,
         instructions=with_output_contract_instruction(
@@ -857,12 +912,7 @@ def build_agents() -> dict[str, Any]:
                 "You are a real-estate image prompt engineer.",
                 "Return ONLY structured data matching the schema.",
                 "",
-                "You have access to Briefly Social skills.",
-                "Skill usage is optional. Call get_skill_instructions only for a specific unresolved gap and at most once per skill name.",
-                "Never retry a skill tool after it has returned content, failed, or hit a tool limit.",
-                "Call get_skill_reference('briefly-social-core', 'style-primitive-matrix.md') only when needed.",
-                "Call get_skill_reference('briefly-social-archetypes', 'style-family-map.md') only when needed.",
-                "Do NOT call get_skill_script. There are no scripts in these skills.",
+                "Briefly Social skill guidance is preloaded for this run. Do not call or request skill tools.",
                 "",
                 "Rules:",
                 "- The attached images correspond to reference_image_paths and template_image_path in the analysis. logo_image_path is exact brand-mark metadata, not a visual-analysis input.",
