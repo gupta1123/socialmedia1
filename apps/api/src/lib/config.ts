@@ -79,7 +79,7 @@ const EnvSchema = z.object({
   AGNO_PYTHON_BIN: z.string().default("python3"),
   AGNO_AGENT_V2_SCRIPT: z.string().default("../../services/socialpython/agents/creative_director_notebook.py"),
   AGNO_AGENT_V2_SERVER_URL: z.string().url().default("http://127.0.0.1:8787/api/compile-v2"),
-  AGNO_AGENT_V2_SERVER_TIMEOUT_SEC: z.coerce.number().positive().default(180),
+  AGNO_AGENT_V2_SERVER_TIMEOUT_SEC: z.coerce.number().positive().default(600),
   AGNO_OPENAI_TIMEOUT_SEC: z.coerce.number().positive().default(20),
   AGNO_OPENAI_MAX_RETRIES: z.coerce.number().min(0).default(1),
   AGNO_RESTRICT_TO_AMENITIES_WITH_IMAGES: z.enum(["0", "1"]).default("0"),

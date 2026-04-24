@@ -32,6 +32,10 @@ import {
 import { shouldUseAsyncCompileByDefault } from "../../lib/compile-mode";
 import { supabase } from "../../lib/supabase-browser";
 
+const ASYNC_COMPILE_POLL_INTERVAL_MS = 2000;
+const ASYNC_COMPILE_TIMEOUT_MS = 600_000;
+const ASYNC_COMPILE_MAX_POLLS = Math.ceil(ASYNC_COMPILE_TIMEOUT_MS / ASYNC_COMPILE_POLL_INTERVAL_MS);
+
 const defaultProfile: BrandProfile = {
   identity: {
     positioning: "Premium real-estate brand with trust-led, design-conscious positioning.",
@@ -730,8 +734,8 @@ export function StudioProvider({
         });
         setMessage("Compiling prompt (async)...");
 
-        for (let i = 0; i < 60; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
+        for (let i = 0; i < ASYNC_COMPILE_MAX_POLLS; i++) {
+          await new Promise((resolve) => setTimeout(resolve, ASYNC_COMPILE_POLL_INTERVAL_MS));
           const status = await getCompileV2AsyncStatus(sessionToken, jobId);
 
           if (status.status === "completed" && status.result) {
@@ -746,7 +750,7 @@ export function StudioProvider({
           }
         }
 
-        throw new Error("Compile timed out");
+        throw new Error(`Compile timed out after ${Math.round(ASYNC_COMPILE_TIMEOUT_MS / 1000)}s`);
       }
 
       const payload = await compileCreativeV2(sessionToken, {
