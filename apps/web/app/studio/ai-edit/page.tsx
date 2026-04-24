@@ -173,6 +173,7 @@ export default function StudioAiEditPage() {
   const [drawColor, setDrawColor] = useState(DRAW_COLORS[0] ?? "#111111");
   const [drawSize, setDrawSize] = useState(5);
   const [currentSourceOutputId, setCurrentSourceOutputId] = useState<string | null>(outputId);
+  const [currentSourceBrandId, setCurrentSourceBrandId] = useState<string | null>(activeBrandId ?? null);
   const [currentSourceProjectId, setCurrentSourceProjectId] = useState<string | null>(null);
   const [currentSourceReviewState, setCurrentSourceReviewState] = useState<"pending_review" | "approved" | "needs_revision" | "closed" | null>(null);
   const [isSaveDrawerOpen, setIsSaveDrawerOpen] = useState(false);
@@ -399,6 +400,7 @@ export default function StudioAiEditPage() {
         setOriginalImage(image);
         setCurrentImage(image);
         setCurrentSourceOutputId(output.id);
+        setCurrentSourceBrandId(output.brandId);
         setCurrentSourceProjectId(output.projectId);
         setCurrentSourceReviewState(output.reviewState);
         setCanvasLayers([]);
@@ -471,6 +473,7 @@ export default function StudioAiEditPage() {
       setOriginalImage(image);
       setCurrentImage(image);
       setCurrentSourceOutputId(null);
+      setCurrentSourceBrandId(activeBrandId ?? null);
       setCurrentSourceProjectId(null);
       setCurrentSourceReviewState(null);
       setToolMode("select");
@@ -764,6 +767,7 @@ export default function StudioAiEditPage() {
         setOriginalImage(image);
         setCurrentImage(image);
         setCurrentSourceOutputId(output.id);
+        setCurrentSourceBrandId(output.brandId);
         setCurrentSourceProjectId(output.projectId);
         setCurrentSourceReviewState(output.reviewState);
         setCanvasLayers([]);
@@ -1353,8 +1357,9 @@ export default function StudioAiEditPage() {
 
     try {
       const file = await getComposedImageFile(buildComposedFileName(currentImage.file.name));
+      const saveBrandId = currentSourceOutputId ? currentSourceBrandId ?? activeBrandId : activeBrandId;
       const response = await saveEditedCreativeOutput(sessionToken, {
-        brandId: activeBrandId,
+        brandId: saveBrandId,
         saveMode,
         sourceOutputId: currentSourceOutputId,
         image: file,
@@ -1362,6 +1367,8 @@ export default function StudioAiEditPage() {
       });
 
       setCurrentSourceOutputId(response.output.id);
+      setCurrentSourceBrandId(response.output.brandId);
+      setCurrentSourceProjectId(response.output.projectId);
       setCurrentSourceReviewState(response.output.reviewState);
       loadedOutputIdRef.current = response.output.id;
       setIsSaveDrawerOpen(false);
@@ -2636,7 +2643,7 @@ async function renderCompositionToFile(sourceImage: EditableImage, layers: Canva
         const layerImage = await loadImage(layer.src);
         applyCanvasFilter(ctx, layer.filter);
         drawRotated(ctx, layer.x * canvas.width, layer.y * canvas.height, layer.width * canvas.width, layer.height * canvas.height, layer.rotation, () => {
-          ctx.drawImage(layerImage, 0, 0, layer.width * canvas.width, layer.height * canvas.height);
+          drawContainedImage(ctx, layerImage, layer.width * canvas.width, layer.height * canvas.height);
         });
       } else if (layer.type === "shape") {
         drawShapeLayer(ctx, layer, canvas.width, canvas.height);
@@ -2756,6 +2763,37 @@ function drawRotated(
   ctx.translate(-width / 2, -height / 2);
   draw();
   ctx.restore();
+}
+
+function drawContainedImage(
+  ctx: CanvasRenderingContext2D,
+  image: CanvasImageSource & { width?: number; height?: number; naturalWidth?: number; naturalHeight?: number },
+  targetWidth: number,
+  targetHeight: number
+) {
+  const sourceWidth = "naturalWidth" in image && typeof image.naturalWidth === "number" && image.naturalWidth > 0
+    ? image.naturalWidth
+    : "width" in image && typeof image.width === "number" && image.width > 0
+      ? image.width
+      : null;
+  const sourceHeight = "naturalHeight" in image && typeof image.naturalHeight === "number" && image.naturalHeight > 0
+    ? image.naturalHeight
+    : "height" in image && typeof image.height === "number" && image.height > 0
+      ? image.height
+      : null;
+
+  if (!sourceWidth || !sourceHeight || targetWidth <= 0 || targetHeight <= 0) {
+    ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+    return;
+  }
+
+  const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+  const offsetX = (targetWidth - drawWidth) / 2;
+  const offsetY = (targetHeight - drawHeight) / 2;
+
+  ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
 }
 
 function applyCanvasFilter(ctx: CanvasRenderingContext2D, filter: CanvasImageLayer["filter"]) {

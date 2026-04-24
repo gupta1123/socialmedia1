@@ -18,7 +18,9 @@ import { assertWorkspaceRole, getActiveBrandProfile, getBrand, getPrimaryWorkspa
 import { createSignedImageUrls, uploadBufferToStorage } from "../lib/storage.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { createThumbnailFromBuffer } from "../lib/thumbnails.js";
+import { ensurePostVersionForOutput } from "../lib/deliverable-flow.js";
 import { buildStoragePath, deriveAspectRatio, randomId, slugify } from "../lib/utils.js";
+import sharp from "sharp";
 
 const ImageEditFieldsSchema = z.object({
   brandId: z.string().uuid(),
@@ -137,6 +139,20 @@ function inferFormatFromDimensions(width?: number, height?: number) {
 
 function canReplaceSourceOutput(reviewState: EditorSourceOutputRow["review_state"]) {
   return reviewState === "pending_review" || reviewState === "needs_revision";
+}
+
+async function getImageDimensions(buffer: Buffer) {
+  const metadata = await sharp(buffer, { animated: false }).metadata();
+  const width = metadata.width ?? undefined;
+  const height = metadata.height ?? undefined;
+  const orientation = metadata.orientation ?? 1;
+
+  if (!width || !height) {
+    return { width: undefined, height: undefined };
+  }
+
+  const needsSwap = orientation >= 5 && orientation <= 8;
+  return needsSwap ? { width: height, height: width } : { width, height };
 }
 
 async function createEditorSaveArtifacts(params: {
@@ -485,8 +501,14 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
       }
 
       sourceOutput = (data as EditorSourceOutputRow | null) ?? null;
+      if (!sourceOutput) {
+        return reply.notFound("Source output not found");
+      }
       if (sourceOutput && sourceOutput.workspace_id !== workspace.id) {
         return reply.badRequest("Source output does not belong to this workspace");
+      }
+      if (sourceOutput.brand_id !== brand.id) {
+        return reply.badRequest("Source output does not belong to the selected brand");
       }
     }
 
@@ -513,13 +535,33 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
 
     await uploadBufferToStorage(storagePath, imagePart.buffer, imagePart.mimetype, true);
     const thumbnail = await createThumbnailFromBuffer(storagePath, imagePart.buffer).catch(() => null);
+    const dimensions = await getImageDimensions(imagePart.buffer).catch(() => ({
+      width: undefined,
+      height: undefined
+    }));
 
     const now = new Date().toISOString();
 
     if (resolvedMode === "replace" && sourceOutput) {
+      const jobArtifacts = await createEditorSaveArtifacts({
+        workspaceId: workspace.id,
+        brandId: brand.id,
+        deliverableId: sourceOutput.deliverable_id ?? null,
+        projectId: sourceOutput.project_id ?? null,
+        postTypeId: sourceOutput.post_type_id ?? null,
+        creativeTemplateId: sourceOutput.creative_template_id ?? null,
+        calendarItemId: sourceOutput.calendar_item_id ?? null,
+        sourceOutputId: sourceOutput.id,
+        ...(typeof dimensions.width === "number" ? { width: dimensions.width } : {}),
+        ...(typeof dimensions.height === "number" ? { height: dimensions.height } : {}),
+        createdBy: viewer.userId,
+        fileName: imagePart.filename,
+        saveMode: resolvedMode
+      });
       const { error } = await supabaseAdmin
         .from("creative_outputs")
         .update({
+          job_id: jobArtifacts.jobId,
           storage_path: storagePath,
           thumbnail_storage_path: thumbnail?.thumbnailStoragePath ?? null,
           thumbnail_width: thumbnail?.thumbnailWidth ?? null,
@@ -530,7 +572,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
           latest_feedback_verdict: null,
           reviewed_at: null,
           created_by: viewer.userId,
-          edited_from_output_id: sourceOutput.id,
+          edited_from_output_id: sourceOutput.edited_from_output_id,
           metadata_json: {
             source: "editor-save",
             saveMode: "replace"
@@ -540,6 +582,13 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
 
       if (error) {
         throw error;
+      }
+
+      if (sourceOutput.deliverable_id && !sourceOutput.post_version_id) {
+        await ensurePostVersionForOutput(sourceOutput.id, {
+          status: "draft",
+          createdBy: viewer.userId
+        });
       }
     } else {
       const jobArtifacts = await createEditorSaveArtifacts({
@@ -551,6 +600,8 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
         creativeTemplateId: sourceOutput?.creative_template_id ?? null,
         calendarItemId: sourceOutput?.calendar_item_id ?? null,
         sourceOutputId: sourceOutput?.id ?? null,
+        ...(typeof dimensions.width === "number" ? { width: dimensions.width } : {}),
+        ...(typeof dimensions.height === "number" ? { height: dimensions.height } : {}),
         createdBy: viewer.userId,
         fileName: imagePart.filename,
         saveMode: resolvedMode
@@ -609,6 +660,13 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
 
       if (error) {
         throw error;
+      }
+
+      if (sourceOutput?.deliverable_id) {
+        await ensurePostVersionForOutput(outputId, {
+          status: "draft",
+          createdBy: viewer.userId
+        });
       }
     }
 
