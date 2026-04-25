@@ -1,5 +1,20 @@
-import { redirect } from "next/navigation";
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useStudio } from "../studio-context";
 
 export default function WorkspaceAdminPage() {
-  redirect("/studio/workspace-admin/team");
+  const router = useRouter();
+  const { loading, bootstrap } = useStudio();
+  const isPlatformAdmin = bootstrap?.viewer.isPlatformAdmin === true;
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+    router.replace(isPlatformAdmin ? "/studio/workspace-admin/team" : "/studio/workspace-admin/compliance");
+  }, [isPlatformAdmin, loading, router]);
+
+  return null;
 }

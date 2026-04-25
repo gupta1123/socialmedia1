@@ -254,23 +254,38 @@ def resolve_selected_reference_paths(bundle: dict[str, Any]) -> list[str]:
 def build_user_brief(request_context: dict[str, Any]) -> str:
     parts: list[str] = []
     prompt = str(request_context.get("prompt") or "").strip()
-    goal = str(request_context.get("goal") or "").strip()
     audience = str(request_context.get("audience") or "").strip()
     offer = str(request_context.get("offer") or "").strip()
     exact_text = str(request_context.get("exactText") or "").strip()
+    template_type = describe_creative_direction(request_context.get("templateType"))
 
     if prompt:
         parts.append(prompt)
-    if goal and goal != prompt:
-        parts.append(f"Goal: {goal}")
     if audience:
-        parts.append(f"Audience: {audience}")
+        parts.append(f"This creative is for {audience}.")
+    if template_type:
+        parts.append(
+            f"Preferred creative direction: {template_type}. Use this only if it fits the post type, asset truth, and business job."
+        )
     if offer:
         parts.append(f"Offer: {offer}")
     if exact_text:
         parts.append(f"Exact text: {exact_text}")
 
     return "\n".join(parts).strip() or "Create a strong real-estate social poster."
+
+
+def describe_creative_direction(value: Any) -> str | None:
+    mapping = {
+        "announcement": "editorial",
+        "hero": "image-led",
+        "product-focus": "feature-led",
+        "testimonial": "proof-led",
+        "quote": "copy-led",
+        "offer": "offer-led",
+    }
+    normalized = str(value or "").strip().lower()
+    return mapping.get(normalized) or None
 
 
 def build_analyst_input(payload: dict[str, Any]) -> NotebookAnalystInput:
@@ -729,6 +744,8 @@ def normalize_prompt_package(
                 "layoutGeometry": analysis.layout_geometry.value,
                 "graphicLayer": [layer.value for layer in analysis.graphic_layer],
                 "textArchitecture": analysis.text_architecture.value,
+                "commercialHook": analysis.commercial_hook.value if analysis.commercial_hook else None,
+                "visualMechanism": analysis.visual_mechanism.value if analysis.visual_mechanism else None,
             },
             "compilerTrace": {
                 "verified": verified.approved,
@@ -807,6 +824,8 @@ def normalize_prompt_package(
         "moodMode": analysis.mood_mode.value,
         "density": analysis.density.value,
         "brandVisibility": analysis.brand_visibility.value,
+        "commercialHook": analysis.commercial_hook.value if analysis.commercial_hook else None,
+        "visualMechanism": analysis.visual_mechanism.value if analysis.visual_mechanism else None,
     }
 
     result = {
@@ -874,12 +893,14 @@ def build_agents() -> dict[str, Any]:
                 "14. If asset_decision.source='project_library', copy category, filename, and reference_tag verbatim from the tool output.",
                 "15. If asset_decision.source='uploaded_reference', copy filepath verbatim from the input, set filename to the basename of the chosen path, and set reference_tag=null.",
                 "16. Use asset_decision.source='none' only when visual_mode is graphic_led or no truthful visual anchor fits.",
+                "17. For ad post types, choose exactly one dominant commercial_hook and one visual_mechanism. Keep them narrow and conversion-oriented rather than stylistic.",
                 "",
                 "Non-negotiable rules:",
                 "- Do not fabricate filenames, filepaths, reference_tags, or template ids.",
                 "- Do not let the template image override reference-image truth.",
                 "- Do not let the logo become stylized, distorted, or rewritten.",
                 "- Do not treat post_type as design style.",
+                "- For ads, do not let price, offer, proof, CTA, and compliance compete equally. One hook must dominate.",
                 "",
                 "Defaults:",
                 "- Default delivery_mode to finished_poster unless the brief explicitly asks for a base visual.",
@@ -926,6 +947,7 @@ def build_agents() -> dict[str, Any]:
                 "- Keep prompts dense, visual, and compositional.",
                 "- If delivery_mode=finished_poster, write a finished poster prompt, not a scenic base-image prompt.",
                 "- poster_archetype and levers must be visible in the final prompt.",
+                "- For ad post types, commercial_hook and visual_mechanism must be visible as the obvious hook device and hierarchy, not as internal labels.",
                 "- If text_policy=exact_text, include the exact text and integrate it into the poster composition.",
                 "- Do not write a generic prompt for construction_update without a truthful primary asset.",
             ],

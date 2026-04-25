@@ -366,6 +366,20 @@ from (
       )
     ),
     (
+      'ad',
+      'Ad',
+      'Drive enquiries with one clear premium commercial hook and readable action hierarchy.',
+      jsonb_build_object(
+        'defaultChannels', jsonb_build_array('instagram-feed', 'instagram-story', 'ad-creative'),
+        'allowedFormats', jsonb_build_array('square', 'portrait', 'story', 'landscape'),
+        'recommendedTemplateTypes', jsonb_build_array('offer', 'announcement', 'hero'),
+        'requiredBriefFields', jsonb_build_array('goal', 'prompt'),
+        'safeZoneGuidance', jsonb_build_array('Keep one dominant hook readable at feed size and keep compliance subordinate'),
+        'ctaStyle', 'lead-gen',
+        'copyDensity', 'balanced'
+      )
+    ),
+    (
       'testimonial',
       'Testimonial',
       'Use resident or buyer trust signals with a polished editorial layout.',

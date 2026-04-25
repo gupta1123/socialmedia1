@@ -37,6 +37,8 @@ export type PostTypePromptGuidance = {
     negativePrompt: string;
     amenityFocus?: string | null;
     amenitySelectionSource?: "explicit" | "inferred" | "none";
+    commercialHook?: string | null;
+    visualMechanism?: string | null;
     playbookKey?: string | null;
   };
 };
@@ -65,6 +67,12 @@ export function buildPostTypePromptGuidance(input: PostTypePromptInput): PostTyp
       });
     case "project-launch":
       return buildProjectLaunchGuidance({
+        ...input,
+        aspectRatio,
+        projectHasActualImage
+      });
+    case "ad":
+      return buildAdGuidance({
         ...input,
         aspectRatio,
         projectHasActualImage
@@ -334,6 +342,7 @@ function buildAmenitySpotlightGuidance(
 function getPlaybookKey(postTypeCode: string | null | undefined): string | null {
   if (!postTypeCode) return null;
   const mapping: Record<string, string> = {
+    ad: "ad-playbook",
     "construction-update": "construction-update-playbook",
     "amenity-spotlight": "amenity-spotlight-playbook",
     "project-launch": "launch-post-playbook",
@@ -343,6 +352,151 @@ function getPlaybookKey(postTypeCode: string | null | undefined): string | null 
     "festive-greeting": "festival-post-playbook"
   };
   return mapping[postTypeCode] ?? null;
+}
+
+type AdCommercialHook =
+  | "price"
+  | "visit"
+  | "location"
+  | "amenity"
+  | "configuration"
+  | "offer"
+  | "investment"
+  | "trust"
+  | "compliance"
+  | "credibility";
+
+function visualMechanismForAdHook(hook: AdCommercialHook) {
+  switch (hook) {
+    case "price":
+      return "price_billboard";
+    case "visit":
+      return "visit_ticket";
+    case "location":
+      return "location_receipt";
+    case "configuration":
+      return "comparison_cards";
+    case "amenity":
+      return "value_stack";
+    case "investment":
+      return "value_stack";
+    case "offer":
+      return "offer_strip";
+    case "trust":
+      return "trust_seal";
+    case "compliance":
+      return "compliance_footer";
+    case "credibility":
+    default:
+      return "credibility_band";
+  }
+}
+
+function buildAdGuidance(
+  input: PostTypePromptInput & { aspectRatio: string; projectHasActualImage: boolean }
+): PostTypePromptGuidance {
+  const commercialHook: AdCommercialHook | null = null;
+  const visualMechanism: ReturnType<typeof visualMechanismForAdHook> | null = null;
+  const usesProjectImage = input.projectHasActualImage;
+
+  const recipe = chooseRecipe(
+    [
+      {
+        key: "premium-claim-billboard",
+        direction:
+          "Premium conversion-led ad poster with one dominant hook, one short proof layer, and one readable action zone.",
+        hero:
+          "Use the real project or amenity image as the trust anchor when available. If a building image exists, keep it recognisable and subordinate any claim box to the project truth rather than letting the graphic panel erase the architecture.",
+        layout:
+          "Build the frame around a clear 3-second hierarchy: hook first, proof second, action third. Use one dominant claim zone and one smaller support zone. Do not let six equal text blocks compete.",
+        typography:
+          "Use one direct premium ad claim, one short support line or proof stack, and one readable CTA treatment only when the brief calls for action language.",
+        supportingSystem:
+          "Express the ad through the analyst-selected visual mechanism. Keep the device premium and intentional rather than flyer-like.",
+        footer:
+          "Keep compliance and secondary proof visually subordinate. If contact or RERA are not supplied, omit them rather than designing empty placeholders.",
+        styleMood:
+          "Commercially clear, premium, readable, mobile-first, credible, and design-led rather than discount-led.",
+        negativePrompt:
+          "cheap lead-gen flyer, too many offers, crowded footer, dense badge stack, fake urgency colors, generic promo poster, cluttered CTA panel, watermark"
+      },
+      {
+        key: "editorial-conversion-frame",
+        direction:
+          "Editorial premium ad that keeps one commercial hook highly legible while preserving real-estate desirability and project identity.",
+        hero:
+          "Let the project, amenity, or contextual truth carry desirability. The hook must stop the scroll, but the image must still look premium, recognisable, and real rather than becoming a generic ad backdrop.",
+        layout:
+          "Use one protected hook field, one compact proof system, and one quiet action strip or footer. Avoid turning the composition into a spec sheet, brochure grid, or event flyer.",
+        typography:
+          "Keep typography direct and feed-readable: one strong hook, one short proof cluster, and one action cue. Use tension and spacing, not clutter, to signal performance intent.",
+        supportingSystem:
+          "Use the analyst-selected commercial device, but express it through disciplined cards, strips, or receipts rather than loud stickers and badges.",
+        footer:
+          "The footer can carry one CTA or proof line. Compliance, phone, website, or QR should only appear if supplied and must stay subordinate to the hook.",
+        styleMood:
+          "Premium ad clarity, restrained urgency, believable desirability, crisp hierarchy, and mobile readability.",
+        negativePrompt:
+          "pretty image with no hook, generic discount ad, unreadable tiny legal line, event-flyer clutter, fake map collage, too many CTAs, watermark, noisy brochure layout"
+      }
+    ],
+    buildSeed(input)
+  );
+
+  const primaryHookLine =
+    "Let the analyst choose the commercial_hook and visual_mechanism from the original brief intent. Keep one dominant commercial idea only.";
+  const projectImageLine = input.projectHasActualImage
+    ? "Use a truthful supplied project or amenity image as the desirability anchor whenever one exists."
+    : "If no truthful project image is supplied, still write this as a premium ad poster with one commercial hook rather than a generic tower-plus-footer flyer.";
+
+  return {
+    seedClauses: compactStrings([
+      `Ad direction family: ${recipe.direction}`,
+      primaryHookLine,
+      projectImageLine,
+      `Hero image rule: ${recipe.hero}`,
+      `Layout rule: ${recipe.layout}`,
+      `Typography rule: ${recipe.typography}`,
+      `Supporting-system rule: ${recipe.supportingSystem}`,
+      `Footer rule: ${recipe.footer}`,
+      `Prompt-shape rule: Hook first, proof second, action third. If price, CTA, proof, and compliance all read equally, the route is wrong.`,
+      `Style and mood: ${recipe.styleMood}`,
+      `Ad readability rule: Assume mobile-first viewing. The hook must read at feed size, and any CTA must stay legible without letting the footer dominate.`,
+      `Ad truth rule: Never invent price, discount, EMI, possession, last-units, RERA, phone, website, or location claims. Omit unsupported commercial facts rather than hinting at them.`,
+      `Negative prompt cues: ${recipe.negativePrompt}`
+    ]),
+    finalClauses: compactStrings([
+      `Write this as a premium real-estate ad poster prompt, not a generic promo poster or scenic render note.`,
+      primaryHookLine,
+      projectImageLine,
+      `Composition family: ${recipe.direction}`,
+      `Hero direction: ${recipe.hero}`,
+      `Layout and composition: ${recipe.layout}`,
+      `Typography system: ${recipe.typography}`,
+      `Supporting treatment: ${recipe.supportingSystem}`,
+      `Footer treatment: ${recipe.footer}`,
+      `Prompt-shape rule: The ad must resolve in 3 seconds. Hook first, proof second, action third. Keep one dominant selling idea and subordinate any compliance or supporting lines.`,
+      input.brief.exactText
+        ? `If exact ad copy is supplied, preserve it exactly and build the hierarchy around its readability.`
+        : `If exact copy is not supplied, keep copy sparse and commercial: one hook line, one short proof line, and one compact action cue at most.`,
+      `Ad truth rule: Never invent price, offer, EMI, possession, nearby landmark time, phone, website, QR, or RERA details.`,
+      `Style and mood: ${recipe.styleMood}`,
+      `Negative prompt: ${recipe.negativePrompt}`,
+      `CRITICAL: Reference any supplied truth or style images only in plain language by role. Never say "Image 1 is X, Image 2 is Y", and never enumerate filenames.`
+    ]),
+    manifest: {
+      code: input.postType?.code ?? null,
+      name: input.postType?.name ?? null,
+      aspectRatio: input.aspectRatio,
+      usesProjectImage,
+      recipeKey: recipe.key,
+      recipeDirection: recipe.direction,
+      negativePrompt: recipe.negativePrompt,
+      commercialHook,
+      visualMechanism,
+      playbookKey: getPlaybookKey(input.postType?.code)
+    }
+  };
 }
 
 function buildProjectLaunchGuidance(
@@ -827,7 +981,6 @@ function buildSeed(input: PostTypePromptInput & { aspectRatio?: string }) {
   return [
     input.postType?.code ?? "",
     input.projectName ?? "",
-    input.brief.goal,
     input.brief.prompt,
     input.brief.channel,
     input.brief.format,
@@ -859,7 +1012,7 @@ function chooseAmenityFocus(
   input: PostTypePromptInput
 ): { focusAmenity: string | null; source: "explicit" | "inferred" | "none" } {
   const selection = resolveAmenityFocus({
-    briefText: [input.brief.goal, input.brief.prompt, input.brief.exactText ?? ""].join(" "),
+    briefText: [input.brief.prompt, input.brief.exactText ?? ""].join(" "),
     projectAmenityNames: [
       ...(input.projectProfile?.heroAmenities ?? []),
       ...(input.projectProfile?.amenities ?? [])

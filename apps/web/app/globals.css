@@ -14961,6 +14961,14 @@ textarea {
   --post-type-wash: #e4ebfa;
 }
 
+.create-post-type-card-ad {
+  --post-type-accent: #3b8d78;
+  --post-type-deep: #2c6a5a;
+  --post-type-mid: #b8ddd2;
+  --post-type-light: #eef8f5;
+  --post-type-wash: #dff1ec;
+}
+
 .create-post-type-card-festive-greeting {
   --post-type-accent: #c88f44;
   --post-type-deep: #d09945;

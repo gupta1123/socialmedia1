@@ -315,10 +315,11 @@ def build_project_manifest(profile: dict[str, Any] | None, post_type_code: str |
     if not profile:
         return None
 
-    include_tagline = post_type_code == "project-launch"
-    include_location = post_type_code == "site-visit-invite"
-    include_amenities = post_type_code == "amenity-spotlight"
+    include_tagline = post_type_code in {"project-launch", "ad"}
+    include_location = post_type_code in {"site-visit-invite", "ad"}
+    include_amenities = post_type_code in {"amenity-spotlight", "ad"}
     include_progress = post_type_code == "construction-update"
+    include_commercial = post_type_code == "ad"
 
     manifest: dict[str, Any] = {
         "positioning": profile.get("positioning"),
@@ -349,6 +350,13 @@ def build_project_manifest(profile: dict[str, Any] | None, post_type_code: str |
         manifest["latestUpdate"] = profile.get("latestUpdate")
         manifest["milestoneHistory"] = take_top(profile.get("milestoneHistory", []), 2)
 
+    if include_commercial:
+        manifest["startingPrice"] = profile.get("startingPrice")
+        manifest["pricingBand"] = profile.get("pricingBand")
+        manifest["priceRangeByConfig"] = take_top(profile.get("priceRangeByConfig", []), 3)
+        manifest["currentOffers"] = take_top(profile.get("currentOffers", []), 2)
+        manifest["paymentPlanSummary"] = profile.get("paymentPlanSummary")
+
     return manifest
 
 
@@ -371,6 +379,15 @@ def build_post_type_manifest(post_type: dict[str, Any], project_name: str | None
                 "imageUsageRule": "Use the actual project building image as the dominant hero rather than inventing a new tower.",
                 "compositionRule": "Let the tower dominate center and right. Reserve upper-left or left-center for headline hierarchy with one refined overlay.",
                 "negativePrompt": "cheap flyer, cluttered brochure, distorted tower, random skyline collage, overpacked icons, neon colors"
+            }
+        )
+    elif code == "ad":
+        manifest.update(
+            {
+                "recipeDirection": "Premium conversion-led ad poster with one dominant commercial hook, one short proof layer, and one readable action zone.",
+                "imageUsageRule": "Use the real project or amenity image as the trust anchor whenever one exists. Do not fall back to a generic ad backdrop.",
+                "compositionRule": "Resolve the frame in 3 seconds: hook first, proof second, action third. Keep one dominant commercial idea only.",
+                "negativePrompt": "cheap lead-gen flyer, too many offers, crowded footer, dense badge stack, fake urgency colors, generic promo poster"
             }
         )
     elif code == "site-visit-invite":
@@ -518,6 +535,7 @@ def infer_project_stage(project: dict[str, Any] | None) -> str | None:
 
 def infer_playbook_key(post_type_code: str | None) -> str:
     return {
+        "ad": "ad-playbook",
         "project-launch": "launch-post-playbook",
         "construction-update": "construction-update-playbook",
         "festive-greeting": "festival-post-playbook",
@@ -755,9 +773,11 @@ def build_request_payload(body: dict[str, Any]) -> dict[str, Any]:
     if post_type_code != "festive-greeting" and project is None:
         raise ValueError("Select a project for this post type.")
 
-    template_type = None
+    template_type = body.get("templateType") if isinstance(body.get("templateType"), str) else None
+    if template_type == "":
+        template_type = None
     recommended_types = post_type.get("config", {}).get("recommendedTemplateTypes", [])
-    if recommended_types:
+    if template_type is None and recommended_types:
         template_type = recommended_types[0]
 
     candidate_assets, exact_asset_contract = build_candidate_assets(body, brand, project, post_type)

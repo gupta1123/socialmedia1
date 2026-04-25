@@ -971,6 +971,10 @@ export function useStudio() {
   return context;
 }
 
+export function useOptionalStudio() {
+  return useContext(StudioContext);
+}
+
 function splitList(value: string) {
   return value
     .split(",")

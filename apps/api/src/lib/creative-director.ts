@@ -1302,6 +1302,8 @@ function normalizeTemplateType(
 
 function inferPlaybookKey(code: string | undefined) {
   switch (code) {
+    case "ad":
+      return "ad-playbook";
     case "project-launch":
       return "launch-post-playbook";
     case "construction-update":
@@ -1458,7 +1460,7 @@ function buildV2CandidateAssets(input: Input) {
   });
   const amenityFocusResolution = isAmenityFocusedPostType(input.postType?.code ?? null)
     ? resolveAmenityFocus({
-        briefText: [input.brief.goal, input.brief.prompt, input.brief.exactText ?? ""].join(" "),
+        briefText: [input.brief.prompt, input.brief.exactText ?? ""].join(" "),
         projectAmenityNames: [
           ...(input.projectProfile?.heroAmenities ?? []),
           ...(input.projectProfile?.amenities ?? []),
@@ -1468,7 +1470,6 @@ function buildV2CandidateAssets(input: Input) {
         seed: [
           input.postType?.code ?? "",
           input.projectName ?? "",
-          input.brief.goal,
           input.brief.prompt,
           input.brief.channel,
           input.brief.format,
@@ -1656,7 +1657,7 @@ function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
       createMode: input.brief.createMode,
       channel: input.brief.channel,
       format: input.brief.format,
-      goal: input.brief.goal,
+      goal: "",
       prompt: input.brief.prompt,
       audience: input.brief.audience,
       copyMode: input.brief.copyMode,
@@ -1692,10 +1693,22 @@ function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
             positioning: input.projectProfile.positioning,
             lifestyleAngle: input.projectProfile.lifestyleAngle,
             audienceSegments: input.projectProfile.audienceSegments,
+            configurations: input.projectProfile.configurations,
+            sizeRanges: input.projectProfile.sizeRanges,
+            pricingBand: input.projectProfile.pricingBand,
+            startingPrice: input.projectProfile.startingPrice,
+            priceRangeByConfig: input.projectProfile.priceRangeByConfig,
+            bookingAmount: input.projectProfile.bookingAmount,
+            currentOffers: input.projectProfile.currentOffers,
+            paymentPlanSummary: input.projectProfile.paymentPlanSummary,
+            financingPartners: input.projectProfile.financingPartners,
+            offerValidity: input.projectProfile.offerValidity,
             heroAmenities: input.projectProfile.heroAmenities,
             amenities: input.projectProfile.amenities,
             locationAdvantages: input.projectProfile.locationAdvantages,
             nearbyLandmarks: input.projectProfile.nearbyLandmarks,
+            connectivityPoints: input.projectProfile.connectivityPoints,
+            travelTimes: input.projectProfile.travelTimes,
             constructionStatus: input.projectProfile.constructionStatus,
             latestUpdate: input.projectProfile.latestUpdate,
             approvedClaims: input.projectProfile.approvedClaims,
@@ -1799,14 +1812,13 @@ function buildTruthBundleAmenityResolution(
   }
 
   const selection = resolveAmenityFocus({
-    briefText: [input.brief.goal, input.brief.prompt, input.brief.exactText ?? ""].join(" "),
+    briefText: [input.brief.prompt, input.brief.exactText ?? ""].join(" "),
     projectAmenityNames,
     allAssets: input.brandAssets ?? [],
     projectId: input.projectId ?? null,
     seed: [
       input.postType?.code ?? "",
       input.projectName ?? "",
-      input.brief.goal,
       input.brief.prompt,
       input.brief.channel,
       input.brief.format,
@@ -1987,6 +1999,8 @@ function buildV2CompactGuardrailClauses(input: Input) {
             "If on-image text is used, keep it neutral and minimal: one short update label or one short factual status cue grounded in visible progress.",
             progressCue ? `The only allowed specific progress cue is: ${progressCue}.` : "Do not invent exact percentages, dates, milestone claims, possession claims, phone numbers, prices, or RERA facts."
           ].join(" ")
+        : postTypeCode === "ad"
+          ? "If exact ad copy is not supplied, keep copy commercial but sparse: one short hook, one short proof line, and one compact action cue at most."
         : postTypeCode === "testimonial"
           ? "If no exact quote is supplied, do not invent a long testimonial. Use a short trust cue or reserve a clean readable quote area."
           : input.brief.copyMode === "auto"
@@ -2029,7 +2043,6 @@ function buildV2CompactGuardrailClauses(input: Input) {
 
 function constructionBriefText(input: Input) {
   return [
-    input.brief.goal,
     input.brief.prompt,
     input.brief.offer,
     input.brief.exactText,
@@ -2162,6 +2175,18 @@ function refineV2PromptForPostType(prompt: string, input: Input, truthBundle: Cr
       "Treat the project name and any launch message as minimal supporting hierarchy, not the main event.",
       "Use believable premium architectural light and material realism. Avoid fake CGI glow, noisy skylines through the text area, traffic clutter, billboards, and random signage.",
       "Negative prompt: cheap brochure, salesy launch flyer, crowded badges, noisy skyline behind text, distorted tower, generic stock luxury tower, fake glow, cluttered amenity collage, watermark, typo-heavy text."
+    ]);
+  }
+
+  if (postTypeCode === "ad") {
+    next = appendMissingPromptClauses(next, [
+      `Create a premium ${aspectRatio} real-estate ad image for social media, not a generic promo flyer.`,
+      "Resolve the composition with a 3-second hierarchy: hook first, proof second, action third.",
+      "Keep one dominant commercial idea only. Do not let price, offer, proof chips, CTA, phone, website, and compliance all compete equally.",
+      "Use the real project or amenity image as the desirability anchor when one is available. Do not let the claim panel erase project recognisability.",
+      "If text is used, keep it to one short hook line, one short proof layer, and one readable CTA zone only when the brief explicitly calls for action language.",
+      "Keep contact, QR, and compliance visually subordinate and only include them when explicitly supplied.",
+      "Negative prompt: cheap lead-gen flyer, too many offers, crowded footer, dense badge stack, fake urgency colors, generic promo poster, cluttered CTA panel, watermark, garbled text."
     ]);
   }
 

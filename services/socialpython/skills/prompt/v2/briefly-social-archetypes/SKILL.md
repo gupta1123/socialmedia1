@@ -19,6 +19,12 @@ Choose style based on:
 - market tone
 - desired distinctiveness
 
+For ad posts, keep the same style-family system but also resolve:
+- commercial_hook
+- visual_mechanism
+
+These should refine the poster route, not replace it with a separate ad template system.
+
 ## Style Primitives / Levers
 
 ### hero_presentation
@@ -370,6 +376,7 @@ Examples:
 3. graphic_layer must not overpower the hero.
 4. density must fit the payload.
 5. Do not pick a style family only because it looks nice; pick it because it suits the job and asset.
+6. For ads, choose the commercial hook first, then choose the style family that carries it cleanly.
 
 ### External Input Rules
 1. If a reference image exists, first decide what the strongest hero actually is before choosing style family.

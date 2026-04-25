@@ -57,6 +57,7 @@ export function filterReferenceStoragePathsForPrompt(
     }
   } else if (
     postTypeCode === "construction-update" ||
+    postTypeCode === "ad" ||
     postTypeCode === "project-launch" ||
     postTypeCode === "site-visit-invite" ||
     postTypeCode === "location-advantage"

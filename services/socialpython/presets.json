@@ -348,6 +348,23 @@
       "starterPrompt": "Show real visible progress with a premium trustworthy tone, clean metrics, and late-afternoon construction light."
     },
     {
+      "id": "8fe43f69-0ea9-4cc9-916e-d37dccfce95f",
+      "code": "ad",
+      "name": "Ad",
+      "config": {
+        "ctaStyle": "lead-gen",
+        "copyDensity": "balanced",
+        "allowedFormats": ["square", "portrait", "story", "landscape"],
+        "defaultChannels": ["instagram-feed", "instagram-story", "ad-creative"],
+        "safeZoneGuidance": ["Keep one dominant commercial hook readable at feed size and keep compliance subordinate."],
+        "requiredBriefFields": ["goal", "prompt"],
+        "recommendedTemplateTypes": ["offer", "announcement", "hero"]
+      },
+      "defaultGoal": "Drive enquiries with one clear premium value proposition",
+      "defaultExactText": "",
+      "starterPrompt": "Create a premium real-estate ad with one clear commercial hook, strong mobile readability, and a real project or amenity image anchor."
+    },
+    {
       "id": "9336e31d-f00e-4ea3-af3a-d9da06016222",
       "code": "festive-greeting",
       "name": "Festive greeting",

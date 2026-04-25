@@ -31,6 +31,7 @@ const ImagePreviewContext = createContext<ImagePreviewContextValue | null>(null)
 export function ImagePreviewProvider({ children }: { children: ReactNode }) {
   const [preview, setPreview] = useState<ImagePreviewPayload | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -65,6 +66,31 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
     }),
     []
   );
+
+  async function handleDownloadAsset() {
+    if (!preview?.src || downloading) {
+      return;
+    }
+
+    setDownloading(true);
+    try {
+      const response = await fetch(preview.src);
+      if (!response.ok) {
+        throw new Error(`Download failed with ${response.status}`);
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = inferDownloadFilename(preview);
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   return (
     <ImagePreviewContext.Provider value={value}>
@@ -171,9 +197,9 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                             {action.label}
                           </a>
                         ))}
-                        <a className="button button-ghost" download href={preview.src}>
-                          Download asset
-                        </a>
+                        <button className="button button-ghost" onClick={() => void handleDownloadAsset()} type="button">
+                          {downloading ? "Downloading..." : "Download asset"}
+                        </button>
                         {secondaryActions.map((action) => (
                           <a
                             className="button button-ghost"
@@ -207,6 +233,25 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
         : null}
     </ImagePreviewContext.Provider>
   );
+}
+
+function inferDownloadFilename(preview: ImagePreviewPayload) {
+  const titleSlug = (preview.title ?? preview.alt ?? "asset")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const pathname = tryGetPathname(preview.src);
+  const extensionMatch = pathname.match(/\.(png|jpe?g|webp|gif|avif)(?:$|\?)/i);
+  const extension = extensionMatch?.[1] ? extensionMatch[1].toLowerCase() : "png";
+  return `${titleSlug || "asset"}.${extension}`;
+}
+
+function tryGetPathname(value: string) {
+  try {
+    return new URL(value).pathname;
+  } catch {
+    return value;
+  }
 }
 
 type ImagePreviewTriggerProps = {

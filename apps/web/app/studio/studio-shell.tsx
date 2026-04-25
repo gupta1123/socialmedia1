@@ -57,18 +57,6 @@ const primaryNavigation = [
     )
   },
   {
-    href: "/studio/queue",
-    label: "Queue",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 6h16" />
-        <path d="M4 12h10" />
-        <path d="M4 18h13" />
-        <circle cx="18" cy="12" r="2.5" />
-      </svg>
-    )
-  },
-  {
     href: "/studio/review",
     label: "Review",
     icon: (
@@ -460,21 +448,30 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   const isWorkspaceAdmin = workspaceRole === "owner" || workspaceRole === "admin";
   const showAdminSidebar = isAdminRoute && isPlatformAdmin;
   const showWorkspaceAdminSidebar = isWorkspaceAdminRoute && isWorkspaceAdmin;
-  const navigation = useMemo(
-    () =>
-      showAdminSidebar
-        ? adminSidebarNavigation
-        : showWorkspaceAdminSidebar
-          ? workspaceAdminSidebarNavigation
-          : isPlatformAdmin && isWorkspaceAdmin
-            ? [...primaryNavigation, workspaceAdminNavigationItem, superAdminNavigationItem]
-            : isWorkspaceAdmin
-              ? [...primaryNavigation, workspaceAdminNavigationItem]
-              : isPlatformAdmin
-                ? [...primaryNavigation, superAdminNavigationItem]
-                : primaryNavigation,
-    [showAdminSidebar, showWorkspaceAdminSidebar, isPlatformAdmin, isWorkspaceAdmin]
-  );
+  const navigation = useMemo(() => {
+    if (showAdminSidebar) {
+      return adminSidebarNavigation;
+    }
+    if (showWorkspaceAdminSidebar) {
+      if (isPlatformAdmin) {
+        return workspaceAdminSidebarNavigation;
+      }
+      return workspaceAdminSidebarNavigation.map((group) => ({
+        ...group,
+        items: group.items.filter((item) => item.href !== "/studio/workspace-admin/team"),
+      }));
+    }
+    if (isPlatformAdmin && isWorkspaceAdmin) {
+      return [...primaryNavigation, workspaceAdminNavigationItem, superAdminNavigationItem];
+    }
+    if (isWorkspaceAdmin) {
+      return [...primaryNavigation, workspaceAdminNavigationItem];
+    }
+    if (isPlatformAdmin) {
+      return [...primaryNavigation, superAdminNavigationItem];
+    }
+    return primaryNavigation;
+  }, [showAdminSidebar, showWorkspaceAdminSidebar, isPlatformAdmin, isWorkspaceAdmin]);
   const shellCollapsed = isCreateRoute ? !createSidebarExpanded : isEditorRoute ? !editorSidebarExpanded : collapsed;
   const pageMeta = resolvePageMeta(pathname);
 

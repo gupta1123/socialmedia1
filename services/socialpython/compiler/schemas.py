@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class PostType(str, Enum):
     project_launch = "project-launch"
+    ad = "ad"
     construction_update = "construction-update"
     festive_greeting = "festive-greeting"
     amenity_spotlight = "amenity-spotlight"
@@ -143,6 +144,31 @@ class TextArchitecture(str, Enum):
     one_statement = "one_statement"
 
 
+class CommercialHook(str, Enum):
+    price = "price"
+    visit = "visit"
+    location = "location"
+    amenity = "amenity"
+    configuration = "configuration"
+    offer = "offer"
+    investment = "investment"
+    trust = "trust"
+    compliance = "compliance"
+    credibility = "credibility"
+
+
+class VisualMechanism(str, Enum):
+    price_billboard = "price_billboard"
+    comparison_cards = "comparison_cards"
+    visit_ticket = "visit_ticket"
+    location_receipt = "location_receipt"
+    offer_strip = "offer_strip"
+    value_stack = "value_stack"
+    trust_seal = "trust_seal"
+    compliance_footer = "compliance_footer"
+    credibility_band = "credibility_band"
+
+
 class MoodMode(str, Enum):
     crisp_daylight = "crisp_daylight"
     pale_editorial_daylight = "pale_editorial_daylight"
@@ -199,6 +225,8 @@ class BriefAnalysis(BaseModel):
     graphic_layer: list[GraphicLayer] = Field(default_factory=list)
     type_voice: TypeVoice
     text_architecture: TextArchitecture
+    commercial_hook: CommercialHook | None = Field(default=None)
+    visual_mechanism: VisualMechanism | None = Field(default=None)
     mood_mode: MoodMode
     density: DensityLevel
     brand_visibility: BrandVisibility
@@ -210,6 +238,26 @@ class BriefAnalysis(BaseModel):
     reference_usage_plan: str = Field(...)
     asset_decision: AssetDecision
     required_data: list[str] = Field(default_factory=list)
+    requested_fact_types: list[str] = Field(
+        default_factory=list,
+        description="Commercial/project fact kinds the original brief explicitly asks to use.",
+    )
+    allowed_fact_kinds: list[str] = Field(
+        default_factory=list,
+        description="Maximum commercial/project fact kinds allowed in final prompts for this brief.",
+    )
+    required_fact_copies: list[str] = Field(
+        default_factory=list,
+        description="Exact grounded fact strings that final prompts must include.",
+    )
+    disallowed_available_fact_kinds: list[str] = Field(
+        default_factory=list,
+        description="Available fact kinds that the brief did not request and final prompts must avoid.",
+    )
+    do_not_use_unless_requested: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="Available facts to keep out of final prompts unless the brief explicitly asks for that kind.",
+    )
     conflict_notes: list[str] = Field(default_factory=list)
     negative_rules: list[str] = Field(default_factory=list)
 
@@ -317,6 +365,14 @@ class NotebookBriefAnalysis(BaseModel):
     graphic_layer: list[GraphicLayer] = Field(default_factory=list, description="0-2 graphic layers.")
     type_voice: TypeVoice
     text_architecture: TextArchitecture
+    commercial_hook: CommercialHook | None = Field(
+        default=None,
+        description="For ads only: the dominant commercial selling hook.",
+    )
+    visual_mechanism: VisualMechanism | None = Field(
+        default=None,
+        description="For ads only: the main ad device or conversion-oriented visual mechanism.",
+    )
     mood_mode: MoodMode
     density: DensityLevel
     brand_visibility: BrandVisibility
@@ -382,6 +438,8 @@ class NotebookCraftedPrompt(BaseModel):
     graphic_layer: list[GraphicLayer] = Field(default_factory=list)
     type_voice: TypeVoice
     text_architecture: TextArchitecture
+    commercial_hook: CommercialHook | None = Field(default=None)
+    visual_mechanism: VisualMechanism | None = Field(default=None)
     mood_mode: MoodMode
     density: DensityLevel
     brand_visibility: BrandVisibility

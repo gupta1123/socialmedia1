@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from agno.run import RunContext
 from agno.tools import tool
@@ -310,6 +310,7 @@ def select_assets_for_post_type(bundle: dict[str, Any], post_type_code: str) -> 
     rera_qr_asset_id = exact_contract.get("reraQrAssetId")
 
     subject_type_priority = {
+        "ad": ["project_exterior", "facade", "aerial", "amenity"],
         "amenity-spotlight": ["amenity", "interior"],
         "construction-update": ["construction_progress", "project_exterior", "facade"],
         "project-launch": ["project_exterior", "facade", "aerial"],
@@ -540,6 +541,10 @@ def list_asset_candidates(
         )
 
     semantic_guidance = {
+        "ad": (
+            "Pick the asset that best supports one clear premium commercial hook. "
+            "Prefer a recognisable project or amenity hero over generic ad-backdrop behavior."
+        ),
         "project-launch": (
             "Pick the asset that best anchors a finished launch poster. "
             "Prefer a recognisable hero over a broad aerial unless township-scale is the message."

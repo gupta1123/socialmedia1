@@ -46,6 +46,24 @@ RERA/contact/QR must stay subordinate unless brief demands compliance emphasis.
 - dusk posters need lighter, calmer copy behavior
 - finished posters must integrate text into composition rather than leaving generic room for later text
 
+### Ad Hierarchy Rule
+For ads, enforce a 3-second hierarchy:
+1. Hook
+2. Proof
+3. Action
+
+If price, offer, proof, CTA, phone, and compliance all compete equally, revise.
+
+### Ad Mobile Readability
+For ads, assume feed-size viewing.
+
+Required:
+- primary hook readable at feed size
+- CTA readable without zooming when present
+- contact readable when intentionally included
+- compliance present but visually subordinate
+- no tiny legal texture pretending to be readable
+
 ## Part C — Asset Grounding
 
 ### Core Rules
@@ -127,6 +145,35 @@ Too experimental for weak assets?
 Project still recognisable?
 Any false completion, false amenity, or false scale implied?
 
+### 8) Ad Truth & Compliance
+For ad posts, never invent:
+- price
+- discount
+- EMI claim
+- possession date
+- RERA number
+- approval status
+- landmark time/distance
+- scarcity claim
+- launch deadline
+
+If a commercial claim is not provided, omit it or keep the hook generic.
+
+If available commercial facts are provided:
+- do not add unrequested commercial facts merely because they are available
+- respect requested_fact_types, allowed_fact_kinds, required_fact_copies, disallowed_available_fact_kinds, and do_not_use_unless_requested from the analyst output
+- every required_fact_copies value must appear exactly in every final prompt
+- facts listed in do_not_use_unless_requested must be removed unless their kind is explicitly allowed by the analyst
+- if the analyst has over-required unrequested facts, revise toward the original brief boundary instead of preserving the overreach
+- brief asks for price / starting price and startingPrice exists -> every final prompt must include that exact value
+- brief asks for configuration pricing and priceRangeByConfig exists -> every final prompt must include only listed values
+- brief asks for area / carpet area and sizeRanges exists -> every final prompt must include the exact listed size range
+- brief asks for offers / booking benefits and currentOffers exists -> every final prompt must include only listed offer values
+- brief asks for an offer and currentOffers is empty -> every final prompt must avoid invented offers
+- brief asks for RERA / compliance and reraNumber exists -> every final prompt must include the exact listed RERA number
+- brief asks for location / landmarks and project location facts exist -> every final prompt must use exact listed location facts, not invented landmarks or travel times
+- never approve generic substitutes such as "pricing information", "starting price text", or "offer details" when an exact value is available and requested
+
 ## Revision Triggers
 Revise if:
 - no singular dominant idea
@@ -144,6 +191,9 @@ Revise if:
 - chosen style family is not visibly executed
 - template image is likely to override project identity
 - logo could be distorted or rewritten
+- for ads, there is no clear hook/proof/action sequence
+- for ads, compliance is louder than the hook
+- for ads, the result feels like a cheap flyer instead of a premium ad
 
 ## Final Approval Standard
 Approve only if:

@@ -7,9 +7,10 @@ import re
 import shutil
 import tempfile
 import traceback
+from functools import wraps
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -58,6 +59,7 @@ NOTEBOOK_POST_TYPE_MAP = {
     "site-visit-invite": "site_visit_invite",
     "location-advantage": "location_advantage",
     "testimonial": "testimonial",
+    "ad": "ad",
 }
 ANALYST_SKILL_NAMES = (
     "briefly-social-core",
@@ -310,7 +312,7 @@ def execute_with_trace(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[st
             analysis_result = namespace["generate_image_prompt"](
                 project_slug=derive_project_slug(payload, bundle),
                 post_type=map_notebook_post_type((bundle.get("postTypeContract") or {}).get("code")),
-                user_brief=build_user_brief(bundle.get("requestContext") or {}),
+                user_brief=build_user_brief(bundle),
                 reference_image_paths=derive_reference_image_urls(payload),
                 reference_image_note=build_reference_image_note(bundle, payload),
                 template_id=derive_template_id(namespace, bundle),
@@ -323,6 +325,12 @@ def execute_with_trace(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[st
                 exact_logo_supplied=has_exact_logo_input(payload),
                 exact_rera_qr_supplied=has_exact_rera_qr_input(payload),
                 requested_variation_count=derive_requested_variation_count(payload),
+                requested_aspect_ratio=(bundle.get("generationContract") or {}).get("aspectRatio"),
+                supplied_exact_text=(bundle.get("requestContext") or {}).get("exactText"),
+                supplied_offer=(bundle.get("requestContext") or {}).get("offer"),
+                available_commercial_facts=build_project_commercial_fact_lines(
+                    bundle.get("projectTruth") or {}
+                ),
                 print_steps=False,
             )
 
@@ -428,6 +436,7 @@ def install_tool_tracing(namespace: dict[str, Any], traced_calls: list[dict[str,
         signature = inspect.signature(original)
 
         def make_wrapper(name: str, fn: Callable[..., Any], sig: inspect.Signature):
+            @wraps(fn)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 try:
                     bound = sig.bind_partial(*args, **kwargs)
@@ -459,6 +468,8 @@ def install_tool_tracing(namespace: dict[str, Any], traced_calls: list[dict[str,
                     )
                     raise
 
+            wrapper.__signature__ = sig
+            wrapper._wrapped_for_validation = True
             return wrapper
 
         namespace[tool_name] = make_wrapper(tool_name, original, signature)
@@ -543,6 +554,11 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             [
                 "Briefly Social skill guidance is already preloaded in this run. Do not call or request skill tools.",
                 "The logo_image_path is metadata for exact downstream logo placement. Do not inspect the logo with vision in the analyst stage.",
+                "When available project commercial facts are present in the brief, infer requested_fact_types, allowed_fact_kinds, required_fact_copies, disallowed_available_fact_kinds, and do_not_use_unless_requested from the original user request. These fields are your intent judgment, not string matching.",
+                "Use required_fact_copies only for exact facts the brief asks to show. Put true-but-unrequested facts into disallowed_available_fact_kinds and do_not_use_unless_requested so QA can keep final prompts grounded.",
+                "Never make payment plans, location advantages, landmarks, RERA, contact, website, offers, area, or starting price mandatory just because they are available. They belong in required_fact_copies only when the brief explicitly requests that kind.",
+                "If the brief asks for configuration-wise pricing, required_fact_copies should contain the exact requested configuration price values only. Do not also require payment plan, location, RERA, contact, website, offers, or landmarks unless the brief asks for them.",
+                "If the brief says show only one fact kind or says do not show certain fact kinds, treat that as a hard boundary in allowed_fact_kinds and disallowed_available_fact_kinds.",
             ],
         )
 
@@ -561,18 +577,27 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "Every variation must use a different poster_archetype.",
             "Do not create superficial copies with renamed titles.",
             "Route 1 may keep the analyst's selected archetype when it fits. Remaining routes must choose other compatible archetypes for the same asset and business job.",
-            "For project_launch, site_visit_invite, location_advantage, and testimonial, every registered poster_archetype is allowed. Rank by asset fit and business job, but do not treat post type alone as a blocker.",
+            "For project_launch, site_visit_invite, location_advantage, testimonial, and ad, every registered poster_archetype is allowed. Rank by asset fit and business job, but do not treat post type alone as a blocker.",
             "If brief_analysis.post_type is testimonial, do not describe the creative as a project launch. The business job is social proof, trust, quote, resident/buyer proof, or experience-led credibility.",
+            "If brief_analysis.post_type is ad, keep one dominant commercial hook and make the prompt feel like a premium ad, not a generic promo flyer.",
+            "For trust-led or compliance-led ads, commercial_hook may be trust, compliance, or credibility. Do not force those briefs into price, location, offer, or configuration hooks.",
             "All variations must preserve the same project truth, asset truth, and text-policy obligations.",
             "If the asset limits possible diversity, choose the nearest distinct compatible archetypes instead of forcing invalid styles.",
             "Every prompt must remain a finished social poster, not a scenic base-image prompt.",
-            "Do not mention aspect ratio, dimensions, or canvas size in the prompt.",
+            "The requested aspect ratio is output metadata only. Do not mention aspect ratio, ratio values, dimensions, or canvas size in the prompt.",
             "Do not invent address lines, street names, RERA, contact details, or location facts that are not grounded in the brief analysis.",
             "Do not include phone numbers, WhatsApp numbers, website URLs, email addresses, social handles, RERA numbers, or contact details unless they are explicitly supplied in exact requested text or the brief.",
             "Do not include a logo, brand mark, emblem, monogram, watermark, or invented branding asset unless an exact logo is supplied in the input.",
             "Do not invent asset filenames, reference filenames, filepaths, or hero image names. If asset_decision.filename is null, describe the visual subject without naming a file.",
             "Do not write literal placeholder labels such as Address, Headline, Call to Action, Contact Details, Phone, Website, RERA, Logo, or Brand Mark.",
-            "If brief_analysis.exact_text_supplied is false, do not name text fields. Use post-type-aware generic copy language like minimal launch copy, minimal location/context copy, short invitation line, minimal testimonial/quote copy, or minimal copy block.",
+            "If brief_analysis.exact_text_supplied is false, do not name text fields. Use post-type-aware generic copy language like minimal launch copy, minimal location/context copy, short invitation line, minimal testimonial/quote copy, minimal ad hook copy, or minimal copy block.",
+            "If brief_analysis.exact_text_supplied is true, every variation prompt must include brief_analysis.supplied_exact_text verbatim as required on-image text. Do not paraphrase, translate, reorder, shorten, or replace it with generic headline language.",
+            "If brief_analysis.supplied_offer is present, every variation prompt must include it verbatim as the supplied offer or CTA copy. Do not replace it with generic call-to-action wording.",
+            "If brief_analysis.required_fact_copies is non-empty, every variation prompt must include each value exactly. These are grounded project facts selected by the analyst from the original brief intent.",
+            "required_fact_copies means literal substring copy/paste. Do not translate, rewrite, shorten, reorder, or convert digits to words. For example, keep '2 BHK' as '2 BHK' and '4.5 BHK' as '4.5 BHK'.",
+            "Every variation must obey brief_analysis.allowed_fact_kinds and brief_analysis.disallowed_available_fact_kinds. Required copies are mandatory; disallowed available facts must not appear even if they are true project facts.",
+            "Available commercial facts are grounding context, not a menu of optional claims. Do not add starting price, configuration pricing, offers, RERA, contact, area, or landmark facts merely because they are available; include them when the original user brief asks for that fact or required_fact_copies requires it.",
+            "For price-led ads, do not write generic substitutes such as 'Starting Price', 'pricing information', or 'price details' when an exact required_fact_copies value exists.",
             "If exact logo or RERA QR assets are not supplied, do not mention logo, brand mark, watermark, QR, or RERA in the prompt or negative prompt.",
             "Keep the negative prompt visual-only. Do not put compliance, contact, logo, URL, email, phone, RERA, placeholder, or address words in negative.",
             "Do not expose internal labels such as Business job, Text architecture, Layout, Voice, Brand visibility, Density, or Visual mode in the prompt. Translate them into natural visual direction.",
@@ -598,7 +623,15 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "Every kept variation must omit logos, brand marks, emblems, monograms, watermarks, and invented branding assets unless an exact logo is supplied in the input.",
             "Every kept variation must omit invented asset filenames, filepaths, and hero image names. If no filename is supplied in asset_decision, never write one in prompt_summary, revised_prompt, or revised_negative.",
             "Every kept variation must remove literal placeholder labels such as Address, Headline, Call to Action, Contact Details, Phone, Website, RERA, Logo, or Brand Mark.",
+            "Every kept variation must treat aspect ratio as output metadata only. If a crafted prompt mentions aspect ratio, ratio values, dimensions, or canvas size, rewrite that sentence out of prompt_summary and revised_prompt.",
             "If text is not supplied, keep copy direction generic and do not name unavailable text fields.",
+            "When brief_analysis.exact_text_supplied is true, prompt_summary and every revised_prompt must contain brief_analysis.supplied_exact_text exactly. If a crafted prompt drops it, rewrite the prompt to include that exact string as on-image text.",
+            "When brief_analysis.supplied_offer is present, every revised_prompt must preserve it exactly as supplied offer or CTA copy. If a crafted prompt replaces it with generic action wording, rewrite it.",
+            "When brief_analysis.required_fact_copies is non-empty, prompt_summary and every revised_prompt must include each value exactly. If a crafted prompt uses generic wording instead, rewrite it using the exact grounded value.",
+            "Exact required_fact_copies matching is character-level. Do not approve paraphrases such as 'Two BHK' for '2 BHK' or 'Four point five BHK' for '4.5 BHK'. Copy the required value literally into revised_prompt.",
+            "Grounded required_fact_copies are allowed even when exact_text_supplied is false; they are verified project truth, not invented copy.",
+            "brief_analysis.allowed_fact_kinds is the maximum fact boundary for final prompts. If a prompt contains a fact kind in brief_analysis.disallowed_available_fact_kinds, rewrite it out even when the fact is true.",
+            "If a prompt includes available commercial facts that the original user brief did not ask for and no required_fact_copies entry requires, rewrite them out. Especially remove unrequested prices, offers, RERA numbers, contact, area, and landmark lists.",
             "When brief_analysis.exact_text_supplied is false, prompt_summary, revised_prompt, and revised_negative must not contain address, headline, CTA, call to action, contact details, phone, website, email, RERA, logo, watermark, brand mark, or invented filenames.",
             "If no exact text is supplied, revised_prompt must not contain field-label lists such as headline/location/CTA/contact/RERA. Rewrite them as a generic post-type-aware copy hierarchy.",
             "If the crafted prompt asks for unavailable contact, compliance, logo, or placeholder text, you must rewrite the sentence instead of approving it.",
@@ -606,7 +639,7 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "revised_negative should be a short visual-quality list only, for example: low quality, clutter, harsh lighting, distorted architecture.",
             "revised_negative must not contain these words: phone, website, email, contact, RERA, logo, watermark, placeholder, address, URL.",
             "revised_prompt must not expose internal compiler labels such as Business job, Text architecture, Layout, Voice, Brand visibility, Density, Visual mode, or Hero presentation.",
-            "Translate internal text architecture into natural creative direction. If exact_text_supplied is false, use post-type-aware wording instead of address/headline/CTA wording. For location_advantage use 'minimal location/context copy treatment', not invitation wording. For testimonial use 'minimal testimonial/quote copy treatment', not launch wording.",
+            "Translate internal text architecture into natural creative direction. If exact_text_supplied is false, use post-type-aware wording instead of address/headline/CTA wording. For location_advantage use 'minimal location/context copy treatment', not invitation wording. For testimonial use 'minimal testimonial/quote copy treatment', not launch wording. For ad use 'minimal ad hook copy treatment' with one short proof line at most.",
             "Use 'contact info' rather than 'contact details' in any negative constraint that must refer to contact.",
             "Use the project_name value from brief_analysis exactly. Do not spell-correct, expand, translate, or rename it.",
             "Every kept variation must treat project_name as a display name only. Revise wording like 'in <project_name>' or '<project_name> project' when it could imply location.",
@@ -617,7 +650,7 @@ def patch_notebook_agents(namespace: dict[str, Any], runtime_dir: Path) -> None:
             "- poster_archetypes must be distinct",
             "- prompts must not be near-duplicates with renamed labels",
             "- weak or invalid routes must be revised into clearly different compatible routes",
-            "- for project_launch, site_visit_invite, location_advantage, and testimonial, do not reject an archetype solely because it is unusual for the post type",
+            "- for project_launch, site_visit_invite, location_advantage, testimonial, and ad, do not reject an archetype solely because it is unusual for the post type",
             "",
             "Per-route checks:",
             "- truthfulness and recognisability",
@@ -693,6 +726,7 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
     build_run_images = namespace.get("_build_run_images")
     step_session_id = namespace.get("_step_session_id")
     repair_analysis_grounding = namespace.get("_repair_analysis_grounding")
+    list_asset_candidates = namespace.get("list_asset_candidates")
 
     if not all(
         [
@@ -724,6 +758,10 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
         exact_logo_supplied: bool = False,
         exact_rera_qr_supplied: bool = False,
         requested_variation_count: int = 1,
+        requested_aspect_ratio: str | None = None,
+        supplied_exact_text: str | None = None,
+        supplied_offer: str | None = None,
+        available_commercial_facts: list[str] | None = None,
         session_id: str | None = None,
         print_steps: bool = True,
     ) -> dict[str, Any]:
@@ -757,9 +795,75 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
         analysis_payload = to_jsonable_model(analysis)
         if canonical_project_name:
             analysis_payload["project_name"] = canonical_project_name
+        if isinstance(requested_aspect_ratio, str) and requested_aspect_ratio.strip():
+            analysis_payload["aspect_ratio"] = requested_aspect_ratio.strip()
+        if str(analysis_payload.get("post_type") or "") == "ad":
+            commercial_hook = str(analysis_payload.get("commercial_hook") or "").strip()
+            if commercial_hook:
+                analysis_payload["commercial_hook"] = commercial_hook
+                analysis_payload["visual_mechanism"] = (
+                    str(analysis_payload.get("visual_mechanism") or "").strip()
+                    or visual_mechanism_for_ad_hook(commercial_hook)
+                )
+            else:
+                analysis_payload.pop("commercial_hook", None)
+                analysis_payload.pop("visual_mechanism", None)
+            asset_decision = analysis_payload.get("asset_decision")
+            if (
+                isinstance(asset_decision, dict)
+                and asset_decision.get("source") == "none"
+                and not (analysis_payload.get("reference_image_paths") or [])
+                and callable(list_asset_candidates)
+            ):
+                try:
+                    asset_payload = json.loads(
+                        list_asset_candidates(
+                            project_slug=analysis_payload["project_slug"],
+                            post_type="ad",
+                            specific_amenity=analysis_payload.get("specific_amenity"),
+                            occasion=analysis_payload.get("occasion"),
+                            no_building_image=bool(analysis_payload.get("no_building_image")),
+                            brief_text=user_brief,
+                        )
+                    )
+                except Exception:
+                    asset_payload = {}
+                selected_asset = choose_ad_project_library_asset(
+                    asset_payload.get("available_assets") or [],
+                    commercial_hook or "credibility",
+                )
+                if selected_asset:
+                    analysis_payload["asset_decision"] = {
+                        **asset_decision,
+                        "source": "project_library",
+                        "category": selected_asset.get("category"),
+                        "filename": selected_asset.get("filename"),
+                        "filepath": None,
+                        "reference_tag": selected_asset.get("reference_tag"),
+                        "reason": (
+                            "Ads should stay anchored to a truthful project or amenity asset when one exists. "
+                            f"Selected project-library asset {selected_asset.get('filename')} for the analyst-selected ad hook."
+                        ),
+                    }
+                    analysis_payload["reference_usage_plan"] = (
+                        f"Use the project-library asset {selected_asset.get('filename')} as the truthful primary anchor. "
+                        "Support the analyst-selected ad hook through hierarchy and framing without inventing commercial claims."
+                    )
+                    note = (
+                        "System repair applied: ad creatives should prefer a truthful project-library anchor when no uploaded reference is supplied."
+                    )
+                    conflict_notes = coerce_string_list(analysis_payload.get("conflict_notes"))
+                    if note not in conflict_notes:
+                        conflict_notes.append(note)
+                    analysis_payload["conflict_notes"] = conflict_notes
         analysis_payload["exact_text_supplied"] = exact_text_supplied
         analysis_payload["exact_logo_supplied"] = exact_logo_supplied
         analysis_payload["exact_rera_qr_supplied"] = exact_rera_qr_supplied
+        if exact_text_supplied and isinstance(supplied_exact_text, str) and supplied_exact_text.strip():
+            analysis_payload["supplied_exact_text"] = supplied_exact_text.strip()
+        if isinstance(supplied_offer, str) and supplied_offer.strip():
+            analysis_payload["supplied_offer"] = supplied_offer.strip()
+        analysis_payload["available_commercial_facts"] = available_commercial_facts or []
         if not exact_text_supplied:
             if analysis_payload.get("text_architecture") in {"address_first", "footer_heavy"}:
                 analysis_payload["text_architecture"] = "slogan_first"
@@ -801,12 +905,13 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
             crafted,
             variation_count,
         )
+        validate_verified_prompt_contract(analysis_payload, verified)
 
         if print_steps:
             print("=" * 90)
             print("STEP 1 — ANALYSIS")
             print("=" * 90)
-            print(analysis.model_dump_json(indent=2) if hasattr(analysis, "model_dump_json") else analysis)
+            print(json.dumps(analysis_payload, indent=2, ensure_ascii=False))
             print("\n" + "=" * 90)
             print("STEP 2 — CRAFTING")
             print("=" * 90)
@@ -818,7 +923,7 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
 
         return {
             "session_id": session_id or verifier_response.session_id,
-            "analysis": to_jsonable_model(analysis),
+            "analysis": analysis_payload,
             "crafted": to_jsonable_model(crafted),
             "verified": to_jsonable_model(verified),
         }
@@ -841,6 +946,10 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
         exact_logo_supplied: bool = False,
         exact_rera_qr_supplied: bool = False,
         requested_variation_count: int = 1,
+        requested_aspect_ratio: str | None = None,
+        supplied_exact_text: str | None = None,
+        supplied_offer: str | None = None,
+        available_commercial_facts: list[str] | None = None,
         session_id: str | None = None,
         print_steps: bool = True,
     ) -> dict[str, Any]:
@@ -860,6 +969,10 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
             exact_logo_supplied=exact_logo_supplied,
             exact_rera_qr_supplied=exact_rera_qr_supplied,
             requested_variation_count=requested_variation_count,
+            requested_aspect_ratio=requested_aspect_ratio,
+            supplied_exact_text=supplied_exact_text,
+            supplied_offer=supplied_offer,
+            available_commercial_facts=available_commercial_facts,
             session_id=session_id,
             print_steps=print_steps,
         )
@@ -1054,6 +1167,7 @@ def build_notebook_projects(
     image_library = build_notebook_image_library(candidate_assets, media_context)
 
     approved_claims = coerce_string_list(project.get("approvedClaims"))
+    configurations = coerce_string_list(project.get("configurations"))
     location_pieces = dedupe_strings(
         [
             *project_location_fields(project),
@@ -1072,7 +1186,7 @@ def build_notebook_projects(
             or project.get("stage")
             or "Residential project",
             "floors": None,
-            "units": ", ".join(extract_configuration_like_claims(approved_claims[:4])) or None,
+            "units": ", ".join(configurations[:4]) or None,
             "status": project.get("constructionStatus") or project.get("stage") or "",
             "completion_date": None,
             "usp": project.get("lifestyleAngle")
@@ -1087,6 +1201,12 @@ def build_notebook_projects(
                 if isinstance(part, str) and part
             ).strip(),
             "rera_number": project.get("reraNumber"),
+            "starting_price": project.get("startingPrice"),
+            "pricing_band": project.get("pricingBand"),
+            "price_range_by_config": coerce_string_list(project.get("priceRangeByConfig")),
+            "current_offers": coerce_string_list(project.get("currentOffers")),
+            "payment_plan": project.get("paymentPlanSummary"),
+            "booking_amount": project.get("bookingAmount"),
             "contact": "",
             "amenities": coerce_string_list(project.get("amenities")),
             "brand_assets": {
@@ -1231,30 +1351,114 @@ def map_notebook_post_type(value: Any) -> str | None:
     return NOTEBOOK_POST_TYPE_MAP.get(code)
 
 
-def build_user_brief(request_context: dict[str, Any]) -> str:
+def build_user_brief(bundle_or_request_context: dict[str, Any]) -> str:
+    if "requestContext" in bundle_or_request_context or "projectTruth" in bundle_or_request_context:
+        request_context = bundle_or_request_context.get("requestContext") or {}
+        project_truth = bundle_or_request_context.get("projectTruth") or {}
+    else:
+        request_context = bundle_or_request_context
+        project_truth = {}
+
     parts: list[str] = []
     prompt = str(request_context.get("prompt") or "").strip()
-    goal = str(request_context.get("goal") or "").strip()
     audience = str(request_context.get("audience") or "").strip()
     offer = str(request_context.get("offer") or "").strip()
     exact_text = str(request_context.get("exactText") or "").strip()
+    template_type = describe_creative_direction(request_context.get("templateType"))
 
     if prompt:
         parts.append(prompt)
-    if goal and goal != prompt:
-        parts.append(f"Goal: {goal}")
     if audience:
-        parts.append(f"Audience: {audience}")
+        parts.append(f"This creative is for {audience}.")
+    if template_type:
+        parts.append(
+            f"Preferred creative direction: {template_type}. Use this only if it fits the post type, asset truth, and business job."
+        )
     if offer:
         parts.append(f"Offer: {offer}")
     if exact_text:
         parts.append(f"Exact text: {exact_text}")
+    commercial_facts = build_project_commercial_fact_lines(project_truth)
+    if commercial_facts:
+        parts.append(
+            "Available project commercial facts. Treat these as grounding context, not optional filler. "
+            "Use the original brief intent to decide requested_fact_types, allowed_fact_kinds, required_fact_copies, disallowed_available_fact_kinds, and do_not_use_unless_requested. "
+            "If the brief asks for a fact kind, use only these exact values and do not invent missing facts. "
+            "If the brief does not ask for a fact kind, keep that available fact out of the final prompts:\n"
+            + "\n".join(commercial_facts)
+        )
     parts.append(
         "Use the provided format only to guide composition and layout. "
         "Do not mention aspect ratio, dimensions, or canvas size in the final prompt."
     )
 
     return "\n".join(parts).strip() or "Create a strong real-estate social poster."
+
+
+def build_project_commercial_fact_lines(project: dict[str, Any]) -> list[str]:
+    if not isinstance(project, dict):
+        return []
+
+    lines: list[str] = []
+    scalar_fields = [
+        ("Starting price", "startingPrice"),
+        ("Pricing band", "pricingBand"),
+        ("Booking amount", "bookingAmount"),
+        ("Payment plan", "paymentPlanSummary"),
+        ("Offer validity", "offerValidity"),
+    ]
+    list_fields = [
+        ("Configurations", "configurations"),
+        ("Size ranges", "sizeRanges"),
+        ("Price by configuration", "priceRangeByConfig"),
+        ("Current offers", "currentOffers"),
+        ("Financing partners", "financingPartners"),
+        ("Location advantages", "locationAdvantages"),
+        ("Nearby landmarks", "nearbyLandmarks"),
+        ("Connectivity points", "connectivityPoints"),
+        ("Travel times", "travelTimes"),
+    ]
+
+    rera_number = str(project.get("reraNumber") or "").strip()
+    if rera_number:
+        lines.append(f"- RERA number: {rera_number}")
+
+    for label, key in scalar_fields:
+        value = str(project.get(key) or "").strip()
+        if value:
+            lines.append(f"- {label}: {value}")
+
+    for label, key in list_fields:
+        values = coerce_string_list(project.get(key))
+        if values:
+            lines.append(f"- {label}: {'; '.join(values[:6])}")
+
+    return lines
+
+
+def dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        key = value.strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(value.strip())
+    return result
+
+
+def describe_creative_direction(value: Any) -> str | None:
+    mapping = {
+        "announcement": "editorial",
+        "hero": "image-led",
+        "product-focus": "feature-led",
+        "testimonial": "proof-led",
+        "quote": "copy-led",
+        "offer": "offer-led",
+    }
+    normalized = str(value or "").strip().lower()
+    return mapping.get(normalized) or None
 
 
 def get_no_exact_copy_note(post_type: str) -> str:
@@ -1270,10 +1474,138 @@ def get_no_exact_copy_note(post_type: str) -> str:
         copy_treatment = "a minimal progress/update copy treatment"
     elif post_type == "testimonial":
         copy_treatment = "a minimal testimonial/quote copy treatment"
+    elif post_type == "ad":
+        copy_treatment = "a minimal ad hook copy treatment with one short proof line at most"
     else:
         copy_treatment = "a minimal copy treatment"
 
     return f"No exact copy was supplied. Do not name unavailable text fields; use {copy_treatment}."
+
+
+def validate_verified_prompt_contract(analysis: dict[str, Any], verified: dict[str, Any]) -> None:
+    if isinstance(verified, BaseModel):
+        verified = verified.model_dump()
+    validate_supplied_copy_contract(analysis, verified)
+    validate_agent_fact_boundary(analysis, verified)
+
+
+def validate_supplied_copy_contract(analysis: dict[str, Any], verified: dict[str, Any]) -> None:
+    exact_text = str(analysis.get("supplied_exact_text") or "").strip()
+    offer = str(analysis.get("supplied_offer") or "").strip()
+    variations = verified.get("variations") or []
+    missing: list[str] = []
+
+    for index, variation in enumerate(variations, start=1):
+        prompt = str(variation.get("revised_prompt") or "")
+        if exact_text and exact_text not in prompt:
+            missing.append(f"variation {index} missing exact text")
+        if offer and offer not in prompt:
+            missing.append(f"variation {index} missing supplied offer")
+
+    if missing:
+        raise RuntimeError(
+            "Verifier failed to preserve supplied manual copy: " + "; ".join(missing)
+        )
+
+
+def validate_agent_fact_boundary(analysis: dict[str, Any], verified: dict[str, Any]) -> None:
+    required_copies = analysis.get("required_fact_copies") or []
+    variations = verified.get("variations") or []
+    violations: list[str] = []
+
+    for index, variation in enumerate(variations, start=1):
+        prompt = str(variation.get("revised_prompt") or "")
+        for required_copy in required_copies:
+            required = str(required_copy or "").strip()
+            if required and required not in prompt:
+                violations.append(f"variation {index} missing required fact: {required}")
+
+        for fact in analysis.get("do_not_use_unless_requested") or []:
+            if not isinstance(fact, dict):
+                continue
+            kind = str(fact.get("kind") or "").strip()
+            copy = str(fact.get("copy") or "").strip()
+            if copy and copy in prompt:
+                violations.append(f"variation {index} contains disallowed {kind}: {copy}")
+
+    if violations:
+        raise RuntimeError(
+            "Verifier failed agent fact boundary: " + "; ".join(violations)
+        )
+
+
+def validate_prompt_hygiene_contract(verified: dict[str, Any]) -> None:
+    forbidden_fragments = (
+        "aspect ratio",
+        "canvas size",
+        "canvas dimension",
+    )
+    violations: list[str] = []
+
+    for index, variation in enumerate(verified.get("variations") or [], start=1):
+        prompt = str(variation.get("revised_prompt") or "").lower()
+        for fragment in forbidden_fragments:
+            if fragment in prompt:
+                violations.append(f"variation {index} contains {fragment}")
+
+    if violations:
+        raise RuntimeError(
+            "Verifier failed to remove prompt-only metadata: " + "; ".join(violations)
+        )
+
+
+def visual_mechanism_for_ad_hook(commercial_hook: str) -> str:
+    return {
+        "price": "price_billboard",
+        "visit": "visit_ticket",
+        "location": "location_receipt",
+        "amenity": "value_stack",
+        "configuration": "comparison_cards",
+        "offer": "offer_strip",
+        "investment": "value_stack",
+        "trust": "trust_seal",
+        "compliance": "compliance_footer",
+        "credibility": "credibility_band",
+    }.get(commercial_hook, "credibility_band")
+
+
+def choose_ad_project_library_asset(
+    available_assets: list[dict[str, Any]],
+    commercial_hook: str,
+) -> dict[str, Any] | None:
+    if not available_assets:
+        return None
+
+    priority_by_hook = {
+        "amenity": ["amenity", "sales_gallery", "main_building_exterior", "aerial_view"],
+        "visit": ["sales_gallery", "entrance_gate", "main_building_exterior", "aerial_view"],
+        "location": ["aerial_view", "entrance_gate", "main_building_exterior", "sales_gallery"],
+        "price": ["main_building_exterior", "aerial_view", "entrance_gate", "sales_gallery", "amenity"],
+        "configuration": ["main_building_exterior", "aerial_view", "sales_gallery", "amenity"],
+        "offer": ["main_building_exterior", "aerial_view", "entrance_gate", "sales_gallery", "amenity"],
+        "investment": ["aerial_view", "main_building_exterior", "entrance_gate", "sales_gallery"],
+        "trust": ["main_building_exterior", "sales_gallery", "entrance_gate", "aerial_view", "amenity"],
+        "compliance": ["main_building_exterior", "sales_gallery", "entrance_gate", "aerial_view", "amenity"],
+        "credibility": ["main_building_exterior", "sales_gallery", "entrance_gate", "aerial_view", "amenity"],
+    }
+    priorities = priority_by_hook.get(commercial_hook, priority_by_hook["offer"])
+
+    def category_score(category: str) -> int:
+        normalized = str(category or "").strip().lower()
+        for index, token in enumerate(priorities):
+            if token in normalized:
+                return index
+        return len(priorities) + 1
+
+    ranked = sorted(
+        [asset for asset in available_assets if isinstance(asset, dict)],
+        key=lambda asset: (
+            category_score(str(asset.get("category") or "")),
+            str(asset.get("category") or ""),
+            str(asset.get("filename") or ""),
+        ),
+    )
+    return ranked[0] if ranked else None
 
 
 def derive_reference_image_urls(payload: dict[str, Any]) -> list[str] | None:
@@ -1461,6 +1793,18 @@ def rank_archetypes_for_analysis(analysis: dict[str, Any]) -> list[str]:
                 "soft_editorial_cutout",
                 "swiss_grid_premium",
                 "philosophy_open_field",
+            ]
+        )
+    elif post_type == "ad":
+        ranked.extend(
+            [
+                "scarcity_panel",
+                "clear_sky_statement",
+                "side_crop_premium_tower",
+                "footer_builder_campaign",
+                "swiss_grid_premium",
+                "organic_shape_launch",
+                "soft_editorial_cutout",
             ]
         )
     elif post_type == "construction_update":
@@ -1717,14 +2061,6 @@ def sanitize_verification_set(
     )
 
 
-def extract_configuration_like_claims(values: list[str]) -> list[str]:
-    output: list[str] = []
-    for value in values:
-        if re.search(r"\b\d+\s*BHK\b", value, flags=re.IGNORECASE):
-            output.append(value)
-    return output
-
-
 def coerce_string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -1820,6 +2156,8 @@ def normalize_notebook_bridge_result(
                         "moodMode": route_context.get("mood_mode"),
                         "density": route_context.get("density"),
                         "brandVisibility": route_context.get("brand_visibility"),
+                        "commercialHook": analysis.get("commercial_hook"),
+                        "visualMechanism": analysis.get("visual_mechanism"),
                         "variationIndex": index,
                     },
                     "compilerTrace": {
@@ -1850,6 +2188,8 @@ def normalize_notebook_bridge_result(
                     "layoutGeometry": analysis.get("layout_geometry"),
                     "graphicLayer": analysis.get("graphic_layer") or [],
                     "textArchitecture": analysis.get("text_architecture"),
+                    "commercialHook": analysis.get("commercial_hook"),
+                    "visualMechanism": analysis.get("visual_mechanism"),
                     "variationIndex": 1,
                 },
                 "compilerTrace": {
@@ -1920,6 +2260,8 @@ def normalize_notebook_bridge_result(
         "moodMode": first_variation["resolvedConstraints"].get("moodMode") or analysis.get("mood_mode"),
         "density": first_variation["resolvedConstraints"].get("density") or analysis.get("density"),
         "brandVisibility": first_variation["resolvedConstraints"].get("brandVisibility") or analysis.get("brand_visibility"),
+        "commercialHook": first_variation["resolvedConstraints"].get("commercialHook") or analysis.get("commercial_hook"),
+        "visualMechanism": first_variation["resolvedConstraints"].get("visualMechanism") or analysis.get("visual_mechanism"),
     }
 
     result = {
@@ -1963,6 +2305,12 @@ def sanitize_public_prompt_text(
         storage_path = asset.get("storagePath")
         if isinstance(storage_path, str) and storage_path:
             text = text.replace(storage_path, replacement)
+    text = re.sub(
+        r"\b(?:the\s+)?project[-\s]library asset ['\"]the supplied project reference['\"]",
+        "the supplied project reference",
+        text,
+        flags=re.IGNORECASE,
+    )
     media_context = payload.get("mediaContext") or {}
     for collection_key in ("referenceImages",):
         for item in media_context.get(collection_key) or []:
@@ -2018,6 +2366,13 @@ def sanitize_negative_prompt_text(prompt: str, payload: dict[str, Any]) -> str:
         "call to action",
         "field-label",
         "field label",
+        "invented",
+        "unsupplied",
+        "extra promotion",
+        "extra offer",
+        "offer claim",
+        "social media handle",
+        "deadline",
     )
     remove_photo_negatives = has_truthful_visual_anchor(payload)
     photo_conflict_fragments = (
@@ -2186,8 +2541,56 @@ def strip_explicit_aspect_ratio_mentions(text: str) -> str:
         flags=re.IGNORECASE,
     )
     cleaned = re.sub(
+        r"\b((?:A\s+)?(?:finished\s+)?(?:social\s+)?(?:poster|post|creative|ad)),?\s*\d+:\d+\s+aspect\s+ratio\.?",
+        r"\1",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
         r"\b(1:1|4:5|9:16|16:9|3:2)\b(?=\s+(?:project|social|poster|story|banner|launch|invite|amenity|festive|testimonial|location|construction|portrait|landscape)\b)",
         "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\b(?:right[_-]copy[_-]left[_-]hero|left[_-]copy[_-]right[_-]hero)\s+geometry\b",
+        "balanced hero and copy layout",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\b(?:right[_-]copy[_-]left[_-]hero|left[_-]copy[_-]right[_-]hero)\b",
+        "balanced hero and copy layout",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\b(?:an?\s+|the\s+)?(?:asset[_-]faithful visual mode|editorialized[_-]truth visual mode)\b",
+        "a truthful visual treatment",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\btext architecture\b",
+        "copy hierarchy",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"['\"]?elegant_signature['\"]?\s+brand visibility",
+        "subtle project branding",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"['\"]?lean['\"]?\s+density",
+        "an uncluttered layout",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\bThe hero presentation is architecture with environment\.?",
+        "Keep the architecture connected to its surrounding environment.",
         cleaned,
         flags=re.IGNORECASE,
     )

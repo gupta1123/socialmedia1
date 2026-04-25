@@ -49,8 +49,9 @@ import {
 } from "../../../lib/creative-brief-fingerprint";
 import { getCurrentCreatePostTaskId } from "../../../lib/workflow";
 import { ImagePreviewTrigger } from "../image-preview";
+import { StudioShell } from "../studio-shell";
 import { useRegisterTopbarControls, useRegisterTopbarMeta } from "../topbar-actions-context";
-import { useStudio } from "../studio-context";
+import { useOptionalStudio, useStudio } from "../studio-context";
 import { SkeletonRow } from "../skeleton";
 
 // ─── Stepper phase enum ───────────────────────────────────────────────────────
@@ -90,7 +91,6 @@ type SeriesCreateFormState = {
   startAt: string;
 };
 
-const defaultGoalText = "Drive enquiries for a premium residential project";
 const legacyDefaultOfferText = "Site visits now open";
 const legacyDefaultExactText = "Luxury residences. Site visits now open.";
 const legacyDefaultPromptText =
@@ -106,22 +106,15 @@ const SHOW_CREATE_TEMPLATE_CONTROLS = false;
 const SHOW_CREATE_REFERENCE_CONTROLS = false;
 const POST_TYPE_BRIEF_STARTERS: Record<string, string> = {
   "project-launch": "Introduce the project with a premium hero visual and a strong first-impression feel.",
+  ad: "Create a premium ad with one clear commercial hook, strong mobile readability, and a restrained but action-oriented hierarchy.",
   "site-visit-invite": "Invite buyers to visit the project soon. Keep it premium, welcoming, and action-led.",
   "amenity-spotlight": "Spotlight one amenity with an aspirational lifestyle angle and a calm premium tone.",
   "construction-update": "Show visible progress and build trust through a premium construction update.",
   "festive-greeting": "Create a premium festive greeting that feels respectful, elegant, and brand-safe."
 };
-const POST_TYPE_GOAL_DEFAULTS: Record<string, string> = {
-  "project-launch": "Drive enquiries for the project launch",
-  "site-visit-invite": "Encourage qualified site visit enquiries",
-  "amenity-spotlight": "Build interest in a key project amenity",
-  "construction-update": "Build trust with a visible construction progress update",
-  "festive-greeting": "Festive greeting",
-  "location-advantage": "Communicate location and connectivity advantage",
-  testimonial: "Build trust through buyer or resident proof"
-};
 const POST_TYPE_COPY_DEFAULTS: Record<string, { offer: string; exactText: string }> = {
   "project-launch": { offer: "Register interest", exactText: "Now launched" },
+  ad: { offer: "Enquire now", exactText: "" },
   "site-visit-invite": { offer: "Book a site visit", exactText: "Site visits open" },
   "amenity-spotlight": { offer: "", exactText: "Amenity Spotlight" },
   "construction-update": { offer: "", exactText: "Construction Update" },
@@ -129,6 +122,26 @@ const POST_TYPE_COPY_DEFAULTS: Record<string, { offer: string; exactText: string
   "location-advantage": { offer: "", exactText: "Connected living" },
   testimonial: { offer: "", exactText: "Real homeowner stories" }
 };
+const TARGET_AUDIENCE_OPTIONS = [
+  "Homebuyers",
+  "Investors",
+  "Homebuyers and investors",
+  "Luxury buyers",
+  "Upgrade families",
+  "Young professionals",
+  "NRI buyers",
+  "First-time buyers",
+  "Commercial investors",
+  "Channel partners"
+] as const;
+const CREATIVE_DIRECTION_OPTIONS: Array<{ value: NonNullable<CreativeBrief["templateType"]>; label: string }> = [
+  { value: "announcement", label: "Editorial" },
+  { value: "hero", label: "Image-led" },
+  { value: "product-focus", label: "Feature-led" },
+  { value: "testimonial", label: "Proof-led" },
+  { value: "quote", label: "Copy-led" },
+  { value: "offer", label: "Offer-led" }
+];
 const POST_TASK_STATUS_FILTER_OPTIONS: Array<{
   id: PostTaskPickerStatusFilter;
   label: string;
@@ -245,7 +258,7 @@ function getTemplateSlideOptions(template: CreativeTemplateRecord | null | undef
   return configured.length > 0 ? configured : [4, 5, 6, 7, 8];
 }
 
-export default function CreatePage() {
+function CreatePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const searchKey = searchParams.toString();
@@ -1186,7 +1199,7 @@ export default function CreatePage() {
           ? "No template on this planned asset."
           : "No template on this post task."
       : isSeriesEpisodeMode
-        ? "Choose a template family to anchor layout and look."
+        ? "Choose a creative direction to anchor layout and look."
         : null;
   const seriesOutputKind = briefForm.seriesOutputKind ?? "single_image";
   const isSeriesCarousel = isSeriesEpisodeMode && seriesOutputKind === "carousel";
@@ -1213,7 +1226,6 @@ export default function CreatePage() {
         compiledPlacement;
       const briefItems = compactPreviewDetails([
         { label: "Brief", value: brief.prompt },
-        { label: "Goal", value: brief.goal },
         { label: "Audience", value: brief.audience },
         { label: "Text mode", value: brief.copyMode === "auto" ? "AI decides text" : "Manual text" },
         { label: "Exact text", value: brief.exactText }
@@ -1224,7 +1236,7 @@ export default function CreatePage() {
         { label: "Channel", value: placement?.channelLabel ?? startCase(brief.channel) },
         { label: "Format", value: placement?.formatLabel ?? startCase(brief.format) },
         { label: "Aspect ratio", value: promptPackage?.aspectRatio ?? runDetail?.run.aspectRatio ?? placement?.aspectRatio },
-        { label: "Creative family", value: brief.templateType ? startCase(brief.templateType) : null }
+        { label: "Creative direction", value: getCreativeDirectionLabel(brief.templateType) }
       ]);
 
       return [
@@ -1596,10 +1608,6 @@ export default function CreatePage() {
       const shouldResetPrompt =
         state.prompt.trim().length === 0 ||
         isSystemSuggestedBrief(state.prompt, festivals);
-      const shouldResetGoal =
-        state.goal.trim().length === 0 ||
-        state.goal === defaultGoalText ||
-        Object.values(POST_TYPE_GOAL_DEFAULTS).includes(state.goal);
       const shouldResetOffer = isSystemSuggestedOffer(state.offer ?? "");
       const shouldResetExactText = isSystemSuggestedExactText(state.exactText ?? "", festivals);
       const nextPrompt: string = shouldResetPrompt
@@ -1621,7 +1629,6 @@ export default function CreatePage() {
         channel: nextPlacement.channel,
         format: nextPlacement.format,
         templateType: nextPlacement.templateType,
-        goal: shouldResetGoal ? getPostTypeGoal(selected, nextFestival) : state.goal,
         prompt: nextPrompt,
         offer: state.copyMode === "auto" ? "" : shouldResetOffer ? nextCopy.offer : state.offer,
         exactText: state.copyMode === "auto" ? "" : shouldResetExactText ? nextCopy.exactText : state.exactText
@@ -1635,10 +1642,6 @@ export default function CreatePage() {
     setBriefForm((state) => ({
       ...state,
       festivalId: festivalId || undefined,
-      goal:
-        selected && (state.goal.trim().length === 0 || state.goal === defaultGoalText || Object.values(POST_TYPE_GOAL_DEFAULTS).includes(state.goal))
-          ? getFestivalGoal(selected)
-          : state.goal,
       prompt:
         selected && (state.prompt.trim().length === 0 || isSystemSuggestedBrief(state.prompt, festivals))
           ? getFestivalBriefStarter(selected)
@@ -2969,50 +2972,38 @@ export default function CreatePage() {
 
                 <div className="create-field-group">
                   <label className="create-field-label">
-                    {isSeriesEpisodeMode
-                      ? "Episode title"
-                      : isCampaignAssetMode
-                        ? "Asset title"
-                        : isAdaptationMode
-                          ? "New version title"
-                          : "Primary Goal"}
-                    <textarea
-                      value={briefForm.goal}
-                      onChange={(e) => setBriefForm((s) => ({ ...s, goal: e.target.value }))}
-                      onInput={(event) => autoResizeTextarea(event.currentTarget)}
-                      placeholder="e.g. Drive enquiry"
-                      className="create-prompt-textarea create-prompt-textarea-compact"
-                      rows={1}
-                    />
-                  </label>
-
-                  <label className="create-field-label">
                     Target Audience
-                    <textarea
+                    <select
                       value={briefForm.audience ?? ""}
                       onChange={(e) => setBriefForm((s) => ({ ...s, audience: e.target.value }))}
-                      onInput={(event) => autoResizeTextarea(event.currentTarget)}
-                      placeholder="e.g. Homebuyers and investors"
-                      className="create-prompt-textarea create-prompt-textarea-compact"
-                      rows={1}
-                    />
+                      className="create-field-select"
+                    >
+                      {TARGET_AUDIENCE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
                   </label>
 
                   <label className="create-field-label">
-                    Creative family
+                    Creative direction
                     <select
-                      value={briefForm.templateType}
+                      value={briefForm.templateType ?? ""}
                       onChange={(e) =>
-                        setBriefForm((s) => ({ ...s, templateType: e.target.value as CreativeBrief["templateType"] }))
+                        setBriefForm((s) => ({
+                          ...s,
+                          templateType: e.target.value ? (e.target.value as CreativeBrief["templateType"]) : undefined
+                        }))
                       }
                       className="create-field-select"
                     >
-                      <option value="announcement">Announcement</option>
-                      <option value="hero">Hero</option>
-                      <option value="product-focus">Product</option>
-                      <option value="testimonial">Review</option>
-                      <option value="quote">Quote</option>
-                      <option value="offer">Offer</option>
+                      <option value="">Auto</option>
+                      {CREATIVE_DIRECTION_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
                     </select>
                   </label>
 
@@ -4055,6 +4046,18 @@ export default function CreatePage() {
   );
 }
 
+export default function CreatePage() {
+  const studio = useOptionalStudio();
+  if (!studio) {
+    return (
+      <StudioShell>
+        <CreatePageContent />
+      </StudioShell>
+    );
+  }
+  return <CreatePageContent />;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function createDefaultCampaignCreateForm(): CampaignCreateFormState {
@@ -4279,17 +4282,6 @@ function getPostTypeBriefStarter(
   return starter ?? defaultPromptText;
 }
 
-function getPostTypeGoal(
-  postType: Pick<PostTypeRecord, "code"> | null | undefined,
-  festival?: FestivalRecord | null
-): string {
-  if (postType?.code === "festive-greeting") {
-    return festival ? getFestivalGoal(festival) : "Festive greeting";
-  }
-
-  return postType?.code ? POST_TYPE_GOAL_DEFAULTS[postType.code] ?? defaultGoalText : defaultGoalText;
-}
-
 function getPostTypeCopyDefaults(
   postType: Pick<PostTypeRecord, "code"> | null | undefined,
   festival?: FestivalRecord | null
@@ -4305,6 +4297,8 @@ function getOfferPlaceholder(postType: Pick<PostTypeRecord, "code"> | null | und
   switch (postType?.code) {
     case "project-launch":
       return "e.g. Register interest";
+    case "ad":
+      return "e.g. Enquire now";
     case "site-visit-invite":
       return "e.g. Book a site visit";
     case "offer":
@@ -4321,6 +4315,8 @@ function getExactTextPlaceholder(
   switch (postType?.code) {
     case "project-launch":
       return "e.g. Now launched";
+    case "ad":
+      return "e.g. One clear reason to enquire";
     case "construction-update":
       return "e.g. Construction Update";
     case "amenity-spotlight":
@@ -4345,6 +4341,8 @@ function getCreativeBriefPlaceholder(
   switch (postType?.code) {
     case "project-launch":
       return "Example: Introduce the project with a premium hero image and a strong first-impression feel.";
+    case "ad":
+      return "Example: Create a premium ad led by one clear hook, strong readability, and a calm but conversion-focused hierarchy.";
     case "site-visit-invite":
       return "Example: Invite buyers to visit this weekend. Keep it premium, welcoming, and action-led.";
     case "amenity-spotlight":
@@ -4399,12 +4397,15 @@ function isSystemSuggestedExactText(value: string, festivals: FestivalRecord[]):
   );
 }
 
-function getFestivalGoal(festival: FestivalRecord) {
-  return `${festival.name} greeting`;
-}
-
 function getFestivalHeadline(festival: FestivalRecord) {
   return `Happy ${festival.name}`;
+}
+
+function getCreativeDirectionLabel(templateType: CreativeBrief["templateType"] | null | undefined) {
+  if (!templateType) {
+    return "Auto";
+  }
+  return CREATIVE_DIRECTION_OPTIONS.find((option) => option.value === templateType)?.label ?? startCase(templateType);
 }
 
 function getFestivalCreativeRecipe(code: string) {
@@ -4567,6 +4568,8 @@ function getPostTypeModalDescription(postType: Pick<PostTypeRecord, "code" | "de
   switch (postType.code) {
     case "project-launch":
       return "Announce a new project or phase with a premium reveal.";
+    case "ad":
+      return "Drive enquiry with one clear commercial hook while keeping the creative premium and brand-safe.";
     case "construction-update":
       return "Share progress, milestones, and delivery confidence.";
     case "amenity-spotlight":
@@ -4641,6 +4644,21 @@ function PostTypeIllustration({ code }: { code: string }) {
         <path d="m118 98 45-14 14 39-45 14-14-39Z" fill="var(--post-type-mid)" />
         <path d="m135 117 9 8 17-23" stroke="white" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
         <path d="M63 119c-16-4-29 0-41 13M151 95c18-12 26-26 24-42M60 101c-17-13-32-15-45-6" stroke="var(--post-type-accent)" strokeWidth="5" strokeLinecap="round" opacity="0.55" />
+      </svg>
+    );
+  }
+
+  if (code === "ad") {
+    return (
+      <svg viewBox="0 0 180 150" fill="none" aria-hidden="true">
+        <path d="M14 147c20-33 54-49 101-48 29 0 51 9 65 27v21H14Z" fill="var(--post-type-wash)" />
+        <rect x="86" y="28" width="68" height="96" rx="10" fill="var(--post-type-light)" />
+        <path d="M98 50h44M98 66h30" stroke="var(--post-type-deep)" strokeWidth="6" strokeLinecap="round" />
+        <rect x="97" y="82" width="46" height="18" rx="9" fill="var(--post-type-accent)" />
+        <path d="M66 46h12M66 64h38M66 82h28" stroke="var(--post-type-accent)" strokeWidth="5" strokeLinecap="round" opacity="0.75" />
+        <path d="M43 112h52V78c0-10-8-18-18-18H61c-10 0-18 8-18 18v34Z" fill="var(--post-type-mid)" />
+        <path d="M43 112h52M57 78h24M56 94h26" stroke="var(--post-type-deep)" strokeWidth="4" strokeLinecap="round" />
+        <path d="M91 114h61" stroke="var(--post-type-deep)" strokeWidth="4" strokeLinecap="round" opacity="0.55" />
       </svg>
     );
   }

@@ -21,6 +21,12 @@ Create a brand-right, asset-grounded, poster-grade real-estate social creative t
 ## Fundamental Model
 post = communication_job × payload × asset_mode × style_family × style_modifiers × lever_bundle × truth_constraints
 
+For ad posts, also resolve:
+- commercial_hook
+- visual_mechanism
+
+These do not replace the poster system. They narrow the conversion hierarchy inside it.
+
 ## Critical Separation
 Do not confuse these:
 
@@ -68,6 +74,25 @@ Examples:
 6. chosen lever settings
 7. brand truth
 8. creative flourish
+
+## Commercial Fact Grounding
+Commercial facts are project truth, not optional copy decoration.
+They are also not a menu of claims to add by default. Use them when the original brief asks for that fact type or when an explicit grounding obligation requires it.
+
+When available project commercial facts are supplied and the brief asks for price, starting price, offer, booking amount, payment plan, area, size, or configuration:
+- use the exact supplied values
+- do not paraphrase numeric values, currency values, carpet areas, dates, or payment percentages
+- do not replace exact available values with generic phrases like "pricing information", "starting price text", "offer details", or "commercial hook"
+- do not invent missing commercial facts
+- if `startingPrice` exists and the brief asks to show price or starting price, the final prompt must include that exact starting price value
+- if `priceRangeByConfig` exists and the brief asks for configuration-wise pricing, use only the listed configuration-price lines
+- if `sizeRanges` exists and the brief asks for area, carpet area, or home size, use the exact listed range
+- if `currentOffers` exists and the brief asks for offers or booking benefits, use only the listed offers
+- if `currentOffers` is empty and the brief asks for offers, keep the hierarchy generic without inventing an offer
+- if `reraNumber` exists and the brief asks for RERA/compliance, use the exact listed number
+- if location facts exist and the brief asks for location/landmarks/connectivity, use only the listed locality, landmark, or travel-time facts
+
+Commercial fact obligations may be used even when no manual exact text was supplied. They are grounded project data, not user-invented copy.
 
 ## External Visual Inputs
 
@@ -250,6 +275,59 @@ Reject outputs that feel like:
   - pretty image but no usable ad hierarchy
   - generic promo poster feel
 
+### ad mechanism layer
+For ad posts, decide:
+- commercial_hook: what sells the ad
+- visual_mechanism: what visible device carries that hook
+
+Use only one dominant hook.
+
+Suggested commercial_hook values:
+- price
+- visit
+- location
+- amenity
+- configuration
+- offer
+- investment
+- trust
+- compliance
+- credibility
+
+Suggested visual_mechanism values:
+- price_billboard
+- comparison_cards
+- visit_ticket
+- location_receipt
+- offer_strip
+- value_stack
+- trust_seal
+- compliance_footer
+- credibility_band
+
+The hook should stop the scroll. The mechanism should make that hook obvious at a glance.
+
+### commercial fact grounding
+Use the original brief intent to decide which project facts are allowed.
+
+Return these structured fields when project/commercial facts are available:
+- requested_fact_types: fact kinds the original brief directly asks for, such as price, configuration, area, offer, rera, contact, location, possession, website
+- allowed_fact_kinds: the maximum fact kinds final prompts may mention
+- required_fact_copies: exact fact strings from project truth or the brief that final prompts must include
+- disallowed_available_fact_kinds: available fact kinds that were not requested
+- do_not_use_unless_requested: exact available facts to keep out unless their kind is requested
+
+Do not use available project facts as optional filler. If the brief asks for prices, use exact price facts. If it asks for RERA or compliance, use exact RERA facts. If it only asks for a trust-led or credibility-led ad, do not pull in prices, locations, area, contact, or RERA merely because those facts exist.
+
+Do not over-require facts:
+- configuration-wise pricing brief -> require only the exact requested configuration price values
+- starting price brief -> require only the exact starting price value
+- carpet area brief -> require only the exact area value
+- RERA/compliance brief -> require only the exact RERA value
+- "show only X" or "do not show Y" -> keep Y in disallowed_available_fact_kinds and do_not_use_unless_requested
+
+Never place payment plan, location advantages, landmarks, RERA, contact, website, offers, area, or starting price into required_fact_copies merely because the facts are available.
+
 ### site_visit_invite
 - business_job: show real on-ground presence, create credibility and human connection
 - persuasion_modes: authenticity, activity, trust, engagement
@@ -273,6 +351,13 @@ Return structured decisions for:
 - persuasion_modes
 - delivery_mode
 - poster_archetype
+- commercial_hook
+- visual_mechanism
+- requested_fact_types
+- allowed_fact_kinds
+- required_fact_copies
+- disallowed_available_fact_kinds
+- do_not_use_unless_requested
 - style_modifiers
 - hero_presentation
 - layout_geometry
