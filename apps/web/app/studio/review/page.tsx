@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import type { ReviewQueueEntry, WorkspaceMemberRecord } from "@image-lab/contracts";
-import { getReviewQueue, getWorkspaceMembers } from "../../../lib/api";
+import type { PostTypeRecord, ProjectRecord, ReviewQueueEntry, WorkspaceMemberRecord } from "@image-lab/contracts";
+import { getPostTypes, getProjects, getReviewQueue, getWorkspaceMembers } from "../../../lib/api";
+import { formatRelativeTime } from "../../../lib/formatters";
 import { DataTable } from "../data-table";
 import { deriveCreativeFormatFromDeliverable } from "../../../lib/deliverable-helpers";
+import { buildCreativePreviewSections } from "../../../lib/creative-preview-sections";
 import { ImagePreviewTrigger } from "../image-preview";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions, useRegisterTopbarControls } from "../topbar-actions-context";
@@ -26,7 +28,13 @@ const VIEW_MODES = [
 ] as const;
 
 type ReviewVerdict = "approved" | "close" | "off-brand";
-const REVIEW_PAGE_SIZE = 24;
+const REVIEW_PAGE_SIZE = 8;
+
+type CommentDialogState = {
+  outputId: string;
+  verdict: ReviewVerdict;
+  comment: string;
+} | null;
 
 export default function ReviewPage() {
   const searchParams = useSearchParams();
@@ -37,13 +45,17 @@ export default function ReviewPage() {
     pendingAction,
     pendingTargetKey,
     leaveFeedback,
-    setMessage
+    setMessage,
+    workspaceMembers: contextWorkspaceMembers
   } = useStudio();
   const [queue, setQueue] = useState<ReviewQueueEntry[]>([]);
-  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRecord[]>([]);
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [postTypes, setPostTypes] = useState<PostTypeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [recentApproval, setRecentApproval] = useState<{ deliverableId: string; postVersionId: string } | null>(null);
+  const [tableMode, setTableMode] = useState(false);
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRecord[]>([]);
   const focusedDeliverableId = searchParams.get("deliverableId");
   const initialScope =
     (searchParams.get("scope") as (typeof REVIEW_SCOPES)[number]["id"] | null) ?? "team";
@@ -51,6 +63,7 @@ export default function ReviewPage() {
   const [viewMode, setViewMode] = useState<(typeof VIEW_MODES)[number]["id"]>("cards");
   const [page, setPage] = useState(1);
   const [hasNextPage, setHasNextPage] = useState(false);
+  const [commentDialog, setCommentDialog] = useState<CommentDialogState>(null);
 
   const activeBrand = useMemo(
     () => bootstrap?.brands.find((brand) => brand.id === activeBrandId) ?? null,
@@ -127,21 +140,31 @@ export default function ReviewPage() {
     async function loadQueue() {
       try {
         setLoading(true);
-        const [entries, members] = await Promise.all([
-          getReviewQueue(token, {
-            scope,
-            limit: REVIEW_PAGE_SIZE + 1,
-            offset: (page - 1) * REVIEW_PAGE_SIZE,
-            ...(activeBrandId ? { brandId: activeBrandId } : {}),
-            ...(focusedDeliverableId ? { deliverableId: focusedDeliverableId } : {})
-          }),
-          getWorkspaceMembers(token)
-        ]);
+        const entries = await getReviewQueue(token, {
+          scope,
+          limit: REVIEW_PAGE_SIZE + 1,
+          offset: (page - 1) * REVIEW_PAGE_SIZE,
+          ...(activeBrandId ? { brandId: activeBrandId } : {}),
+          ...(focusedDeliverableId ? { deliverableId: focusedDeliverableId } : {})
+        });
+
+        if (cancelled) return;
+
+        setHasNextPage(entries.length > REVIEW_PAGE_SIZE);
+        setQueue(entries.slice(0, REVIEW_PAGE_SIZE));
+
+        if (tableMode) {
+          const [projectRecords, postTypeRecords] = await Promise.all([
+            getProjects(token, activeBrandId ? { brandId: activeBrandId } : undefined),
+            getPostTypes(token)
+          ]);
+          if (!cancelled) {
+            setProjects(projectRecords);
+            setPostTypes(postTypeRecords);
+          }
+        }
 
         if (!cancelled) {
-          setHasNextPage(entries.length > REVIEW_PAGE_SIZE);
-          setQueue(entries.slice(0, REVIEW_PAGE_SIZE));
-          setWorkspaceMembers(members);
           setError(null);
         }
       } catch (loadError) {
@@ -160,10 +183,49 @@ export default function ReviewPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeBrandId, focusedDeliverableId, page, scope, sessionToken]);
+  }, [activeBrandId, focusedDeliverableId, page, scope, sessionToken, tableMode]);
+
+  useEffect(() => {
+    if (tableMode && projects.length === 0 && sessionToken && activeBrandId) {
+      getProjects(sessionToken, { brandId: activeBrandId }).then(setProjects).catch(() => null);
+      getPostTypes(sessionToken).then(setPostTypes).catch(() => null);
+    }
+  }, [tableMode, projects.length, sessionToken, activeBrandId]);
+
+  useEffect(() => {
+    if (!sessionToken) {
+      setWorkspaceMembers([]);
+      return;
+    }
+
+    getWorkspaceMembers(sessionToken)
+      .then(setWorkspaceMembers)
+      .catch(() => setWorkspaceMembers([]));
+  }, [sessionToken]);
 
   const pageStart = queue.length === 0 ? 0 : (page - 1) * REVIEW_PAGE_SIZE + 1;
   const pageEnd = queue.length === 0 ? 0 : pageStart + queue.length - 1;
+  const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
+  const postTypeMap = useMemo(() => new Map(postTypes.map((postType) => [postType.id, postType])), [postTypes]);
+  const getPreviewSections = (entry: ReviewQueueEntry) => {
+    const format = deriveCreativeFormatFromDeliverable(
+      entry.deliverable.placementCode,
+      entry.deliverable.contentFormat,
+      entry.deliverable.sourceJson
+    );
+
+    return buildCreativePreviewSections({
+      brief: {
+        prompt: entry.deliverable.briefText ?? "",
+        channel: entry.deliverable.placementCode,
+        format
+      },
+      projectName: entry.deliverable.projectId ? projectMap.get(entry.deliverable.projectId)?.name : null,
+      postTypeName: postTypeMap.get(entry.deliverable.postTypeId)?.name,
+      channel: entry.deliverable.placementCode,
+      format
+    });
+  };
 
   const tableColumns = useMemo(
     () => [
@@ -189,15 +251,7 @@ export default function ReviewPage() {
               { label: "Created by", value: createdByLabel(entry.previewOutput?.createdBy ?? null, workspaceMembers) }
             ]}
             meta={`${formatOrdinal(entry.postVersion.versionNumber)} version`}
-            sections={[
-              {
-                title: "Review",
-                items: [
-                  { label: "Deliverable", value: entry.deliverable.title },
-                  { label: "Version", value: `${formatOrdinal(entry.postVersion.versionNumber)} version` }
-                ]
-              }
-            ]}
+            sections={getPreviewSections(entry)}
             src={entry.previewOutput?.originalUrl ?? entry.previewOutput?.previewUrl}
             title={entry.deliverable.title}
           >
@@ -310,12 +364,17 @@ export default function ReviewPage() {
         }
       }
     ],
-    [pendingAction, pendingTargetKey, workspaceMembers]
+    [pendingAction, pendingTargetKey, postTypeMap, projectMap, workspaceMembers]
   );
 
   async function handleDecision(outputId: string | null, verdict: ReviewVerdict) {
     if (!outputId) {
       setMessage("This review item is missing a preview output.");
+      return;
+    }
+
+    if (verdict === "close") {
+      setCommentDialog({ outputId, verdict, comment: "" });
       return;
     }
 
@@ -331,6 +390,21 @@ export default function ReviewPage() {
       });
     }
 
+    try {
+      setQueue((current) => current.filter((entry) => entry.previewOutput?.id !== outputId));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Failed to update review queue");
+    }
+  }
+
+  async function handleCommentSubmit() {
+    if (!commentDialog) return;
+    const { outputId, verdict, comment } = commentDialog;
+    setCommentDialog(null);
+    const result = await leaveFeedback(outputId, verdict, comment);
+    if (!result || !sessionToken) {
+      return;
+    }
     try {
       setQueue((current) => current.filter((entry) => entry.previewOutput?.id !== outputId));
     } catch (loadError) {
@@ -392,6 +466,7 @@ export default function ReviewPage() {
               pendingTargetKey={pendingTargetKey}
               reviewerLabelFor={(reviewerUserId) => reviewerLabel(reviewerUserId, workspaceMembers)}
               createdByLabelFor={(createdBy) => createdByLabel(createdBy, workspaceMembers)}
+              getPreviewSections={getPreviewSections}
               focusedDeliverableId={focusedDeliverableId}
             />
           ) : (
@@ -484,6 +559,68 @@ export default function ReviewPage() {
           ) : null}
         </div>
       </section>
+      {commentDialog && (
+        <div
+          className="modal-overlay"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: "rgba(0,0,0,0.5)"
+          }}
+          onClick={() => setCommentDialog(null)}
+        >
+          <div
+            className="comment-dialog"
+            style={{
+              background: "var(--paper-soft)",
+              borderRadius: "12px",
+              padding: "24px",
+              width: "min(480px, 90vw)",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)"
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ marginBottom: "8px" }}>Add feedback</h3>
+            <p style={{ color: "var(--ink-soft)", marginBottom: "16px" }}>Explain what needs to change for this option.</p>
+            <textarea
+              className="comment-textarea"
+              placeholder="Describe the changes needed..."
+              value={commentDialog.comment}
+              onChange={(e) => setCommentDialog({ ...commentDialog, comment: e.target.value })}
+              rows={4}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: "8px",
+                border: "1px solid var(--line)",
+                fontSize: "14px",
+                resize: "vertical"
+              }}
+            />
+            <div className="comment-dialog-actions" style={{ display: "flex", gap: "12px", marginTop: "16px", justifyContent: "flex-end" }}>
+              <button
+                className="button button-ghost"
+                onClick={() => setCommentDialog(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="button button-primary"
+                disabled={commentDialog.comment.trim().length < 3}
+                onClick={() => void handleCommentSubmit()}
+                type="button"
+              >
+                Save feedback
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -496,6 +633,7 @@ function ReviewCardGallery({
   pendingTargetKey,
   reviewerLabelFor,
   createdByLabelFor,
+  getPreviewSections,
   focusedDeliverableId
 }: {
   entries: ReviewQueueEntry[];
@@ -505,6 +643,7 @@ function ReviewCardGallery({
   pendingTargetKey: string | null;
   reviewerLabelFor: (reviewerUserId: string | null) => string;
   createdByLabelFor: (createdBy: string | null) => string;
+  getPreviewSections: (entry: ReviewQueueEntry) => ReturnType<typeof buildCreativePreviewSections>;
   focusedDeliverableId: string | null;
 }) {
   if (loading) {
@@ -596,6 +735,7 @@ function ReviewCardGallery({
                   { label: "Placement", value: format },
                   { label: "Created by", value: createdByLabelFor(entry.previewOutput?.createdBy ?? null) }
                 ]}
+                sections={getPreviewSections(entry)}
                 src={entry.previewOutput?.originalUrl ?? entry.previewOutput?.previewUrl}
                 subtitle={entry.deliverable.briefText ?? "Ready for review"}
                 title={entry.deliverable.title}
@@ -615,9 +755,9 @@ function ReviewCardGallery({
               <div className="work-gallery-copy">
                 <Link href={`/studio/deliverables/${entry.deliverable.id}`}>{entry.deliverable.title}</Link>
                 <p>Created by: {createdByLabelFor(entry.previewOutput?.createdBy ?? null)}</p>
-              </div>
-              <div className="work-gallery-footer">
-                <PlacementIcons channel={entry.deliverable.placementCode} compact format={format} interactive={false} />
+                {entry.previewOutput?.createdAt && (
+                  <p className="work-gallery-time">{formatRelativeTime(entry.previewOutput.createdAt)}</p>
+                )}
               </div>
                 <div className="review-decision-group">
                   <FloatingTooltip content="Approve">

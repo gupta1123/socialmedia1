@@ -1,8 +1,30 @@
+export function formatRelativeTime(date: string | Date | null) {
+  if (!date) return "";
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "";
+
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday = d.toDateString() === yesterday.toDateString();
+
+  const timeStr = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+
+  if (isToday) {
+    return `Today ${timeStr}`;
+  }
+  if (isYesterday) {
+    return `Yesterday ${timeStr}`;
+  }
+  return `${d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })} ${timeStr}`;
+}
+
 export function formatDisplayDate(date: string | Date | null) {
   if (!date) return "";
   const d = new Date(date);
   if (isNaN(d.getTime())) return "Unknown";
-  
+
   return d.toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",

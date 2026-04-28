@@ -9,12 +9,13 @@ export const AssetSubjectTypeSchema = z.enum([
   "amenity",
   "interior",
   "sample_flat",
+  "location_map",
   "lifestyle",
   "logo",
   "rera_qr",
   "generic_reference"
 ]);
-export const AssetViewTypeSchema = z.enum(["aerial", "wide", "facade", "close_up", "street", "site", "interior"]);
+export const AssetViewTypeSchema = z.enum(["aerial", "wide", "facade", "close_up", "street", "site", "interior", "map"]);
 export const AssetUsageIntentSchema = z.enum(["truth_anchor", "supporting_ref", "inspiration_only", "exact_asset"]);
 export const AssetQualityTierSchema = z.enum(["hero", "usable", "weak"]);
 export const ProjectStageSchema = z.enum(["pre_launch", "launch", "under_construction", "near_possession", "delivered"]);
@@ -73,6 +74,7 @@ export const CreativeChannelSchema = z.enum([
   "ad-creative"
 ]);
 export const CreativeFormatSchema = z.enum(["square", "portrait", "landscape", "story", "cover"]);
+export const CopyLanguageSchema = z.enum(["en", "hi", "mr", "gu", "kn", "ta", "te", "bn"]);
 export const TemplateTypeSchema = z.enum([
   "hero",
   "product-focus",
@@ -679,6 +681,7 @@ export const CreativeBriefSchema = z.object({
   prompt: z.string().min(10),
   audience: z.string().optional(),
   copyMode: z.enum(["manual", "auto"]).default("manual"),
+  copyLanguage: CopyLanguageSchema.optional(),
   offer: z.string().optional(),
   exactText: z.string().optional(),
   referenceAssetIds: z.array(z.string().uuid()).default([]),
@@ -1068,7 +1071,7 @@ export const PostTypeContractSchema = z.object({
   requiredFields: z.array(z.string()).default([]),
   safeZoneGuidance: z.array(z.string()).default([]),
   amenityFocus: z.string().nullable().default(null),
-  amenitySelectionSource: z.enum(["explicit", "inferred", "none"]).default("none")
+  amenitySelectionSource: z.enum(["explicit", "inferred", "none", "user_selected"]).default("none")
 });
 
 export const FestivalTruthSchema = z.object({
@@ -1366,9 +1369,22 @@ export const CreativeOutputSchema = z.object({
   latestVerdict: OutputVerdictSchema.nullable().default(null),
   reviewedAt: z.string().nullable().default(null),
   createdBy: z.string().uuid().nullable().default(null),
+  createdAt: z.string().optional(),
   previewUrl: z.string().url().optional(),
   thumbnailUrl: z.string().url().optional(),
-  originalUrl: z.string().url().optional()
+  originalUrl: z.string().url().optional(),
+  previewContext: z
+    .object({
+      brief: CreativeBriefSchema.partial().nullable().default(null),
+      projectName: z.string().nullable().default(null),
+      postTypeName: z.string().nullable().default(null),
+      channel: CreativeChannelSchema.optional(),
+      format: CreativeFormatSchema.optional(),
+      aspectRatio: z.string().nullable().default(null),
+      templateType: TemplateTypeSchema.optional()
+    })
+    .nullable()
+    .default(null)
 });
 
 export const EditorSaveModeSchema = z.enum(["new", "version", "replace"]);
@@ -1763,7 +1779,8 @@ export const BootstrapResponseSchema = z.object({
   projectReraRegistrations: z.array(ProjectReraRegistrationSchema).default([]),
   styleTemplates: z.array(StyleTemplateSchema),
   recentJobs: z.array(CreativeJobSchema),
-  recentOutputs: z.array(CreativeOutputSchema)
+  recentOutputs: z.array(CreativeOutputSchema),
+  workspaceMembers: z.array(WorkspaceMemberSchema).default([])
 });
 
 export type WorkspaceRole = z.infer<typeof WorkspaceRoleSchema>;

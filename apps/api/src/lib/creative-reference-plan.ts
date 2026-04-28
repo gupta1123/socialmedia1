@@ -2,6 +2,7 @@ export type RoleAwareReferencePlan = {
   primaryAnchor: { role: "template" | "source_post"; label: string; storagePath: string } | null;
   sourcePost: { role: "source_post"; label: string; storagePath: string } | null;
   amenityAnchor: { role: "amenity_image"; label: string; storagePath: string; amenityName: string | null } | null;
+  locationMapAnchor: { role: "location_map"; label: string; storagePath: string } | null;
   projectAnchor: { role: "project_image"; label: string; storagePath: string } | null;
   brandLogo: { role: "brand_logo"; label: string; storagePath: string } | null;
   complianceQr: { role: "rera_qr"; label: string; storagePath: string } | null;
@@ -13,6 +14,7 @@ export function collectReferenceStoragePaths(plan: RoleAwareReferencePlan) {
     plan.primaryAnchor?.storagePath,
     plan.sourcePost?.storagePath,
     plan.amenityAnchor?.storagePath,
+    plan.locationMapAnchor?.storagePath,
     plan.projectAnchor?.storagePath,
     plan.brandLogo?.storagePath,
     plan.complianceQr?.storagePath,
@@ -59,10 +61,14 @@ export function filterReferenceStoragePathsForPrompt(
     postTypeCode === "construction-update" ||
     postTypeCode === "ad" ||
     postTypeCode === "project-launch" ||
-    postTypeCode === "site-visit-invite" ||
-    postTypeCode === "location-advantage"
+    postTypeCode === "site-visit-invite"
   ) {
     pushProjectTruthFallback();
+  } else if (postTypeCode === "location-advantage") {
+    pushProjectTruthFallback();
+    if (plan.locationMapAnchor?.storagePath) {
+      pushSecondary(plan.locationMapAnchor.storagePath);
+    }
   } else if (postTypeCode === "sample-flat-showcase") {
     pushProjectTruthFallback();
     pushSecondary(plan.primaryAnchor?.storagePath);
@@ -166,6 +172,12 @@ export function buildV2RoleAwarePrompt(
     );
   }
 
+  if (postTypeCode === "location-advantage" && plan.locationMapAnchor) {
+    roleLines.push(
+      `Attach the location map (${plan.locationMapAnchor.label}) as a compact proof panel showing connectivity landmarks. Use it as a secondary context element alongside the project hero, not as the main subject.`
+    );
+  }
+
   roleLines.push(
     mode === "seed"
       ? "One complete style direction only; no grid, collage, contact sheet, or multiple poster options."
@@ -184,6 +196,13 @@ function getHeroReferenceForPostType(plan: RoleAwareReferencePlan, postTypeCode:
     return plan.amenityAnchor?.storagePath ? [plan.amenityAnchor.storagePath] : [];
   }
 
+  if (postTypeCode === "location-advantage") {
+    return [
+      plan.projectAnchor?.storagePath,
+      plan.locationMapAnchor?.storagePath
+    ].filter((value, index, values): value is string => typeof value === "string" && values.indexOf(value) === index);
+  }
+
   const fallbackProjectTruth = getProjectTruthFallbackReference(plan);
 
   return [
@@ -191,7 +210,7 @@ function getHeroReferenceForPostType(plan: RoleAwareReferencePlan, postTypeCode:
     plan.amenityAnchor?.storagePath,
     fallbackProjectTruth,
     plan.primaryAnchor?.storagePath
-  ].filter((value, index, values): value is string => typeof value === "string" && value.length > 0 && values.indexOf(value) === index);
+  ].filter((value, index, values): value is string => typeof value === "string" && values.indexOf(value) === index);
 }
 
 function getAssetForPath(plan: RoleAwareReferencePlan, storagePath: string): { role: string; label: string } | null {

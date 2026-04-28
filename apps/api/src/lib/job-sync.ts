@@ -4,7 +4,7 @@ import { getFalResult, getFalStatus } from "./fal.js";
 import { buildStoragePath, randomId } from "./utils.js";
 import { ensurePostVersionForOutput } from "./deliverable-flow.js";
 import { env } from "./config.js";
-import { createThumbnailFromStorage } from "./thumbnails.js";
+import { createThumbnailFromStorageOrNull } from "./thumbnails.js";
 import {
   isReservationAlreadySettledError,
   releaseWorkspaceCreditReservation,
@@ -298,7 +298,10 @@ export async function persistCompletedJobImages(row: PersistableJobRow, images: 
       });
 
       await ingestRemoteImageToStorage(storagePath, image.url);
-      const thumbnail = await createThumbnailFromStorage(storagePath).catch(() => null);
+      const thumbnail = await createThumbnailFromStorageOrNull(storagePath, {
+        source: "completed_job_image",
+        mimeType: "image/png"
+      });
 
       return {
         id: outputId,

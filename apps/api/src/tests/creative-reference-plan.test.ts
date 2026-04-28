@@ -11,6 +11,7 @@ describe("creative reference plan", () => {
       primaryAnchor: null,
       sourcePost: null,
       amenityAnchor: null,
+      locationMapAnchor: null,
       projectAnchor: {
         role: "project_image",
         label: "Miami elevation Cam011Final_1.jpg",
@@ -37,6 +38,7 @@ describe("creative reference plan", () => {
       primaryAnchor: null,
       sourcePost: null,
       amenityAnchor: null,
+      locationMapAnchor: null,
       projectAnchor: null,
       brandLogo: {
         role: "brand_logo",
@@ -70,6 +72,7 @@ describe("creative reference plan", () => {
       primaryAnchor: null,
       sourcePost: null,
       amenityAnchor: null,
+      locationMapAnchor: null,
       projectAnchor: {
         role: "project_image",
         label: "Miami elevation Cam011Final_1.jpg",
@@ -109,6 +112,7 @@ describe("creative reference plan", () => {
         storagePath: "amenities/pool.jpg",
         amenityName: "Swimming Pool"
       },
+      locationMapAnchor: null,
       projectAnchor: {
         role: "project_image",
         label: "Building hero",

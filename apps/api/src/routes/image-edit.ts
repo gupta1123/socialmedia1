@@ -17,7 +17,7 @@ import {
 import { assertWorkspaceRole, getActiveBrandProfile, getBrand, getPrimaryWorkspace } from "../lib/repository.js";
 import { createSignedImageUrls, uploadBufferToStorage } from "../lib/storage.js";
 import { supabaseAdmin } from "../lib/supabase.js";
-import { createThumbnailFromBuffer } from "../lib/thumbnails.js";
+import { createThumbnailFromBufferOrNull } from "../lib/thumbnails.js";
 import { ensurePostVersionForOutput } from "../lib/deliverable-flow.js";
 import { buildStoragePath, deriveAspectRatio, randomId, slugify } from "../lib/utils.js";
 import sharp from "sharp";
@@ -534,7 +534,10 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
           });
 
     await uploadBufferToStorage(storagePath, imagePart.buffer, imagePart.mimetype, true);
-    const thumbnail = await createThumbnailFromBuffer(storagePath, imagePart.buffer).catch(() => null);
+    const thumbnail = await createThumbnailFromBufferOrNull(storagePath, imagePart.buffer, {
+      source: "image_edit_save",
+      mimeType: imagePart.mimetype
+    });
     const dimensions = await getImageDimensions(imagePart.buffer).catch(() => ({
       width: undefined,
       height: undefined

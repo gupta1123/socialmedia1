@@ -40,10 +40,10 @@ import {
   listReviewQueue
 } from "../lib/deliverables-repository.js";
 import { getCreativeTemplate, getPostType, getProject } from "../lib/planning-repository.js";
-import { invalidateRuntimeCache } from "../lib/runtime-cache.js";
+import { getOrPopulateRuntimeCache, invalidateRuntimeCache } from "../lib/runtime-cache.js";
 import { createSignedImageUrls, removeStorageObjects, uploadBufferToStorage } from "../lib/storage.js";
 import { supabaseAdmin } from "../lib/supabase.js";
-import { createThumbnailFromBuffer } from "../lib/thumbnails.js";
+import { createThumbnailFromBufferOrNull } from "../lib/thumbnails.js";
 import { buildStoragePath, deriveAspectRatio, randomId } from "../lib/utils.js";
 
 export async function registerDeliverableRoutes(app: FastifyInstance) {
@@ -341,7 +341,10 @@ export async function registerDeliverableRoutes(app: FastifyInstance) {
 
     try {
       await uploadBufferToStorage(storagePath, filePart.buffer, filePart.mimetype);
-      thumbnail = await createThumbnailFromBuffer(storagePath, filePart.buffer).catch(() => null);
+      thumbnail = await createThumbnailFromBufferOrNull(storagePath, filePart.buffer, {
+        source: "deliverable_external_upload",
+        mimeType: filePart.mimetype
+      });
 
       const { error: deliverableError } = await supabaseAdmin.from("deliverables").insert({
       id: deliverableId,
@@ -833,12 +836,18 @@ export async function registerDeliverableRoutes(app: FastifyInstance) {
     const scope = query.scope === "my" || query.scope === "team" || query.scope === "unassigned" ? query.scope : "team";
     const parsedLimit = Number.parseInt(query.limit ?? "", 10);
     const parsedOffset = Number.parseInt(query.offset ?? "", 10);
-    const items = await listReviewQueue(workspace.id, query.brandId, query.deliverableId, {
-      scope,
-      reviewerUserId: viewer.userId,
-      ...(Number.isFinite(parsedLimit) ? { limit: parsedLimit } : {}),
-      ...(Number.isFinite(parsedOffset) ? { offset: parsedOffset } : {})
+
+    const cacheKey = `review-queue:${workspace.id}:${query.brandId ?? "all"}:${query.deliverableId ?? "all"}:${scope}:${parsedLimit}:${parsedOffset}`;
+
+    const items = await getOrPopulateRuntimeCache(cacheKey, 5000, async () => {
+      return listReviewQueue(workspace.id, query.brandId, query.deliverableId, {
+        scope,
+        reviewerUserId: viewer.userId,
+        ...(Number.isFinite(parsedLimit) ? { limit: parsedLimit } : {}),
+        ...(Number.isFinite(parsedOffset) ? { offset: parsedOffset } : {})
+      });
     });
+
     const signedItems = await Promise.all(
       items.map(async (item) => {
         if (!item.previewOutput) {

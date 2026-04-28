@@ -1,5 +1,5 @@
 import type { BrandAssetRecord, CreativeBrief, PostTypeRecord, ProjectProfile } from "@image-lab/contracts";
-import { resolveAmenityFocus } from "./creative-reference-selection.js";
+import { resolveAmenityFocus, resolveAmenityFocusFromSelectedAssets } from "./creative-reference-selection.js";
 import { deriveAspectRatio } from "./utils.js";
 
 type PostTypePromptInput = {
@@ -10,6 +10,7 @@ type PostTypePromptInput = {
   projectProfile: ProjectProfile | null | undefined;
   brandAssets?: BrandAssetRecord[] | null | undefined;
   projectId?: string | null | undefined;
+  selectedReferenceAssetIds?: string[] | null;
 };
 
 type PostTypeVisualRecipe = {
@@ -36,7 +37,7 @@ export type PostTypePromptGuidance = {
     recipeDirection: string;
     negativePrompt: string;
     amenityFocus?: string | null;
-    amenitySelectionSource?: "explicit" | "inferred" | "none";
+    amenitySelectionSource?: "explicit" | "inferred" | "none" | "user_selected";
     commercialHook?: string | null;
     visualMechanism?: string | null;
     playbookKey?: string | null;
@@ -746,6 +747,42 @@ function buildLocationAdvantageGuidance(
           "Premium real-estate editorial, quiet confidence, urban context, crisp hierarchy, restrained graphics.",
         negativePrompt:
           "map-heavy flyer, fake metro map, unsupported location claims, busy arrows, dense landmark list, noisy brochure clutter, watermark, typo-heavy text"
+      },
+      {
+        key: "map_backdrop_project_hero",
+        direction: "Map-backdrop project-hero poster where a softened or cropped map layer provides context while the project building appears as the recognizable hero.",
+        hero:
+          "Composite the project image as the primary subject, with a subdued map backdrop providing landmark context. The map should be visually de-emphasized—softened, cropped, or partially clipped—so the project remains the focal point.",
+        layout:
+          "Place the project hero in the center or right field with enough negative space for typography. Let the map occupy the upper-left or lower portion with low contrast and subtle blending, not a visible frame or border.",
+        typography:
+          "Use a strong editorial headline that leads with the location advantage theme, such as 'Well Connected' or 'At the Heart of It All', with one supporting line for context. Keep the text area clear and premium.",
+        supportingSystem:
+          "Include a small landmark proof strip or callout badges for only the verified nearby destinations shown in the map—do not add extra landmarks beyond what the map shows. Keep this element small and understated.",
+        footer:
+          "Use a minimal footer with project and brand attribution only. No dense fact panels.",
+        styleMood:
+          "Editorial, premium, confident, map-aware but not map-centric. Architectural hero with contextual backdrop.",
+        negativePrompt:
+          "raw map screenshot without project overlay, map dominating the frame, invented landmarks, dense location list, brochure clutter, watermark"
+      },
+      {
+        key: "split_context_proof",
+        direction: "Split-context proof poster with project hero on one side and a compact map proof panel on the other, clearly separated but visually balanced.",
+        hero:
+          "Show the project building or exterior on one half as the dominant hero, with a clearly bounded map panel on the opposite side showing nearby landmarks and connectivity.",
+        layout:
+          "Divide the frame roughly 50/50 or 60/40 between project and map. Use a clean divider line or subtle gap—no bleeding between the two zones. Each zone should be clearly readable and premium.",
+        typography:
+          "Place headline text in the project zone with the project name prominent. Use the map zone for landmark labels or a small connectivity legend. Keep type minimal and premium.",
+        supportingSystem:
+          "The map panel should show only verified landmarks from the supplied map. No invented locations, travel times, or metro claims. The panel should feel designed, not like a screenshot.",
+        footer:
+          "Small project and brand attribution in the project zone footer only.",
+        styleMood:
+          "Balanced, premium, dual-context, structured. Clear separation between project identity and location proof.",
+        negativePrompt:
+          "bleeding split with no clear divider, map dominating project zone, raw map screenshot, dense landmark list, watermark"
       }
     ],
     buildSeed(input)
@@ -1010,7 +1047,18 @@ function compactStrings(values: Array<string | null | undefined>) {
 
 function chooseAmenityFocus(
   input: PostTypePromptInput
-): { focusAmenity: string | null; source: "explicit" | "inferred" | "none" } {
+): { focusAmenity: string | null; source: "explicit" | "inferred" | "none" | "user_selected" } {
+  const selectedRefs = input.selectedReferenceAssetIds ?? [];
+  if (selectedRefs.length > 0 && input.brandAssets) {
+    const userSelectedFocus = resolveAmenityFocusFromSelectedAssets(selectedRefs, input.brandAssets);
+    if (userSelectedFocus.focusAmenity) {
+      return {
+        focusAmenity: userSelectedFocus.focusAmenity,
+        source: "user_selected"
+      };
+    }
+  }
+
   const selection = resolveAmenityFocus({
     briefText: [input.brief.prompt, input.brief.exactText ?? ""].join(" "),
     projectAmenityNames: [

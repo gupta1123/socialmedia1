@@ -25,6 +25,6 @@ export function resolvePlacementForPostTypeSelection(params: {
   return {
     channel: nextChannel,
     format: nextFormat,
-    templateType: current.templateType ?? postType?.config.recommendedTemplateTypes[0] ?? "announcement"
+    templateType: current.templateType ?? postType?.config.recommendedTemplateTypes[0]
   };
 }

@@ -553,6 +553,42 @@ def repair_analysis_grounding(
     return analysis
 
 
+def repair_location_advantage_archetype(
+    payload: dict[str, Any], analysis: NotebookBriefAnalysis
+) -> NotebookBriefAnalysis:
+    if analysis.post_type != PostType.location_advantage:
+        return analysis
+
+    split_context_archetypes = {
+        "split_panel",
+        "left_copy_right_hero",
+        "right_copy_left_hero",
+        "claim_panel_side_crop",
+        "balanced_card_layout",
+    }
+
+    if analysis.poster_archetype.value in split_context_archetypes:
+        return analysis
+
+    bundle = truth_bundle_from_payload(payload)
+    available_facts = (analysis.available_commercial_facts or []) if hasattr(analysis, "available_commercial_facts") else []
+    location_facts = [f for f in available_facts if f and any(term in f.lower() for term in ["km", "road", "hospital", "mall", "station", "annexe", "manjari"])]
+
+    analysis.poster_archetype = PosterArchetype.split_panel
+    analysis.layout_geometry = LayoutGeometry.split_panel
+    analysis.graphic_layer = [GraphicLayer.geometric_blocks]
+
+    repair_note = (
+        "System repair applied: location-advantage requires a split-context proof archetype "
+        "with project hero on one side and a compact map/connectivity panel on the other. "
+        "Corrected poster_archetype to split_panel and layout_geometry to split_panel."
+    )
+    if repair_note not in analysis.conflict_notes:
+        analysis.conflict_notes.append(repair_note)
+
+    return analysis
+
+
 def replacement_label_for_asset(asset: dict[str, Any], bundle: dict[str, Any]) -> str:
     exact_assets = bundle.get("exactAssetContract") or {}
     asset_id = asset.get("id")
@@ -894,6 +930,8 @@ def build_agents() -> dict[str, Any]:
                 "15. If asset_decision.source='uploaded_reference', copy filepath verbatim from the input, set filename to the basename of the chosen path, and set reference_tag=null.",
                 "16. Use asset_decision.source='none' only when visual_mode is graphic_led or no truthful visual anchor fits.",
                 "17. For ad post types, choose exactly one dominant commercial_hook and one visual_mechanism. Keep them narrow and conversion-oriented rather than stylistic.",
+                "18. For location-advantage, MUST use a split-context proof archetype (split_panel, left_copy_right_hero, right_copy_left_hero, claim_panel_side_crop, or balanced_card_layout). The output must include a project hero on one side and a compact map/connectivity proof panel on the other. Do NOT use philosophy_open_field, white_space_editorial_statement, or other single-hero archetypes.",
+                "19. For location-advantage, commercial_hook MUST be 'location' and the visual must surface connectivity facts (nearby landmarks, travel times, location advantages) in a visual proof panel, not just in copy.",
                 "",
                 "Non-negotiable rules:",
                 "- Do not fabricate filenames, filepaths, reference_tags, or template ids.",
@@ -976,11 +1014,13 @@ def build_agents() -> dict[str, Any]:
                 "",
                 "Revision rules:",
                 "- Reject outputs where construction_update has no truthful primary asset while a project-library construction asset exists.",
+                "- Reject outputs where location-advantage uses a single-hero archetype (philosophy_open_field, white_space_editorial_statement, etc.) without a split-context proof panel showing map/connectivity facts.",
                 "- Reject outputs that describe a generic facade crop or generic documentary poster without a grounded primary asset.",
                 "- Reject outputs where the template image is likely to override project identity.",
                 "- Reject outputs where the logo could be distorted or rewritten.",
                 "- Reject outputs that feel like a plain hero image plus normal text.",
                 "- Reject outputs where the selected style family is named but not visibly executed.",
+                "- For location-advantage, reject if the prompt does not describe a split layout with project hero AND a separate connectivity/map proof panel.",
                 "",
                 "Approval rules:",
                 "- Approve only if the prompt is grounded, specific, recognisable, and poster-grade.",
@@ -1032,6 +1072,7 @@ def execute_with_trace(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[st
         images=run_images,
     )
     analysis = repair_analysis_grounding(normalized_payload, analyst_traced["content"])
+    analysis = repair_location_advantage_archetype(normalized_payload, analysis)
 
     crafter_traced = run_agent_with_trace(
         agents["crafter"],

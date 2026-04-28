@@ -15,6 +15,7 @@ import type {
   CreativeFormat,
   CreativeTemplateRecord,
   DeliverableRecord,
+  BrandAssetRecord,
   FestivalRecord,
   ObjectiveCode,
   PostTypeRecord,
@@ -56,6 +57,12 @@ import { SkeletonRow } from "../skeleton";
 
 // ─── Stepper phase enum ───────────────────────────────────────────────────────
 type GeneratePhase = "idle" | "exploring" | "picking" | "creating" | "done";
+type OneStageGenerationUiSession = {
+  id: string;
+  expectedCount: number;
+  phase: "compiling" | "submitting" | "rendering";
+  promptPackageId?: string;
+};
 type CreatePicker =
   | "post-task"
   | "project"
@@ -104,6 +111,23 @@ const MAX_REFERENCE_SELECTION = 2;
 // Temporarily hidden from Create while reference/template routing is being cleaned up.
 const SHOW_CREATE_TEMPLATE_CONTROLS = false;
 const SHOW_CREATE_REFERENCE_CONTROLS = false;
+const AMENITY_REFERENCE_TERMS = [
+  "amenity",
+  "clubhouse",
+  "pool",
+  "gym",
+  "lounge",
+  "garden",
+  "terrace",
+  "deck",
+  "play",
+  "plaza",
+  "theatre",
+  "amphitheater",
+  "cafe",
+  "jacuzzi",
+  "cricket"
+];
 const POST_TYPE_BRIEF_STARTERS: Record<string, string> = {
   "project-launch": "Introduce the project with a premium hero visual and a strong first-impression feel.",
   ad: "Create a premium ad with one clear commercial hook, strong mobile readability, and a restrained but action-oriented hierarchy.",
@@ -134,6 +158,16 @@ const TARGET_AUDIENCE_OPTIONS = [
   "Commercial investors",
   "Channel partners"
 ] as const;
+const COPY_LANGUAGE_OPTIONS: Array<{ value: CreativeBrief["copyLanguage"]; label: string }> = [
+  { value: "en", label: "English" },
+  { value: "hi", label: "Hindi" },
+  { value: "mr", label: "Marathi" },
+  { value: "gu", label: "Gujarati" },
+  { value: "kn", label: "Kannada" },
+  { value: "ta", label: "Tamil" },
+  { value: "te", label: "Telugu" },
+  { value: "bn", label: "Bengali" }
+];
 const CREATIVE_DIRECTION_OPTIONS: Array<{ value: NonNullable<CreativeBrief["templateType"]>; label: string }> = [
   { value: "announcement", label: "Editorial" },
   { value: "hero", label: "Image-led" },
@@ -311,10 +345,13 @@ function CreatePageContent() {
   const [runRefreshToken, setRunRefreshToken] = useState(0);
   const [pendingCanvasAction, setPendingCanvasAction] = useState<"explore" | null>(null);
   const [pendingGenerationTargetCount, setPendingGenerationTargetCount] = useState<number | null>(null);
+  const [oneStageGenerationSession, setOneStageGenerationSession] =
+    useState<OneStageGenerationUiSession | null>(null);
   const [activePicker, setActivePicker] = useState<CreatePicker | null>(null);
   const [pickerQuery, setPickerQuery] = useState("");
   const [postTaskStatusFilter, setPostTaskStatusFilter] = useState<PostTaskPickerStatusFilter>("all");
   const [postTaskProjectFilter, setPostTaskProjectFilter] = useState<string>("all");
+  const [festivalFilter, setFestivalFilter] = useState<"all" | "upcoming">("upcoming");
   const [campaignCreateForm, setCampaignCreateForm] = useState<CampaignCreateFormState>(
     createDefaultCampaignCreateForm
   );
@@ -336,6 +373,7 @@ function CreatePageContent() {
     setPickerQuery("");
     setPostTaskStatusFilter("all");
     setPostTaskProjectFilter("all");
+    setFestivalFilter("upcoming");
   }, [activePicker]);
 
   useEffect(() => {
@@ -540,6 +578,10 @@ function CreatePageContent() {
     () => postTypes.find((p) => p.id === briefForm.postTypeId) ?? null,
     [briefForm.postTypeId, postTypes]
   );
+  const isAmenitySpotlight = selectedPostType?.code === "amenity-spotlight";
+  const isFestiveGreeting = selectedPostType?.code === "festive-greeting";
+  const disallowsReferenceSelection = isFestiveGreeting;
+  const allowsReferenceImages = SHOW_CREATE_REFERENCE_CONTROLS && !disallowsReferenceSelection;
   const selectedFestival = useMemo(
     () => festivals.find((festival) => festival.id === briefForm.festivalId) ?? null,
     [briefForm.festivalId, festivals]
@@ -587,8 +629,18 @@ function CreatePageContent() {
     [adaptationCandidates, briefForm.sourceOutputId]
   );
   const referenceEligibleAssets = useMemo(
-    () => activeAssets.filter((asset) => asset.kind !== "logo" && asset.kind !== "rera_qr"),
-    [activeAssets]
+    () =>
+      allowsReferenceImages
+        ? activeAssets.filter((asset) => {
+            if (asset.kind === "logo" || asset.kind === "rera_qr") return false;
+            return isAmenitySpotlight ? isAmenityReferenceAsset(asset) : true;
+          })
+        : [],
+    [activeAssets, allowsReferenceImages, isAmenitySpotlight]
+  );
+  const referenceEligibleAssetIds = useMemo(
+    () => new Set(referenceEligibleAssets.map((asset) => asset.id)),
+    [referenceEligibleAssets]
   );
   const selectedReferenceAssets = useMemo(
     () =>
@@ -724,8 +776,16 @@ function CreatePageContent() {
           .toLowerCase();
 
         return haystack.includes(normalizedPickerQuery);
+      }).filter((festival) => {
+        if (festivalFilter === "all") return true;
+        if (!festival.nextOccursOn) return false;
+        const nextDate = new Date(festival.nextOccursOn);
+        const now = new Date();
+        const in90Days = new Date();
+        in90Days.setDate(in90Days.getDate() + 90);
+        return nextDate >= now && nextDate <= in90Days;
       }),
-    [festivals, normalizedPickerQuery]
+    [festivals, normalizedPickerQuery, festivalFilter]
   );
   const filteredTemplates = useMemo(
     () =>
@@ -804,13 +864,41 @@ function CreatePageContent() {
       }),
     [campaignPlans, normalizedPickerQuery, postTypes]
   );
-  const filteredReferenceAssets = useMemo(
-    () =>
-      referenceEligibleAssets.filter((asset) =>
-        normalizedPickerQuery ? asset.label.toLowerCase().includes(normalizedPickerQuery) : true
-      ),
-    [normalizedPickerQuery, referenceEligibleAssets]
-  );
+  const filteredReferenceAssets = useMemo(() => {
+    const queryFiltered = referenceEligibleAssets.filter((asset) =>
+      normalizedPickerQuery ? asset.label.toLowerCase().includes(normalizedPickerQuery) : true
+    );
+    if (!selectedPostType?.code) {
+      return queryFiltered;
+    }
+    const postTypeCode = selectedPostType.code;
+    const projectId = briefForm.projectId;
+    const getAssetScore = (asset: (typeof queryFiltered)[number]) => {
+      const metadata = asset.metadataJson as Record<string, unknown> | null;
+      const subjectType = typeof metadata?.subjectType === "string" ? metadata.subjectType : "";
+      const isProjectAsset = asset.projectId === projectId;
+      let score = 0;
+      if (postTypeCode === "amenity-spotlight") {
+        if (subjectType === "amenity") score += 100;
+        if (isProjectAsset) score += 10;
+      } else if (postTypeCode === "project-launch") {
+        if (subjectType === "project_exterior" || subjectType === "construction_progress") score += 100;
+        if (isProjectAsset) score += 10;
+      } else if (postTypeCode === "location-advantage") {
+        if (subjectType === "project_exterior" || subjectType === "lifestyle") score += 50;
+        if (isProjectAsset) score += 20;
+      } else if (postTypeCode === "sample-flat-showcase") {
+        if (subjectType === "sample_flat" || subjectType === "interior") score += 100;
+        if (isProjectAsset) score += 10;
+      } else if (postTypeCode === "construction-update") {
+        if (subjectType === "construction_progress") score += 100;
+        if (subjectType === "project_exterior") score += 30;
+        if (isProjectAsset) score += 10;
+      }
+      return score;
+    };
+    return [...queryFiltered].sort((a, b) => getAssetScore(b) - getAssetScore(a));
+  }, [normalizedPickerQuery, referenceEligibleAssets, selectedPostType?.code, briefForm.projectId]);
   const filteredOutputs = useMemo(
     () =>
       adaptationCandidates.filter((output) => {
@@ -840,9 +928,58 @@ function CreatePageContent() {
   const isCampaignAssetMode = productionMode === "campaign_asset";
   const isAdaptationMode = productionMode === "adaptation";
   const isAutoCopyMode = briefForm.copyMode === "auto";
-  const isFestiveGreeting = selectedPostType?.code === "festive-greeting";
+  const locksProjectSelection = isFestiveGreeting;
   const isCampaignCreateMode = workspaceMode === "campaign";
   const isSeriesCreateMode = workspaceMode === "series";
+
+  useEffect(() => {
+    if (!locksProjectSelection) return;
+    if (activePicker === "project") {
+      setActivePicker(null);
+    }
+    if (briefForm.projectId) {
+      setBriefForm((state) => ({
+        ...state,
+        projectId: undefined
+      }));
+    }
+  }, [activePicker, briefForm.projectId, locksProjectSelection, setBriefForm]);
+
+  useEffect(() => {
+    if (allowsReferenceImages) return;
+    if (activePicker === "references") {
+      setActivePicker(null);
+    }
+    if (briefForm.selectedReferenceAssetIds.length === 0) return;
+    setBriefForm((state) =>
+      state.selectedReferenceAssetIds.length === 0
+        ? state
+        : {
+            ...state,
+            selectedReferenceAssetIds: []
+          }
+    );
+  }, [activePicker, allowsReferenceImages, briefForm.selectedReferenceAssetIds.length, setBriefForm]);
+
+  useEffect(() => {
+    if (!allowsReferenceImages || briefForm.selectedReferenceAssetIds.length === 0) return;
+    const nextSelectedReferenceAssetIds = briefForm.selectedReferenceAssetIds.filter((assetId) =>
+      referenceEligibleAssetIds.has(assetId)
+    );
+    if (nextSelectedReferenceAssetIds.length === briefForm.selectedReferenceAssetIds.length) return;
+    setBriefForm((state) => ({
+      ...state,
+      selectedReferenceAssetIds: state.selectedReferenceAssetIds.filter((assetId) =>
+        referenceEligibleAssetIds.has(assetId)
+      )
+    }));
+  }, [
+    allowsReferenceImages,
+    briefForm.selectedReferenceAssetIds,
+    briefForm.selectedReferenceAssetIds.length,
+    referenceEligibleAssetIds,
+    setBriefForm
+  ]);
 
   const topbarControls = useMemo(
     () => (
@@ -1019,7 +1156,7 @@ function CreatePageContent() {
       goal: deliverable?.title ?? state.goal,
       prompt: deliverable?.briefText ?? state.prompt,
       offer: state.copyMode === "auto" ? "" : deliverable?.ctaText ?? state.offer,
-      templateType: postType?.config.recommendedTemplateTypes[0] ?? state.templateType
+      templateType: state.templateType ?? postType?.config.recommendedTemplateTypes[0]
     }));
 
     appliedQueryRef.current = true;
@@ -1127,14 +1264,19 @@ function CreatePageContent() {
   const hasActiveSeedJob = Boolean(latestActiveSeedJob);
   const hasActiveFinalJob = Boolean(latestActiveFinalJob);
   const activeFinalTemplateId = latestActiveFinalJob?.selectedTemplateId ?? null;
-  const optimisticGenerationTargetCount = pendingGenerationTargetCount ?? styleVariationCount;
+  const activeOneStageGenerationSession = isOneStageV2 ? oneStageGenerationSession : null;
+  const activeOneStageExpectedCount = activeOneStageGenerationSession?.expectedCount;
+  const optimisticGenerationTargetCount =
+    activeOneStageExpectedCount ?? pendingGenerationTargetCount ?? styleVariationCount;
   const directionTargetCount =
     latestActiveSeedJob?.requestedCount ??
     (hasActiveSeedJob || pendingCanvasAction === "explore" || pendingAction === "generate-seeds"
       ? optimisticGenerationTargetCount
       : promptPackage?.variations.length || styleVariationCount);
   const optionTargetCount = isOneStageV2
-    ? latestActiveFinalJob?.requestedCount ??
+    ? activeOneStageExpectedCount ??
+      latestActiveFinalJob?.requestedCount ??
+      pendingGenerationTargetCount ??
       (hasActiveFinalJob || pendingCanvasAction === "explore" || pendingAction === "generate-seeds"
         ? optimisticGenerationTargetCount
         : promptPackage?.variations.length || runDetail?.promptPackage.variations.length || styleVariationCount)
@@ -1166,7 +1308,7 @@ function CreatePageContent() {
     ? seedTemplateLabelById.get(latestSelectedStyleId) ?? null
     : null;
 
-  const canCreateOptionsFromReferences = SHOW_CREATE_REFERENCE_CONTROLS && briefForm.selectedReferenceAssetIds.length > 0;
+  const canCreateOptionsFromReferences = allowsReferenceImages && selectedReferenceAssets.length > 0;
   const canCreateOptionsFromSourceOutput = Boolean(briefForm.sourceOutputId);
   const canCreateOptionsFromTemplateFamily = SHOW_CREATE_TEMPLATE_CONTROLS && Boolean(selectedReusableTemplate);
   const hasFreshSelectedStyle = Boolean(latestSelectedStyleId) && !isCompiledStale;
@@ -1263,7 +1405,12 @@ function CreatePageContent() {
   // Derive current generate phase for the stepper
   const generatePhase: GeneratePhase = useMemo(() => {
     if (isOneStageV2) {
-      if (hasActiveFinalJob || pendingAction === "generate-seeds") return "creating";
+      if (
+        activeOneStageGenerationSession ||
+        hasActiveFinalJob ||
+        pendingAction === "compile-prompt" ||
+        pendingAction === "generate-seeds"
+      ) return "creating";
       if (currentFinalOutputs.length > 0) return "done";
       return "idle";
     }
@@ -1277,6 +1424,7 @@ function CreatePageContent() {
   }, [
     currentFinalOutputs.length,
     currentSeedTemplates.length,
+    activeOneStageGenerationSession,
     hasActiveFinalJob,
     hasActiveSeedJob,
     isOneStageV2,
@@ -1304,15 +1452,42 @@ function CreatePageContent() {
   const isGeneratingV2Options =
     isOneStageV2 &&
     currentFinalOutputs.length === 0 &&
-    (pendingCanvasAction === "explore" || pendingAction === "generate-seeds" || hasActiveFinalJob);
+    (Boolean(activeOneStageGenerationSession) ||
+      pendingCanvasAction === "explore" ||
+      pendingAction === "compile-prompt" ||
+      pendingAction === "generate-seeds" ||
+      hasActiveFinalJob);
+
+  useEffect(() => {
+    if (!oneStageGenerationSession) return;
+    if (!isOneStageV2 || currentFinalOutputs.length > 0 || runError) {
+      setOneStageGenerationSession(null);
+      return;
+    }
+    if (hasActiveFinalJob && oneStageGenerationSession.phase !== "rendering") {
+      setOneStageGenerationSession((session) =>
+        session ? { ...session, phase: "rendering" } : session
+      );
+    }
+  }, [
+    currentFinalOutputs.length,
+    hasActiveFinalJob,
+    isOneStageV2,
+    oneStageGenerationSession,
+    runError
+  ]);
 
   useEffect(() => {
     if (pendingCanvasAction !== "explore") return;
-    if (currentSeedTemplates.length > 0 || currentFinalOutputs.length > 0 || runError) {
+    if (currentFinalOutputs.length > 0 || runError) {
       setPendingCanvasAction(null);
       return;
     }
-    if (!isPending && !hasActiveSeedJob && !hasActiveFinalJob && !runHasRunningJobs) {
+    if (!isOneStageV2 && currentSeedTemplates.length > 0) {
+      setPendingCanvasAction(null);
+      return;
+    }
+    if (!isOneStageV2 && !isPending && !hasActiveSeedJob && !hasActiveFinalJob && !runHasRunningJobs) {
       setPendingCanvasAction(null);
     }
   }, [
@@ -1321,7 +1496,35 @@ function CreatePageContent() {
     hasActiveFinalJob,
     hasActiveSeedJob,
     isPending,
+    isOneStageV2,
     pendingCanvasAction,
+    runError,
+    runHasRunningJobs
+  ]);
+
+  useEffect(() => {
+    if (pendingGenerationTargetCount === null) return;
+    if (hasActiveSeedJob || hasActiveFinalJob || isPending || pendingCanvasAction === "explore") return;
+    if (currentFinalOutputs.length > 0 || runError) {
+      setPendingGenerationTargetCount(null);
+      return;
+    }
+    if (!isOneStageV2 && currentSeedTemplates.length > 0) {
+      setPendingGenerationTargetCount(null);
+      return;
+    }
+    if (!isOneStageV2 && !runHasRunningJobs) {
+      setPendingGenerationTargetCount(null);
+    }
+  }, [
+    currentFinalOutputs.length,
+    currentSeedTemplates.length,
+    hasActiveFinalJob,
+    hasActiveSeedJob,
+    isPending,
+    isOneStageV2,
+    pendingCanvasAction,
+    pendingGenerationTargetCount,
     runError,
     runHasRunningJobs
   ]);
@@ -1447,7 +1650,7 @@ function CreatePageContent() {
           !canCreateOptionsFromTemplateFamily &&
           !hasFreshSelectedStyle;
   const createDockStatus = allPreflightDone
-    ? isOneStageV2 && (hasActiveFinalJob || pendingAction === "generate-seeds")
+    ? isOneStageV2 && (activeOneStageGenerationSession || hasActiveFinalJob || pendingAction === "generate-seeds")
       ? "Generating options"
       : isOneStageV2
         ? "Ready to generate options"
@@ -1531,8 +1734,19 @@ function CreatePageContent() {
       );
       return;
     }
-    setPendingGenerationTargetCount(styleVariationCount);
+    const generationCount = styleVariationCount;
+    setPendingGenerationTargetCount(generationCount);
     setPendingCanvasAction("explore");
+    if (isOneStageV2) {
+      setOneStageGenerationSession({
+        id: crypto.randomUUID(),
+        expectedCount: generationCount,
+        phase: canReuseCompiledPromptPackage ? "submitting" : "compiling",
+        ...(canReuseCompiledPromptPackage && promptPackage?.id
+          ? { promptPackageId: promptPackage.id }
+          : {})
+      });
+    }
     const compiled =
       canReuseCompiledPromptPackage
         ? promptPackage
@@ -1540,14 +1754,30 @@ function CreatePageContent() {
     if (!compiled) {
       setPendingCanvasAction(null);
       setPendingGenerationTargetCount(null);
+      if (isOneStageV2) setOneStageGenerationSession(null);
       return;
+    }
+    if (isOneStageV2) {
+      setOneStageGenerationSession((session) =>
+        session
+          ? { ...session, phase: "submitting", promptPackageId: compiled.id }
+          : session
+      );
     }
     const submitted = await generateSeedsForPackage(compiled.id, compiled);
     if (submitted) {
+      if (isOneStageV2) {
+        setOneStageGenerationSession((session) =>
+          session
+            ? { ...session, phase: "rendering", promptPackageId: compiled.id }
+            : session
+        );
+      }
       rearmRunPolling();
     } else {
       setPendingCanvasAction(null);
       setPendingGenerationTargetCount(null);
+      if (isOneStageV2) setOneStageGenerationSession(null);
     }
   }
 
@@ -1567,6 +1797,14 @@ function CreatePageContent() {
   }
 
   function handleProjectChange(projectId: string) {
+    if (locksProjectSelection) {
+      setBriefForm((state) => ({
+        ...state,
+        projectId: undefined
+      }));
+      return;
+    }
+
     const selectedDeliverableRecord = briefForm.deliverableId
       ? deliverables.find((item) => item.id === briefForm.deliverableId)
       : null;
@@ -1590,6 +1828,7 @@ function CreatePageContent() {
   function handlePostTypeChange(postTypeId: string) {
     const selected = postTypes.find((p) => p.id === postTypeId);
     const nextIsFestiveGreeting = selected?.code === "festive-greeting";
+    const nextDisallowsReferenceSelection = nextIsFestiveGreeting;
     const selectedDeliverableRecord = briefForm.deliverableId
       ? deliverables.find((item) => item.id === briefForm.deliverableId)
       : null;
@@ -1621,7 +1860,7 @@ function CreatePageContent() {
         projectId: nextIsFestiveGreeting ? undefined : state.projectId,
         festivalId: nextIsFestiveGreeting ? state.festivalId : undefined,
         creativeTemplateId: nextIsFestiveGreeting ? undefined : state.creativeTemplateId,
-        selectedReferenceAssetIds: nextIsFestiveGreeting ? [] : state.selectedReferenceAssetIds,
+        selectedReferenceAssetIds: nextDisallowsReferenceSelection ? [] : state.selectedReferenceAssetIds,
         deliverableId:
           selectedDeliverableRecord && postTypeId && selectedDeliverableRecord.postTypeId !== postTypeId
             ? undefined
@@ -1982,6 +2221,11 @@ function CreatePageContent() {
   }
 
   function toggleReferenceAsset(assetId: string) {
+    if (!allowsReferenceImages) {
+      setActivePicker(null);
+      return;
+    }
+
     if (
       !briefForm.selectedReferenceAssetIds.includes(assetId) &&
       briefForm.selectedReferenceAssetIds.length >= MAX_REFERENCE_SELECTION
@@ -2010,6 +2254,8 @@ function CreatePageContent() {
     setRunRefreshToken(0);
     completedRunRefreshRef.current = null;
     setPendingCanvasAction(null);
+    setPendingGenerationTargetCount(null);
+    setOneStageGenerationSession(null);
   }
 
   function clearSeries() {
@@ -2239,11 +2485,11 @@ function CreatePageContent() {
                       value={pickerQuery}
                     />
                   </div>
-                  <div className="create-picker-list">
+                  <div className="create-picker-list create-picker-project-list">
                     {filteredProjects.map((project) => (
                       <button
                         key={project.id}
-                        className={`create-picker-row ${campaignCreateForm.primaryProjectId === project.id ? "is-selected" : ""}`}
+                        className={`create-picker-row create-picker-project-card ${campaignCreateForm.primaryProjectId === project.id ? "is-selected" : ""}`}
                         onClick={() => {
                           setCampaignCreateForm((current) => ({ ...current, primaryProjectId: project.id }));
                           setActivePicker(null);
@@ -2633,14 +2879,16 @@ function CreatePageContent() {
               {!canUseDeliverableInheritance && !isCampaignAssetMode && (
                 <div className="create-editorial-group">
                   <p className="create-editorial-label">Base Configuration</p>
-                  <SelectionRow
-                    actionLabel={selectedProject ? "Change" : "Select"}
-                    emptyLabel="None"
-                    label="Project"
-                    onAction={() => setActivePicker("project")}
-                    onClear={selectedProject ? () => handleProjectChange("") : undefined}
-                    value={selectedProject?.name ?? null}
-                  />
+                  {!locksProjectSelection ? (
+                    <SelectionRow
+                      actionLabel={selectedProject ? "Change" : "Select"}
+                      emptyLabel="None"
+                      label="Project"
+                      onAction={() => setActivePicker("project")}
+                      onClear={selectedProject ? () => handleProjectChange("") : undefined}
+                      value={selectedProject?.name ?? null}
+                    />
+                  ) : null}
                   <SelectionRow
                     actionLabel={selectedPostType ? "Change" : "Select"}
                     emptyLabel="None"
@@ -2767,7 +3015,7 @@ function CreatePageContent() {
               ) : null}
 
               {/* Reference picker hidden temporarily. Restore by setting SHOW_CREATE_REFERENCE_CONTROLS to true. */}
-              {SHOW_CREATE_REFERENCE_CONTROLS ? (
+              {allowsReferenceImages ? (
                 <div className="create-references-section">
                   {referenceEligibleAssets.length === 0 ? (
                     <>
@@ -3000,6 +3248,26 @@ function CreatePageContent() {
                     >
                       <option value="">Auto</option>
                       {CREATIVE_DIRECTION_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="create-field-label">
+                    Copy language
+                    <select
+                      value={briefForm.copyLanguage ?? "en"}
+                      onChange={(e) =>
+                        setBriefForm((s) => ({
+                          ...s,
+                          copyLanguage: e.target.value as CreativeBrief["copyLanguage"]
+                        }))
+                      }
+                      className="create-field-select"
+                    >
+                      {COPY_LANGUAGE_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
@@ -3306,7 +3574,22 @@ function CreatePageContent() {
 
           {/* ── Final options section ── */}
           <section className="create-section-canvas">
-            {!promptPackage ? (
+            {currentFinalOutputs.length === 0 && (hasActiveFinalJob || isGeneratingV2Options) ? (
+              <div className="candidate-grid create-final-options-grid create-processing-pulse">
+                {Array.from({ length: optionTargetCount }).map((_, index) => (
+                  <article className="candidate-card create-final-option-card create-batch-placeholder" key={`option-pending-${index}`}>
+                    <div
+                      className="candidate-media create-generating-shimmer"
+                      style={{ aspectRatio: getCanvasAspectRatioValue(compiledPlacement?.aspectRatio) }}
+                    />
+                    <div className="candidate-body create-batch-placeholder-copy">
+                      <strong>Option {index + 1}</strong>
+                      <span>{isOneStageV2 ? "Rendering post option…" : "Rendering option…"}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : !promptPackage ? (
               <div className="create-empty-state">
                 <div className="create-empty-icon">
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
@@ -3323,21 +3606,6 @@ function CreatePageContent() {
                       ? "Add a brief, then generate post options."
                       : "Add a brief, then explore styles or create options."}
                 </p>
-              </div>
-            ) : currentFinalOutputs.length === 0 && (hasActiveFinalJob || isGeneratingV2Options) ? (
-              <div className="candidate-grid create-final-options-grid create-processing-pulse">
-                {Array.from({ length: optionTargetCount }).map((_, index) => (
-                  <article className="candidate-card create-final-option-card create-batch-placeholder" key={`option-pending-${index}`}>
-                    <div
-                      className="candidate-media create-generating-shimmer"
-                      style={{ aspectRatio: getCanvasAspectRatioValue(compiledPlacement?.aspectRatio) }}
-                    />
-                    <div className="candidate-body create-batch-placeholder-copy">
-                      <strong>Option {index + 1}</strong>
-                      <span>{isOneStageV2 ? "Rendering post option…" : "Rendering option…"}</span>
-                    </div>
-                  </article>
-                ))}
               </div>
             ) : !isOneStageV2 && currentFinalOutputs.length === 0 && currentSeedTemplates.length > 0 ? (
               <div className="create-pick-prompt">
@@ -3429,7 +3697,7 @@ function CreatePageContent() {
               <div className="create-preflight-status">
                 <strong>{createDockStatus}</strong>
                 <span>
-                  {isOneStageV2 && (hasActiveFinalJob || pendingAction === "generate-seeds")
+                  {isOneStageV2 && (activeOneStageGenerationSession || hasActiveFinalJob || pendingAction === "generate-seeds")
                     ? "Post options are rendering now. Results will appear here automatically."
                     : hasActiveFinalJob
                       ? "Options are rendering now. Results will appear here automatically."
@@ -3537,10 +3805,34 @@ function CreatePageContent() {
                       getPickerTitle(activePicker)
                     )}
                   </h2>
+                  {activePicker === "festival" ? (
+                    <div className="create-filter-chips">
+                      <button
+                        className={`create-filter-chip ${festivalFilter === "all" ? "is-active" : ""}`}
+                        onClick={() => setFestivalFilter("all")}
+                        type="button"
+                      >
+                        All
+                      </button>
+                      <button
+                        className={`create-filter-chip ${festivalFilter === "upcoming" ? "is-active" : ""}`}
+                        onClick={() => setFestivalFilter("upcoming")}
+                        type="button"
+                      >
+                        Upcoming
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
-                <button className="drawer-close" onClick={() => setActivePicker(null)} type="button">
-                  ×
-                </button>
+                {activePicker !== "festival" ? (
+                  <button className="drawer-close" onClick={() => setActivePicker(null)} type="button">
+                    ×
+                  </button>
+                ) : (
+                  <button className="drawer-close create-picker-close-festival" onClick={() => setActivePicker(null)} type="button">
+                    ×
+                  </button>
+                )}
               </div>
               <div className={`drawer-body create-picker-body ${activePicker === "post-type" ? "create-picker-body-post-type" : ""}`}>
                 <div className="create-picker-toolbar">
@@ -3556,7 +3848,7 @@ function CreatePageContent() {
                     placeholder={getPickerPlaceholder(activePicker)}
                     value={pickerQuery}
                   />
-                  {SHOW_CREATE_REFERENCE_CONTROLS && activePicker === "references" && selectedReferenceAssets.length > 0 ? (
+                  {allowsReferenceImages && activePicker === "references" && selectedReferenceAssets.length > 0 ? (
                     <button className="button button-ghost" onClick={clearSelectedReferences} type="button">
                       Clear selected
                     </button>
@@ -3688,11 +3980,11 @@ function CreatePageContent() {
                 ) : null} */}
 
                 {activePicker === "project" ? (
-                  <div className="create-picker-list">
+                  <div className="create-picker-list create-picker-project-list">
                     {filteredProjects.map((project) => (
                       <button
                         key={project.id}
-                        className={`create-picker-row ${briefForm.projectId === project.id ? "is-selected" : ""}`}
+                        className={`create-picker-row create-picker-project-card ${briefForm.projectId === project.id ? "is-selected" : ""}`}
                         onClick={() => {
                           handleProjectChange(project.id);
                           setActivePicker(null);
@@ -3991,7 +4283,7 @@ function CreatePageContent() {
                 ) : null}
 
                 {/* Reference picker hidden temporarily. Restore by setting SHOW_CREATE_REFERENCE_CONTROLS to true. */}
-                {SHOW_CREATE_REFERENCE_CONTROLS && activePicker === "references" ? (
+                {allowsReferenceImages && activePicker === "references" ? (
                   <div className="create-picker-gallery">
                     {filteredReferenceAssets.map((asset) => {
                       const selected = briefForm.selectedReferenceAssetIds.includes(asset.id);
@@ -4025,7 +4317,7 @@ function CreatePageContent() {
                 ) : null}
               </div>
               <div className="drawer-footer create-picker-footer">
-                {SHOW_CREATE_REFERENCE_CONTROLS && activePicker === "references" ? (
+                {allowsReferenceImages && activePicker === "references" ? (
                   <p className="create-hint">
                     {selectedReferenceAssets.length === 0
                       ? `No references selected. Add up to ${MAX_REFERENCE_SELECTION}.`
@@ -4243,6 +4535,25 @@ function getInitials(value: string) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
+}
+
+function isAmenityReferenceAsset(asset: BrandAssetRecord) {
+  if (asset.kind !== "reference") {
+    return false;
+  }
+
+  const metadata = asset.metadataJson as Record<string, unknown> | null;
+  const subjectType = typeof metadata?.subjectType === "string" ? metadata.subjectType.toLowerCase() : "";
+  if (subjectType === "amenity") {
+    return true;
+  }
+
+  const amenityName = typeof metadata?.amenityName === "string" ? metadata.amenityName : "";
+  const tags = Array.isArray(metadata?.tags)
+    ? metadata.tags.filter((value): value is string => typeof value === "string")
+    : [];
+  const haystack = [asset.label, amenityName, ...tags].join(" ").toLowerCase();
+  return AMENITY_REFERENCE_TERMS.some((term) => haystack.includes(term));
 }
 
 function startCase(value: string) {

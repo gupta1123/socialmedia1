@@ -52,7 +52,6 @@ describe("creative reference selection", () => {
     const workspaceId = crypto.randomUUID();
     const brandId = crypto.randomUUID();
     const projectId = crypto.randomUUID();
-    const explicitReferenceId = crypto.randomUUID();
     const projectImageId = crypto.randomUUID();
     const sampleFlatId = crypto.randomUUID();
 
@@ -79,7 +78,7 @@ describe("creative reference selection", () => {
 
     const selection = buildInferredReferenceSelection({
       postTypeCode: "amenity-spotlight",
-      explicitReferenceAssetIds: [explicitReferenceId],
+      explicitReferenceAssetIds: [],
       projectImageAssetIds: [projectImageId],
       sampleFlatImageIds: [sampleFlatId],
       brandReferenceAssetIds: [],
@@ -92,9 +91,139 @@ describe("creative reference selection", () => {
 
     expect(selection.amenityAssetIds).toContain(amenityAsset.id);
     expect(selection.referenceAssetIds).toEqual([
-      explicitReferenceId,
       amenityAsset.id,
     ]);
+  });
+
+  it("user selection is final authority - selected pool image returns only pool image in finalReferenceAssetIds", () => {
+    const workspaceId = crypto.randomUUID();
+    const brandId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+
+    const poolAsset = buildAsset({
+      workspaceId,
+      brandId,
+      projectId,
+      label: "Miami pool hero",
+      metadataJson: {
+        subjectType: "amenity",
+        amenityName: "Swimming Pool",
+      },
+    });
+
+    const parkAsset = buildAsset({
+      workspaceId,
+      brandId,
+      projectId,
+      label: "Miami park hero",
+      metadataJson: {
+        subjectType: "amenity",
+        amenityName: "Park",
+      },
+    });
+
+    const selection = buildInferredReferenceSelection({
+      postTypeCode: "amenity-spotlight",
+      explicitReferenceAssetIds: [poolAsset.id],
+      projectImageAssetIds: [],
+      sampleFlatImageIds: [],
+      brandReferenceAssetIds: [],
+      allAssets: [poolAsset, parkAsset],
+      projectId,
+    });
+
+    expect(selection.trace?.finalReferenceAssetIds).toEqual([poolAsset.id]);
+    expect(selection.trace?.referenceSelectionSource).toBe("user_selection");
+    expect(selection.trace?.amenityFocus).toBe("Swimming Pool");
+    expect(selection.trace?.amenityFocusSource).toBe("user_selected");
+  });
+
+  it("user selected two references returns exactly those two, in order", () => {
+    const workspaceId = crypto.randomUUID();
+    const brandId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+
+    const poolAsset = buildAsset({
+      workspaceId,
+      brandId,
+      projectId,
+      label: "Miami pool hero",
+      metadataJson: { subjectType: "amenity", amenityName: "Swimming Pool" },
+    });
+
+    const gymAsset = buildAsset({
+      workspaceId,
+      brandId,
+      projectId,
+      label: "Miami gym hero",
+      metadataJson: { subjectType: "amenity", amenityName: "Gym" },
+    });
+
+    const parkAsset = buildAsset({
+      workspaceId,
+      brandId,
+      projectId,
+      label: "Miami park hero",
+      metadataJson: { subjectType: "amenity", amenityName: "Park" },
+    });
+
+    const selection = buildInferredReferenceSelection({
+      postTypeCode: "amenity-spotlight",
+      explicitReferenceAssetIds: [poolAsset.id, gymAsset.id],
+      projectImageAssetIds: [],
+      sampleFlatImageIds: [],
+      brandReferenceAssetIds: [],
+      allAssets: [poolAsset, gymAsset, parkAsset],
+      projectId,
+    });
+
+    expect(selection.trace?.finalReferenceAssetIds).toEqual([poolAsset.id, gymAsset.id]);
+    expect(selection.trace?.referenceSelectionSource).toBe("user_selection");
+  });
+
+  it("no selected reference still allows current inferred behavior", () => {
+    const workspaceId = crypto.randomUUID();
+    const brandId = crypto.randomUUID();
+    const projectId = crypto.randomUUID();
+    const projectImageId = crypto.randomUUID();
+
+    const poolAsset = buildAsset({
+      workspaceId,
+      brandId,
+      projectId,
+      label: "Miami pool hero",
+      metadataJson: { subjectType: "amenity", amenityName: "Swimming Pool" },
+    });
+
+    const selection = buildInferredReferenceSelection({
+      postTypeCode: "amenity-spotlight",
+      explicitReferenceAssetIds: [],
+      projectImageAssetIds: [projectImageId],
+      sampleFlatImageIds: [],
+      brandReferenceAssetIds: [],
+      allAssets: [poolAsset],
+      projectId,
+    });
+
+    expect(selection.trace?.referenceSelectionSource).toBe("inference");
+    expect(selection.amenityAssetIds).toContain(poolAsset.id);
+  });
+
+  it("project launch still gets project image fallback when nothing is selected", () => {
+    const projectImageId = crypto.randomUUID();
+
+    const selection = buildInferredReferenceSelection({
+      postTypeCode: "project-launch",
+      explicitReferenceAssetIds: [],
+      projectImageAssetIds: [projectImageId],
+      sampleFlatImageIds: [],
+      brandReferenceAssetIds: [],
+      allAssets: [],
+      projectId: crypto.randomUUID(),
+    });
+
+    expect(selection.trace?.referenceSelectionSource).toBe("inference");
+    expect(selection.referenceAssetIds).toContain(projectImageId);
   });
 
   it("locks amenity focus and references to the matching amenity asset", () => {

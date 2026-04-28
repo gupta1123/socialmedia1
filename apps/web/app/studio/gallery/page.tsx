@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { CreativeOutputRecord, WorkspaceMemberRecord } from "@image-lab/contracts";
-import { getCreativeOutputs, getWorkspaceMembers } from "../../../lib/api";
-import { ImagePreviewTrigger } from "../image-preview";
+import { getCreativeOutput, getCreativeOutputs, getWorkspaceMembers } from "../../../lib/api";
+import { formatRelativeTime } from "../../../lib/formatters";
+import { buildCreativePreviewSections, type CreativePreviewInput } from "../../../lib/creative-preview-sections";
+import { useImagePreview } from "../image-preview";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions } from "../topbar-actions-context";
 import { Skeleton } from "../skeleton";
@@ -18,10 +20,11 @@ const REVIEW_FILTERS = [
 ] as const;
 
 type ReviewFilter = (typeof REVIEW_FILTERS)[number]["id"];
-const GALLERY_PAGE_SIZE = 24;
+const GALLERY_PAGE_SIZE = 10;
 
 export default function GalleryPage() {
-  const { sessionToken, activeBrandId, activeBrand } = useStudio();
+  const { sessionToken, activeBrandId } = useStudio();
+  const imagePreview = useImagePreview();
   const [outputs, setOutputs] = useState<CreativeOutputRecord[]>([]);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +71,7 @@ export default function GalleryPage() {
         const outputFilters: Parameters<typeof getCreativeOutputs>[1] = {
           limit: GALLERY_PAGE_SIZE + 1,
           offset: (page - 1) * GALLERY_PAGE_SIZE,
+          imageMode: "thumbnail",
           ...(activeBrandId ? { brandId: activeBrandId } : {}),
           ...(reviewFilter === "all" ? {} : { reviewState: reviewFilter })
         };
@@ -107,6 +111,39 @@ export default function GalleryPage() {
 
   const pageStart = outputs.length === 0 ? 0 : (page - 1) * GALLERY_PAGE_SIZE + 1;
   const pageEnd = outputs.length === 0 ? 0 : pageStart + outputs.length - 1;
+
+  async function openOutputPreview(output: CreativeOutputRecord, creator: string, statusLabel: string) {
+    const resolved = sessionToken ? await getCreativeOutput(sessionToken, output.id).catch(() => output) : output;
+    const previewSrc =
+      resolved.originalUrl ?? resolved.previewUrl ?? resolved.thumbnailUrl ?? output.thumbnailUrl ?? output.previewUrl;
+    if (!previewSrc) {
+      return;
+    }
+    const previewContext = (resolved as CreativeOutputRecord & { previewContext?: CreativePreviewInput | null })
+      .previewContext;
+
+    imagePreview.openPreview({
+      alt: `Generated option ${output.outputIndex + 1}`,
+      actions: [{ href: `/studio/ai-edit?outputId=${output.id}`, label: "Open in Editor", tone: "primary" }],
+      badges: [`#${output.outputIndex + 1}`, `v${output.versionNumber}`, statusLabel],
+      details: [
+        { label: "Created by", value: creator }
+      ],
+      meta: `#${output.outputIndex + 1}`,
+      sections: buildCreativePreviewSections({
+        brief: previewContext?.brief,
+        projectName: previewContext?.projectName,
+        postTypeName: previewContext?.postTypeName,
+        channel: previewContext?.channel,
+        format: previewContext?.format,
+        aspectRatio: previewContext?.aspectRatio,
+        templateType: previewContext?.templateType
+      }),
+      src: previewSrc,
+      subtitle: output.kind.replaceAll("_", " "),
+      title: `Output ${output.outputIndex + 1} · v${output.versionNumber}`
+    });
+  }
 
   if (error) {
     return (
@@ -161,20 +198,10 @@ export default function GalleryPage() {
                   return (
                     <article className="work-gallery-card" key={output.id}>
                       <div className="work-gallery-media">
-                        <ImagePreviewTrigger
-                          alt={`Generated option ${output.outputIndex + 1}`}
-                          actions={[{ href: `/studio/ai-edit?outputId=${output.id}`, label: "Open in Editor", tone: "primary" }]}
-                          badges={[`#${output.outputIndex + 1}`, `v${output.versionNumber}`, statusLabel]}
-                          details={[
-                            { label: "Created by", value: creator },
-                            { label: "Version", value: `v${output.versionNumber}` },
-                            { label: "Review state", value: statusLabel },
-                            { label: "Kind", value: output.kind }
-                          ]}
-                          src={output.originalUrl ?? output.previewUrl}
-                          subtitle={`${output.kind.replaceAll("_", " ")} · ${statusLabel}`}
-                          title={`Output ${output.outputIndex + 1} · v${output.versionNumber}`}
-                          meta={`#${output.outputIndex + 1}`}
+                        <button
+                          className="image-preview-trigger"
+                          onClick={() => void openOutputPreview(output, creator, statusLabel)}
+                          type="button"
                         >
                           {output.thumbnailUrl ?? output.previewUrl ? (
                             <img
@@ -184,13 +211,14 @@ export default function GalleryPage() {
                           ) : (
                             <div className="work-gallery-fallback" />
                           )}
-                        </ImagePreviewTrigger>
+                        </button>
                       </div>
                       <div className="work-gallery-body">
                         <div className="work-gallery-copy">
                           <strong>{`Output #${output.outputIndex + 1} · v${output.versionNumber}`}</strong>
                           <p>{statusLabel}</p>
                           <p>Created by {creator}</p>
+                          {output.createdAt && <p className="work-gallery-time">{formatRelativeTime(output.createdAt)}</p>}
                         </div>
                         <div className="work-gallery-footer">
                           <Link className="button button-ghost button-sm" href={`/studio/ai-edit?outputId=${output.id}`}>

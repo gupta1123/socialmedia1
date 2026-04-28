@@ -107,7 +107,8 @@ export function compilePromptPackageMock(input: Input) {
     projectName: useProjectContext ? input.projectName : null,
     projectProfile: useProjectContext ? input.projectProfile : null,
     brandAssets: input.brandAssets ?? [],
-    projectId: useProjectContext ? input.projectId : null
+    projectId: useProjectContext ? input.projectId : null,
+    selectedReferenceAssetIds: input.brief.referenceAssetIds
   });
   const { styleDescriptors, approvedVocabulary, bannedTerms: banned } = brandGuidance;
   const safeZoneNotes = dedupeStrings([

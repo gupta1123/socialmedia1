@@ -66,7 +66,8 @@ import {
   buildInferredReferenceSelection,
   inferAmenityNameFromAssetParts,
   isAmenityFocusedPostType,
-  isAmenityReferenceAsset
+  isAmenityReferenceAsset,
+  isLocationMapAsset
 } from "../lib/creative-reference-selection.js";
 import {
   buildV2RoleAwarePrompt,
@@ -616,6 +617,32 @@ function resolveAmenityAnchorAsset(
   );
 }
 
+function resolveLocationMapAnchorAsset(
+  brandAssets: BrandAssetRecord[],
+  supportingReferenceAssetIds: string[]
+) {
+  const locationMapAssets = brandAssets.filter((asset) => isLocationMapAsset(asset));
+  if (locationMapAssets.length === 0) return null;
+
+  const explicitLocationMapAssets = locationMapAssets.filter((asset) =>
+    supportingReferenceAssetIds.includes(asset.id)
+  );
+  const candidates = explicitLocationMapAssets.length > 0 ? explicitLocationMapAssets : locationMapAssets;
+
+  return candidates.reduce<{ asset: BrandAssetRecord; score: number } | null>((best, asset) => {
+    const metadata = asset.metadataJson ?? {};
+    let score = 0;
+    const usageIntent = typeof metadata.usageIntent === "string" ? metadata.usageIntent.toLowerCase() : "";
+    if (usageIntent === "truth_anchor") score += 20;
+    const preserveIdentity = metadata.preserveIdentity === true;
+    if (preserveIdentity) score += 10;
+
+    if (!best) return { asset, score };
+    if (score > best.score) return { asset, score };
+    return best;
+  }, null)?.asset ?? null;
+}
+
 function generationCreditAmount(kind: "style_seed" | "final", requestedCount: number) {
   const units = Math.max(0, Math.trunc(requestedCount));
   const perImage = kind === "style_seed" ? env.CREDITS_STYLE_SEED_PER_IMAGE : env.CREDITS_FINAL_PER_IMAGE;
@@ -1043,6 +1070,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const {
       amenityAnchorAsset,
       projectAnchorAsset,
+      locationMapAnchorAsset,
       secondaryReferenceAssets,
       brandLogoAsset,
       complianceQrAsset
@@ -1094,6 +1122,13 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
             label: amenityAnchorAsset.label,
             storagePath: amenityAnchorAsset.storagePath,
             amenityName: inferAmenityNameFromAssetParts(amenityAnchorAsset.label, amenityAnchorAsset.metadataJson ?? {}) ?? null
+          }
+        : null,
+      locationMapAnchor: locationMapAnchorAsset
+        ? {
+            role: "location_map" as const,
+            label: locationMapAnchorAsset.label,
+            storagePath: locationMapAnchorAsset.storagePath
           }
         : null,
       projectAnchor: projectAnchorAsset
@@ -1447,6 +1482,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const {
       amenityAnchorAsset,
       projectAnchorAsset,
+      locationMapAnchorAsset,
       secondaryReferenceAssets,
       brandLogoAsset,
       complianceQrAsset
@@ -1498,6 +1534,13 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
             label: amenityAnchorAsset.label,
             storagePath: amenityAnchorAsset.storagePath,
             amenityName: inferAmenityNameFromAssetParts(amenityAnchorAsset.label, amenityAnchorAsset.metadataJson ?? {}) ?? null
+          }
+        : null,
+      locationMapAnchor: locationMapAnchorAsset
+        ? {
+            role: "location_map" as const,
+            label: locationMapAnchorAsset.label,
+            storagePath: locationMapAnchorAsset.storagePath
           }
         : null,
       projectAnchor: projectAnchorAsset
@@ -1749,6 +1792,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const {
       amenityAnchorAsset,
       projectAnchorAsset,
+      locationMapAnchorAsset,
       secondaryReferenceAssets,
       brandLogoAsset,
       complianceQrAsset
@@ -1812,6 +1856,13 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
             label: amenityAnchorAsset.label,
             storagePath: amenityAnchorAsset.storagePath,
             amenityName: inferAmenityNameFromAssetParts(amenityAnchorAsset.label, amenityAnchorAsset.metadataJson ?? {}) ?? null
+          }
+        : null,
+      locationMapAnchor: locationMapAnchorAsset
+        ? {
+            role: "location_map" as const,
+            label: locationMapAnchorAsset.label,
+            storagePath: locationMapAnchorAsset.storagePath
           }
         : null,
       projectAnchor: projectAnchorAsset
@@ -2738,10 +2789,15 @@ function resolvePromptPackageReferenceAssets(
     .slice(0, MAX_SUPPORTING_REFERENCE_IMAGES);
   const brandLogoAssetId = getPromptPackageResolvedAssetId(promptPackage, "brandLogoAssetId");
   const reraQrAssetId = getPromptPackageResolvedAssetId(promptPackage, "reraQrAssetId");
+  const locationMapAnchorAsset =
+    postTypeCode === "location-advantage"
+      ? resolveLocationMapAnchorAsset(brandAssets, supportingReferenceAssetIds)
+      : null;
 
   return {
     amenityAnchorAsset,
     projectAnchorAsset,
+    locationMapAnchorAsset,
     secondaryReferenceAssets,
     brandLogoAsset: brandLogoAssetId ? brandAssets.find((asset) => asset.id === brandLogoAssetId) ?? null : null,
     complianceQrAsset: reraQrAssetId ? brandAssets.find((asset) => asset.id === reraQrAssetId) ?? null : null,

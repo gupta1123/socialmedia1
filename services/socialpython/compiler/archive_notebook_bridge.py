@@ -793,6 +793,7 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
         )
         analysis = repair_analysis_grounding(analysis_content)
         analysis_payload = to_jsonable_model(analysis)
+        analysis_payload = repair_location_advantage_archetype(analysis_payload)
         if canonical_project_name:
             analysis_payload["project_name"] = canonical_project_name
         if isinstance(requested_aspect_ratio, str) and requested_aspect_ratio.strip():
@@ -864,6 +865,7 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
         if isinstance(supplied_offer, str) and supplied_offer.strip():
             analysis_payload["supplied_offer"] = supplied_offer.strip()
         analysis_payload["available_commercial_facts"] = available_commercial_facts or []
+        normalize_agent_fact_boundary(analysis_payload)
         if not exact_text_supplied:
             if analysis_payload.get("text_architecture") in {"address_first", "footer_heavy"}:
                 analysis_payload["text_architecture"] = "slogan_first"
@@ -1402,7 +1404,6 @@ def build_project_commercial_fact_lines(project: dict[str, Any]) -> list[str]:
     lines: list[str] = []
     scalar_fields = [
         ("Starting price", "startingPrice"),
-        ("Pricing band", "pricingBand"),
         ("Booking amount", "bookingAmount"),
         ("Payment plan", "paymentPlanSummary"),
         ("Offer validity", "offerValidity"),
@@ -1434,6 +1435,215 @@ def build_project_commercial_fact_lines(project: dict[str, Any]) -> list[str]:
             lines.append(f"- {label}: {'; '.join(values[:6])}")
 
     return lines
+
+
+def normalize_agent_fact_boundary(analysis: dict[str, Any]) -> None:
+    available_facts = parse_available_commercial_facts(
+        coerce_string_list(analysis.get("available_commercial_facts"))
+    )
+    if not available_facts:
+        return
+
+    requested_kinds = expand_requested_fact_kinds(analysis.get("requested_fact_types"))
+    raw_allowed_kinds = {
+        normalize_fact_kind(value)
+        for value in coerce_string_list(analysis.get("allowed_fact_kinds"))
+    }
+    raw_allowed_kinds.discard("")
+    raw_disallowed_kinds = {
+        normalize_fact_kind(value)
+        for value in coerce_string_list(analysis.get("disallowed_available_fact_kinds"))
+    }
+    raw_disallowed_kinds.discard("")
+
+    if requested_kinds:
+        allowed_kinds = raw_allowed_kinds & requested_kinds if raw_allowed_kinds else set(requested_kinds)
+    else:
+        allowed_kinds = set()
+
+    available_kinds = {fact["kind"] for fact in available_facts}
+    allowed_kinds &= available_kinds
+    allowed_kinds -= raw_disallowed_kinds
+
+    post_type = str(analysis.get("post_type") or "").replace("-", "_")
+    if post_type == "location_advantage":
+        location_non_fact_kinds = {
+            "starting_price",
+            "price_by_configuration",
+            "current_offers",
+            "booking_amount",
+            "payment_plan",
+            "rera_number",
+            "offer_validity",
+            "financing_partners",
+        }
+        allowed_kinds -= location_non_fact_kinds
+
+    disallowed_kinds = available_kinds - allowed_kinds
+
+    required_copies = []
+    for value in coerce_string_list(analysis.get("required_fact_copies")):
+        matching_fact = find_available_fact_for_copy(value, available_facts)
+        if matching_fact is None:
+            continue
+        if matching_fact["kind"] in allowed_kinds:
+            required_copies.append(value)
+
+    existing_do_not_use = normalize_do_not_use_facts(analysis.get("do_not_use_unless_requested"))
+    blocked_by_copy = {(fact["kind"], fact["copy"]) for fact in existing_do_not_use}
+    do_not_use = list(existing_do_not_use)
+    for fact in available_facts:
+        if not is_enforceable_public_fact(fact):
+            continue
+        if fact["kind"] not in disallowed_kinds:
+            continue
+        key = (fact["kind"], fact["copy"])
+        if key in blocked_by_copy:
+            continue
+        blocked_by_copy.add(key)
+        do_not_use.append(fact)
+
+    analysis["requested_fact_types"] = sorted(requested_kinds)
+    analysis["allowed_fact_kinds"] = sorted(allowed_kinds)
+    analysis["required_fact_copies"] = dedupe_preserve_order(required_copies)
+    analysis["disallowed_available_fact_kinds"] = sorted(disallowed_kinds)
+    analysis["do_not_use_unless_requested"] = do_not_use
+
+
+def parse_available_commercial_facts(lines: list[str]) -> list[dict[str, str]]:
+    facts: list[dict[str, str]] = []
+    for line in lines:
+        cleaned = line.strip()
+        if cleaned.startswith("-"):
+            cleaned = cleaned[1:].strip()
+        if ":" not in cleaned:
+            continue
+        label, copy = cleaned.split(":", 1)
+        kind = normalize_fact_kind(label)
+        value = copy.strip()
+        if kind and value:
+            facts.append({"kind": kind, "copy": value})
+    return facts
+
+
+def is_enforceable_public_fact(fact: dict[str, str]) -> bool:
+    kind = str(fact.get("kind") or "").strip()
+    copy = str(fact.get("copy") or "").strip()
+    if not kind or not copy:
+        return False
+    if kind in INTERNAL_FACT_KINDS:
+        return False
+    return True
+
+
+def normalize_do_not_use_facts(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+
+    facts: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "").strip()
+        copy = str(item.get("copy") or "").strip()
+        if not kind or not copy:
+            string_items = [(str(key), str(val)) for key, val in item.items() if str(val).strip()]
+            if len(string_items) == 1:
+                kind, copy = string_items[0]
+        normalized_kind = normalize_fact_kind(kind)
+        if normalized_kind and copy:
+            facts.append({"kind": normalized_kind, "copy": copy.strip()})
+    return facts
+
+
+def find_available_fact_for_copy(value: str, available_facts: list[dict[str, str]]) -> dict[str, str] | None:
+    normalized = value.strip()
+    if not normalized:
+        return None
+    exact_matches = [fact for fact in available_facts if fact["copy"] == normalized]
+    if exact_matches:
+        return exact_matches[0]
+
+    containing_matches = [
+        fact
+        for fact in available_facts
+        if normalized in fact["copy"] or fact["copy"] in normalized
+    ]
+    if containing_matches:
+        return max(containing_matches, key=lambda fact: len(fact["copy"]))
+
+    for fact in available_facts:
+        copy = fact["copy"]
+        if normalized == copy or normalized in copy or copy in normalized:
+            return fact
+    return None
+
+
+def normalize_fact_kind(value: Any) -> str:
+    normalized = normalize_choice_token(value)
+    return FACT_KIND_ALIASES.get(normalized, normalized)
+
+
+def expand_requested_fact_kinds(value: Any) -> set[str]:
+    expanded: set[str] = set()
+    for raw_kind in coerce_string_list(value):
+        kind = normalize_fact_kind(raw_kind)
+        if not kind:
+            continue
+        expanded.update(REQUESTED_FACT_KIND_EXPANSIONS.get(kind, {kind}))
+    return expanded
+
+
+FACT_KIND_ALIASES = {
+    "area": "size_ranges",
+    "booking": "booking_amount",
+    "booking_benefit": "current_offers",
+    "booking_benefits": "current_offers",
+    "configuration": "configurations",
+    "configuration_pricing": "price_by_configuration",
+    "configurations_pricing": "price_by_configuration",
+    "config_wise_pricing": "price_by_configuration",
+    "connectivity": "connectivity_points",
+    "landmark": "nearby_landmarks",
+    "landmarks": "nearby_landmarks",
+    "location": "location_advantages",
+    "offer": "current_offers",
+    "offers": "current_offers",
+    "payment": "payment_plan",
+    "payment_plan_summary": "payment_plan",
+    "price": "starting_price",
+    "pricing": "starting_price",
+    "rera": "rera_number",
+    "size": "size_ranges",
+    "travel_time": "travel_times",
+}
+
+
+REQUESTED_FACT_KIND_EXPANSIONS = {
+    "starting_price": {"starting_price"},
+    "price_by_configuration": {"price_by_configuration", "configurations"},
+    "configurations": {"configurations"},
+    "size_ranges": {"size_ranges"},
+    "current_offers": {"current_offers", "offer_validity"},
+    "booking_amount": {"booking_amount"},
+    "payment_plan": {"payment_plan"},
+    "rera_number": {"rera_number"},
+    "location_advantages": {
+        "location_advantages",
+        "nearby_landmarks",
+        "connectivity_points",
+        "travel_times",
+    },
+    "nearby_landmarks": {"nearby_landmarks", "travel_times"},
+    "connectivity_points": {"connectivity_points", "travel_times"},
+    "travel_times": {"travel_times"},
+    "financing_partners": {"financing_partners"},
+}
+
+
+INTERNAL_FACT_KINDS = {
+    "pricing_band",
+}
 
 
 def dedupe_preserve_order(values: list[str]) -> list[str]:
@@ -1567,6 +1777,40 @@ def visual_mechanism_for_ad_hook(commercial_hook: str) -> str:
         "compliance": "compliance_footer",
         "credibility": "credibility_band",
     }.get(commercial_hook, "credibility_band")
+
+
+def repair_location_advantage_archetype(
+    analysis: dict[str, Any]
+) -> dict[str, Any]:
+    if analysis.get("post_type") != "location_advantage":
+        return analysis
+
+    split_context_archetypes = {
+        "split_panel",
+        "left_copy_right_hero",
+        "right_copy_left_hero",
+        "claim_panel_side_crop",
+        "balanced_card_layout",
+    }
+
+    if analysis.get("poster_archetype") in split_context_archetypes:
+        return analysis
+
+    analysis["poster_archetype"] = "split_panel"
+    analysis["layout_geometry"] = "split_panel"
+    analysis["graphic_layer"] = ["geometric_blocks"]
+
+    repair_note = (
+        "System repair applied: location-advantage requires a split-context proof archetype "
+        "with project hero on one side and a compact map/connectivity panel on the other. "
+        "Corrected poster_archetype to split_panel and layout_geometry to split_panel."
+    )
+    conflict_notes = analysis.get("conflict_notes") or []
+    if repair_note not in conflict_notes:
+        conflict_notes.append(repair_note)
+    analysis["conflict_notes"] = conflict_notes
+
+    return analysis
 
 
 def choose_ad_project_library_asset(
@@ -1769,20 +2013,13 @@ def rank_archetypes_for_analysis(analysis: dict[str, Any]) -> list[str]:
             ]
         )
     elif post_type == "location_advantage":
-        ranked.extend(
-            [
-                "masterplan_scale_reveal",
-                "philosophy_open_field",
-                "swiss_grid_premium",
-                "white_space_editorial_statement",
-                "side_crop_premium_tower",
-                "clear_sky_statement",
-                "footer_builder_campaign",
-                "soft_editorial_cutout",
-                "centered_monolith",
-                "organic_shape_launch",
-            ]
-        )
+        location_specific_archetypes = [
+            "map_backdrop_project_hero",
+            "split_context_proof",
+        ]
+        ranked.extend(location_specific_archetypes)
+        ranked = dedupe_strings(ranked)
+        return ranked
     elif post_type == "testimonial":
         ranked.extend(
             [
@@ -1866,12 +2103,24 @@ def rank_archetypes_for_analysis(analysis: dict[str, Any]) -> list[str]:
 
 
 def select_route_archetype(raw_value: Any, analysis: dict[str, Any], used: set[str]) -> str:
+    post_type = str(analysis.get("post_type") or "")
+    location_advantage_valid = {"map_backdrop_project_hero", "split_context_proof"}
     candidate = coerce_choice(raw_value, POSTER_ARCHETYPE_VALUES)
     if candidate and candidate not in used:
-        return candidate
+        if post_type == "location_advantage" and candidate not in location_advantage_valid:
+            pass
+        else:
+            return candidate
     for fallback in rank_archetypes_for_analysis(analysis):
         if fallback not in used:
+            if post_type == "location_advantage" and fallback not in location_advantage_valid:
+                continue
             return fallback
+    if post_type == "location_advantage":
+        valid_remaining = [a for a in location_advantage_valid if a not in used]
+        if valid_remaining:
+            return valid_remaining[0]
+        return list(location_advantage_valid)[0]
     return POSTER_ARCHETYPE_VALUES[0]
 
 
@@ -2075,6 +2324,18 @@ def dedupe_strings(values: list[str]) -> list[str]:
             continue
         seen.add(value)
         result.append(value)
+    return result
+
+
+def dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        key = str(value or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(value.strip())
     return result
 
 

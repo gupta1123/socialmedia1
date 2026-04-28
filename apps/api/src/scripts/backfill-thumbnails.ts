@@ -1,11 +1,12 @@
 import { supabaseAdmin } from "../lib/supabase.js";
-import { createThumbnailFromStorage } from "../lib/thumbnails.js";
+import { createThumbnailFromStorage, isSupportedThumbnailMimeType } from "../lib/thumbnails.js";
 
 type TableName = "creative_outputs" | "brand_assets";
 
 type BackfillRow = {
   id: string;
   storage_path: string;
+  mime_type?: string | null;
   thumbnail_storage_path: string | null;
 };
 
@@ -67,6 +68,14 @@ async function backfillTable(table: TableName, limit: number): Promise<BackfillS
     }
 
     for (const row of rows) {
+      if (!isSupportedThumbnailMimeType(row.mime_type)) {
+        summary.skipped += 1;
+        console.info(
+          `[thumbnail-backfill] skipped ${table}:${row.id} because mime type is not thumbnailable (${row.mime_type})`
+        );
+        continue;
+      }
+
       try {
         const thumbnail = await createThumbnailFromStorage(row.storage_path);
         const { data, error } = await supabaseAdmin
@@ -106,14 +115,19 @@ async function backfillTable(table: TableName, limit: number): Promise<BackfillS
 }
 
 async function fetchBatch(table: TableName, limit: number) {
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from(table)
-    .select("id, storage_path, thumbnail_storage_path")
+    .select(table === "brand_assets" ? "id, storage_path, mime_type, thumbnail_storage_path" : "id, storage_path, thumbnail_storage_path")
     .is("thumbnail_storage_path", null)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true })
-    .limit(limit)
-    .returns<BackfillRow[]>();
+    .limit(limit);
+
+  if (table === "brand_assets") {
+    query = query.like("mime_type", "image/%");
+  }
+
+  const { data, error } = await query.returns<BackfillRow[]>();
 
   if (error) {
     throw error;

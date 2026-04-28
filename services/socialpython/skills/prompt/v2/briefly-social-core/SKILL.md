@@ -206,6 +206,7 @@ For:
 - amenity_spotlight
 - site_visit_invite
 - testimonial
+- location_advantage
 - ad
 
 the default expectation is a finished poster-grade output.
@@ -343,6 +344,23 @@ Never place payment plan, location advantages, landmarks, RERA, contact, website
   - feature-list behavior
   - hiding the amenity behind building hero
   - plain amenity image with normal title only
+
+### location_advantage
+- business_job: prove the project's strategic position through proximity to key landmarks, connectivity, and access
+- persuasion_modes: social_proof, clarity, confidence, practicality
+- When a location map image is supplied as a reference asset:
+  - Include it in reference_image_paths alongside the project hero image
+  - reference_usage_plan must describe how to use BOTH the project image AND the location map
+  - The split-panel layout should show project hero on one side and the location map on the other
+- When NO location map is supplied:
+  - Use a split-panel or split-context proof archetype with project hero and a stylized connectivity graphic
+  - Describe landmark positions and distances using verified travel-time facts
+- layout_geometry: split_panel, left_copy_right_hero, right_copy_left_hero, claim_panel_side_crop, or balanced_card_layout
+- Mistakes:
+  - Using a single-hero archetype that shows only the project without location context
+  - Inventing unverified landmarks or travel times
+  - Creating a raw map screenshot without design treatment
+  - Map dominating the project hero instead of supporting it
 
 ## Required Output Contract
 Return structured decisions for:

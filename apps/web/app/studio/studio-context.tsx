@@ -133,6 +133,7 @@ type StudioContextValue = {
   activeTemplates: BootstrapResponse["styleTemplates"];
   recentOutputs: BootstrapResponse["recentOutputs"];
   recentJobs: BootstrapResponse["recentJobs"];
+  workspaceMembers: BootstrapResponse["workspaceMembers"];
   userEmail: string | null;
   darkMode: boolean;
   toggleDarkMode: () => void;
@@ -168,7 +169,7 @@ type StudioContextValue = {
   generateSeedsForPackage: (promptPackageId: string, promptPackageOverride?: PromptPackage) => Promise<boolean>;
   generateFinalImages: (selectedTemplateId?: string) => Promise<void>;
   generateFinalImagesForPackage: (promptPackageId: string, selectedTemplateId?: string) => Promise<boolean>;
-  leaveFeedback: (outputId: string, verdict: OutputVerdict) => Promise<FeedbackResult | null>;
+  leaveFeedback: (outputId: string, verdict: OutputVerdict, comment?: string) => Promise<FeedbackResult | null>;
   signOut: () => Promise<void>;
 };
 
@@ -198,13 +199,14 @@ const defaultBrandForm: BrandFormState = {
 const defaultBriefForm: BriefFormState = {
   createMode: "post",
   channel: "instagram-feed",
-  format: "square",
+  format: "portrait",
   seriesOutputKind: "single_image",
   slideCount: 5,
   goal: "Drive enquiries for a premium residential project",
   prompt: "Create a premium real-estate post with a clear visual angle and restrained copy.",
   audience: "Homebuyers and investors",
   copyMode: "auto",
+  copyLanguage: "en",
   offer: "",
   exactText: "",
   includeBrandLogo: false,
@@ -412,6 +414,11 @@ export function StudioProvider({
   const recentJobs = useMemo(
     () => bootstrap?.recentJobs.filter((job) => job.brandId === activeBrandId) ?? [],
     [bootstrap, activeBrandId]
+  );
+
+  const workspaceMembers = useMemo(
+    () => bootstrap?.workspaceMembers ?? [],
+    [bootstrap]
   );
 
   const hasRunningJobs = useMemo(
@@ -856,7 +863,7 @@ export function StudioProvider({
     }
   }
 
-  async function leaveFeedback(outputId: string, verdict: OutputVerdict) {
+  async function leaveFeedback(outputId: string, verdict: OutputVerdict, comment?: string) {
     if (!sessionToken) {
       return null;
     }
@@ -865,14 +872,11 @@ export function StudioProvider({
     setPendingTargetKey(`output:${outputId}:feedback:${verdict}`);
 
     try {
+      const feedbackReason = comment || (verdict === "approved" ? "Strong fit for the brand." : verdict === "off-brand" ? "Rejected as not aligned with the brand." : "Needs more refinement.");
       const result = await submitFeedback(sessionToken, outputId, {
         verdict,
-        reason:
-          verdict === "approved"
-            ? "Strong fit for the brand."
-            : verdict === "off-brand"
-              ? "Rejected as not aligned with the brand."
-              : "Needs more refinement."
+        reason: feedbackReason,
+        notes: comment && verdict !== "approved" ? comment : undefined
       });
       await refresh(activeBrandId ?? undefined);
       setMessage(
@@ -880,7 +884,9 @@ export function StudioProvider({
           ? "Approved. You can open the post task or schedule it next."
           : verdict === "off-brand"
             ? "Rejected. The post task is now blocked until a stronger option is created."
-          : `Feedback saved: ${verdict}.`
+          : comment
+            ? `Feedback saved: ${comment.substring(0, 50)}${comment.length > 50 ? "..." : ""}`
+            : `Feedback saved: ${verdict}.`
       );
       return result;
     } catch (error) {
@@ -910,6 +916,7 @@ export function StudioProvider({
         activeTemplates,
         recentOutputs,
         recentJobs,
+        workspaceMembers,
         userEmail,
         darkMode,
         toggleDarkMode,

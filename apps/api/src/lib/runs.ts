@@ -606,7 +606,8 @@ function mapOutputRow(row: OutputRow, outputIndex = row.output_index): CreativeO
     reviewState: row.review_state,
     latestVerdict: row.latest_feedback_verdict,
     reviewedAt: row.reviewed_at,
-    createdBy: row.created_by
+    createdBy: row.created_by,
+    previewContext: null
   };
 }
 

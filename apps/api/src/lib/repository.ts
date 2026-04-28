@@ -795,7 +795,8 @@ export async function listWorkspaceOutputs(workspaceId: string, brandId?: string
     reviewState: output.review_state,
     latestVerdict: output.latest_feedback_verdict,
     reviewedAt: output.reviewed_at,
-    createdBy: output.created_by
+    createdBy: output.created_by,
+    previewContext: null
   }));
 }
 

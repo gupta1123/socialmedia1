@@ -29,6 +29,7 @@ import { buildFestivalPromptGuidance } from "./festival-prompt-guidance.js";
 import { compilePromptPackageMock } from "./mock-creative-director.js";
 import { buildPostTypePromptGuidance } from "./post-type-prompt-guidance.js";
 import { buildProjectPromptGuidance } from "./project-prompt-guidance.js";
+import { localizePromptPackageCopy } from "./prompt-localization.js";
 import { createSignedUrl } from "./storage.js";
 import { deriveAspectRatio } from "./utils.js";
 
@@ -195,11 +196,20 @@ export async function compilePromptPackageV2(input: Input) {
   const mode = resolveCompilerV2Mode();
 
   if (mode === "mock") {
-    return buildV2MockResult(normalizedInput);
+    return localizePromptPackageCopy(buildV2MockResult(normalizedInput), {
+      brandName: normalizedInput.brandName,
+      projectName: normalizedInput.projectName,
+      brief: normalizedInput.brief
+    });
   }
 
   try {
-    return await runAgnoCreativeDirectorV2(normalizedInput);
+    const compiled = await runAgnoCreativeDirectorV2(normalizedInput);
+    return await localizePromptPackageCopy(compiled, {
+      brandName: normalizedInput.brandName,
+      projectName: normalizedInput.projectName,
+      brief: normalizedInput.brief
+    });
   } catch (error) {
     resetV2WorkerState();
     throw error;
@@ -1091,7 +1101,8 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
     projectName: useProjectContext ? input.projectName : null,
     projectProfile: useProjectContext ? input.projectProfile : null,
     brandAssets: input.brandAssets ?? [],
-    projectId: useProjectContext ? input.projectId : null
+    projectId: useProjectContext ? input.projectId : null,
+    selectedReferenceAssetIds: input.brief.referenceAssetIds
   });
   const referenceStrategy = normalizeReferenceStrategy(raw.referenceStrategy, input);
   const templateType = normalizeTemplateType(raw.templateType, input);
@@ -1456,7 +1467,8 @@ function buildV2CandidateAssets(input: Input) {
     projectName: useProjectContext ? input.projectName : null,
     projectProfile: useProjectContext ? input.projectProfile : null,
     brandAssets: input.brandAssets ?? [],
-    projectId: useProjectContext ? input.projectId : null
+    projectId: useProjectContext ? input.projectId : null,
+    selectedReferenceAssetIds: input.brief.referenceAssetIds
   });
   const amenityFocusResolution = isAmenityFocusedPostType(input.postType?.code ?? null)
     ? resolveAmenityFocus({
@@ -1649,7 +1661,8 @@ function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
     projectName: useProjectContext ? input.projectName : null,
     projectProfile: useProjectContext ? input.projectProfile : null,
     brandAssets: input.brandAssets ?? [],
-    projectId: useProjectContext ? input.projectId : null
+    projectId: useProjectContext ? input.projectId : null,
+    selectedReferenceAssetIds: input.brief.referenceAssetIds
   });
   const candidateAssetState = buildV2CandidateAssets(input);
   return {

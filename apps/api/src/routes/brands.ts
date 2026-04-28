@@ -16,7 +16,7 @@ import {
 import { getProject } from "../lib/planning-repository.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { createSignedImageUrls, removeStorageObjects, uploadBufferToStorage } from "../lib/storage.js";
-import { createThumbnailFromBuffer } from "../lib/thumbnails.js";
+import { createThumbnailFromBufferOrNull } from "../lib/thumbnails.js";
 import { buildStoragePath, randomId, slugify } from "../lib/utils.js";
 import { invalidateRuntimeCache } from "../lib/runtime-cache.js";
 
@@ -391,7 +391,10 @@ export async function registerBrandRoutes(app: FastifyInstance) {
     });
 
     await uploadBufferToStorage(storagePath, buffer, filePart.mimetype);
-    const thumbnail = await createThumbnailFromBuffer(storagePath, buffer).catch(() => null);
+    const thumbnail = await createThumbnailFromBufferOrNull(storagePath, buffer, {
+      source: "brand_asset_upload",
+      mimeType: filePart.mimetype
+    });
 
     const { error } = await supabaseAdmin.from("brand_assets").insert({
       id: assetId,

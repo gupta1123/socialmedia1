@@ -781,6 +781,7 @@ describe("compilePromptPackageV2", () => {
       primaryAnchor: null,
       sourcePost: null,
       amenityAnchor: { role: "amenity_image", label: "Pool amenity", storagePath: "amenities/pool.jpg", amenityName: null },
+      locationMapAnchor: null,
       projectAnchor: { role: "project_image", label: "Building", storagePath: "project/building.jpg" },
       brandLogo: { role: "brand_logo", label: "Logo", storagePath: "brand/logo.png" },
       complianceQr: null,

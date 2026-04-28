@@ -109,7 +109,8 @@ export async function compileDeliverablePromptPackage(params: {
     projectName: project?.name ?? null,
     projectProfile: projectProfileVersion?.profile ?? null,
     brandAssets: allAssets,
-    projectId: project?.id ?? null
+    projectId: project?.id ?? null,
+    selectedReferenceAssetIds: brief.referenceAssetIds
   });
 
   const inferredReferenceSelection = buildInferredReferenceSelection({
@@ -446,9 +447,11 @@ export async function applyApprovalDecision(params: {
     const reviewState =
       params.action === "approve"
         ? "approved"
-        : params.action === "close"
-          ? "closed"
-          : "needs_revision";
+        : params.action === "reject"
+          ? "needs_revision"
+          : params.action === "close"
+            ? "needs_revision"
+            : "needs_revision";
     await supabaseAdmin
       .from("creative_outputs")
       .update({
@@ -765,8 +768,8 @@ export function resolveApprovalState(
     default:
       return {
         postVersionStatus: "archived",
-        deliverableStatus: currentApprovedPostVersionId ? "approved" : "review",
-        approvedPostVersionId: currentApprovedPostVersionId
+        deliverableStatus: currentApprovedPostVersionId ? "review" : "review",
+        approvedPostVersionId: null
       };
   }
 }

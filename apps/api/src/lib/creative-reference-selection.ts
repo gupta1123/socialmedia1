@@ -26,6 +26,15 @@ const AMENITY_MATCHES = [
   "cricket",
 ];
 
+export type ReferenceSelectionTrace = {
+  explicitReferenceAssetIds: string[];
+  inferredReferenceAssetIds: string[];
+  finalReferenceAssetIds: string[];
+  amenityFocus: string | null;
+  amenityFocusSource: "user_selected" | "brief_text" | "project_profile" | "inferred" | "none";
+  referenceSelectionSource: "user_selection" | "inference" | "mixed";
+};
+
 type InferredReferenceSelectionInput = {
   postTypeCode?: string | null;
   isFestiveGreeting?: boolean;
@@ -63,6 +72,30 @@ export function isAmenityFocusedPostType(postTypeCode: string | null | undefined
   return postTypeCode === "amenity-spotlight";
 }
 
+export function resolveAmenityFocusFromSelectedAssets(
+  selectedAssetIds: string[],
+  allAssets: BrandAssetRecord[]
+): { focusAmenity: string | null; source: "user_selected" | "none" } {
+  const selectedAmenityAssets = allAssets.filter(
+    (asset) => selectedAssetIds.includes(asset.id) && isAmenityReferenceAsset(asset)
+  );
+
+  if (selectedAmenityAssets.length === 0) {
+    return { focusAmenity: null, source: "none" };
+  }
+
+  const firstSelectedAmenity = selectedAmenityAssets[0]!;
+  const amenityName = inferAmenityNameFromAssetParts(
+    firstSelectedAmenity.label,
+    firstSelectedAmenity.metadataJson ?? {}
+  );
+
+  return {
+    focusAmenity: amenityName ?? null,
+    source: "user_selected"
+  };
+}
+
 export function inferAmenityNameFromAssetParts(
   label: string,
   metadataJson: Record<string, unknown> | null | undefined
@@ -92,6 +125,18 @@ export function isAmenityReferenceAsset(asset: BrandAssetRecord) {
   }
 
   return Boolean(inferAmenityNameFromAssetParts(asset.label, metadata));
+}
+
+export function isLocationMapAsset(asset: BrandAssetRecord) {
+  if (asset.kind !== "reference") {
+    return false;
+  }
+
+  const metadata = asRecord(asset.metadataJson);
+  const subjectType = typeof metadata.subjectType === "string" ? metadata.subjectType.toLowerCase() : "";
+  const viewType = typeof metadata.viewType === "string" ? metadata.viewType.toLowerCase() : "";
+
+  return subjectType === "location_map" || viewType === "map";
 }
 
 export function resolveAmenityFocus(input: AmenityFocusInput): AmenityFocusSelection {
@@ -213,26 +258,90 @@ export function buildInferredReferenceSelection(input: InferredReferenceSelectio
   const explicitReferenceAssetIds = dedupeStrings(input.explicitReferenceAssetIds ?? []);
   const amenityFocused = isAmenityFocusedPostType(input.postTypeCode);
   const sampleFlatFocused = isSampleFlatFocusedPostType(input.postTypeCode);
+  const hasUserSelectedReferences = explicitReferenceAssetIds.length > 0;
+
   if (input.isFestiveGreeting) {
     return {
       referenceAssetIds: explicitReferenceAssetIds,
       amenityAssetIds: [] as string[],
+      trace: {
+        explicitReferenceAssetIds,
+        inferredReferenceAssetIds: [] as string[],
+        finalReferenceAssetIds: explicitReferenceAssetIds,
+        amenityFocus: null,
+        amenityFocusSource: "none" as const,
+        referenceSelectionSource: hasUserSelectedReferences ? "user_selection" as const : "inference" as const,
+      },
     };
   }
 
-  const amenityAssetIds =
-    amenityFocused
-      ? dedupeStrings(
-          (input.allAssets ?? [])
-            .filter((asset) => asset.projectId === input.projectId && isAmenityReferenceAsset(asset))
-            .filter((asset) => assetMatchesAmenityFocus(asset, input.focusAmenity ?? null))
-            .map((asset) => asset.id)
-        )
-      : [];
+  const inferredAmenityFocusResult = resolveAmenityFocus({
+    briefText: null,
+    projectAmenityNames: null,
+    allAssets: input.allAssets ?? [],
+    projectId: input.projectId ?? null,
+    seed: null,
+  });
+
+  const userSelectedAmenityFocus = hasUserSelectedReferences
+    ? resolveAmenityFocusFromSelectedAssets(explicitReferenceAssetIds, input.allAssets ?? [])
+    : { focusAmenity: null, source: "none" as const };
+
+  const amenityFocusSource: ReferenceSelectionTrace["amenityFocusSource"] =
+    userSelectedAmenityFocus.source === "user_selected"
+      ? "user_selected"
+      : input.focusAmenity
+        ? "brief_text"
+        : inferredAmenityFocusResult.source === "inferred"
+          ? "inferred"
+          : inferredAmenityFocusResult.source === "explicit"
+            ? "brief_text"
+            : "none";
+
+  const amenityFocus =
+    userSelectedAmenityFocus.focusAmenity ?? input.focusAmenity ?? inferredAmenityFocusResult.focusAmenity ?? null;
+
+  const projectAmenityAssetIds = amenityFocused
+    ? dedupeStrings(
+        (input.allAssets ?? [])
+          .filter((asset) => asset.projectId === input.projectId && isAmenityReferenceAsset(asset))
+          .map((asset) => asset.id)
+      )
+    : [];
+
+  const focusedAmenityAssetIds = amenityFocus
+    ? projectAmenityAssetIds.filter((id) => {
+        const asset = (input.allAssets ?? []).find((a) => a.id === id);
+        return asset && assetMatchesAmenityFocus(asset, amenityFocus);
+      })
+    : projectAmenityAssetIds;
+
+  if (hasUserSelectedReferences) {
+    const finalReferenceAssetIds = [...explicitReferenceAssetIds];
+    const selectedAmenityAssetIds = dedupeStrings(
+      (input.allAssets ?? [])
+        .filter((asset) => explicitReferenceAssetIds.includes(asset.id) && isAmenityReferenceAsset(asset))
+        .map((asset) => asset.id)
+    );
+
+    return {
+      referenceAssetIds: finalReferenceAssetIds,
+      amenityAssetIds: selectedAmenityAssetIds,
+      trace: {
+        explicitReferenceAssetIds,
+        inferredReferenceAssetIds: [],
+        finalReferenceAssetIds,
+        amenityFocus,
+        amenityFocusSource,
+        referenceSelectionSource: "user_selection",
+      },
+    };
+  }
+
   const explicitAmenityAssetIds = dedupeStrings(
     (input.allAssets ?? [])
       .filter((asset) => explicitReferenceAssetIds.includes(asset.id) && isAmenityReferenceAsset(asset))
-      .filter((asset) => assetMatchesAmenityFocus(asset, input.focusAmenity ?? null))
+      .filter((asset) => assetMatchesAmenityFocus(asset, amenityFocus))
       .map((asset) => asset.id)
   );
   const explicitNonAmenityAssetIds = dedupeStrings(
@@ -242,16 +351,44 @@ export function buildInferredReferenceSelection(input: InferredReferenceSelectio
     )
   );
 
-  const referenceAssetIds = dedupeStrings([
-    ...explicitNonAmenityAssetIds,
-    ...explicitAmenityAssetIds,
-    ...amenityAssetIds,
+  const inferredReferenceAssetIds = dedupeStrings([
+    ...focusedAmenityAssetIds,
     ...(amenityFocused ? [] : input.projectImageAssetIds ?? []),
     ...(amenityFocused || !sampleFlatFocused ? [] : input.sampleFlatImageIds ?? []),
-    ...(input.brandReferenceAssetIds ?? []),
+    ...input.brandReferenceAssetIds ?? [],
   ]);
 
-  return { referenceAssetIds, amenityAssetIds };
+  const finalReferenceAssetIds = dedupeStrings([
+    ...explicitNonAmenityAssetIds,
+    ...explicitAmenityAssetIds,
+    ...inferredReferenceAssetIds,
+  ]);
+
+  // Auto-include location map assets for location-advantage when no user refs selected
+  const locationMapAssetIds = input.postTypeCode === "location-advantage" && !hasUserSelectedReferences
+    ? dedupeStrings(
+        (input.allAssets ?? [])
+          .filter((asset) => asset.projectId === input.projectId && isLocationMapAsset(asset))
+          .map((asset) => asset.id)
+      )
+    : [];
+
+  if (locationMapAssetIds.length > 0) {
+    finalReferenceAssetIds.push(...locationMapAssetIds);
+  }
+
+  return {
+    referenceAssetIds: finalReferenceAssetIds,
+    amenityAssetIds: explicitAmenityAssetIds.length > 0 ? explicitAmenityAssetIds : focusedAmenityAssetIds,
+    trace: {
+      explicitReferenceAssetIds,
+      inferredReferenceAssetIds,
+      finalReferenceAssetIds,
+      amenityFocus,
+      amenityFocusSource,
+      referenceSelectionSource: explicitReferenceAssetIds.length > 0 ? "mixed" : "inference",
+    },
+  };
 }
 
 export function isSampleFlatFocusedPostType(postTypeCode: string | null | undefined) {

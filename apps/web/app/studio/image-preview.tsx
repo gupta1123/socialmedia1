@@ -356,6 +356,10 @@ function isLongPreviewDetail(value: string) {
   return value.length > 90;
 }
 
+function isPromptDisclosureLabel(value: string) {
+  return ["prompt", "final prompt", "seed prompt", "image prompt", "generation prompt"].includes(normalizeText(value));
+}
+
 function getPreviewSummary(preview: ImagePreviewPayload) {
   return preview.subtitle?.trim() || preview.meta?.trim() || null;
 }
@@ -377,6 +381,10 @@ function getPreviewDetails(preview: ImagePreviewPayload, summary: string | null,
   );
 
   return (preview.details ?? []).filter((detail) => {
+    if (isPromptDisclosureLabel(detail.label)) {
+      return false;
+    }
+
     const normalizedValue = normalizeText(detail.value);
     if (!normalizedValue) {
       return false;
@@ -398,9 +406,14 @@ function getPreviewSections(preview: ImagePreviewPayload, summary: string | null
   );
 
   return (preview.sections ?? [])
+    .filter((section) => !isPromptDisclosureLabel(section.title))
     .map((section) => ({
       ...section,
       items: section.items.filter((item) => {
+        if (isPromptDisclosureLabel(item.label)) {
+          return false;
+        }
+
         const normalizedValue = normalizeText(item.value);
         if (!normalizedValue) {
           return false;

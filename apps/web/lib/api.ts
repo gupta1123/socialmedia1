@@ -1399,6 +1399,7 @@ export function getCreativeOutputs(
   token: string,
   filters?: {
     brandId?: string;
+    imageMode?: "full" | "thumbnail";
     reviewState?: CreativeOutputRecord["reviewState"];
     limit?: number;
     offset?: number;
@@ -1407,6 +1408,7 @@ export function getCreativeOutputs(
   return request<CreativeOutputRecord[]>(
     withQuery("/api/creative/outputs", {
       brandId: filters?.brandId,
+      imageMode: filters?.imageMode,
       reviewState: filters?.reviewState,
       limit: typeof filters?.limit === "number" ? String(filters.limit) : undefined,
       offset: typeof filters?.offset === "number" ? String(filters.offset) : undefined

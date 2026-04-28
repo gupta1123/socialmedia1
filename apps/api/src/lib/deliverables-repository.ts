@@ -287,6 +287,7 @@ type ReviewPreviewOutputRow = {
   latest_feedback_verdict: "approved" | "close" | "off-brand" | "wrong-layout" | "wrong-text" | null;
   reviewed_at: string | null;
   created_by: string | null;
+  created_at: string;
 };
 
 const DELIVERABLE_SELECT =
@@ -856,7 +857,8 @@ export async function listReviewQueue(
         review_state,
         latest_feedback_verdict,
         reviewed_at,
-        created_by
+        created_by,
+        created_at
       `)
       .in("post_version_id", postVersionIds)
       .eq("kind", "final")
@@ -1485,7 +1487,9 @@ function mapReviewOutputRow(row: ReviewPreviewOutputRow | null) {
     reviewState: row.review_state,
     latestVerdict: row.latest_feedback_verdict,
     reviewedAt: row.reviewed_at,
-    createdBy: row.created_by
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    previewContext: null
   };
 }
 

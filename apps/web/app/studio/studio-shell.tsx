@@ -498,25 +498,23 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setCollapsed(window.localStorage.getItem("studio-sidebar-collapsed") === "true");
-    setCreateSidebarExpanded(window.localStorage.getItem("studio-create-sidebar-expanded") === "true");
-    setEditorSidebarExpanded(window.localStorage.getItem("studio-editor-sidebar-expanded") === "true");
     setSidebarPrefsReady(true);
   }, []);
+
+  useEffect(() => {
+    if (isCreateRoute) {
+      setCreateSidebarExpanded(false);
+      return;
+    }
+    if (isEditorRoute) {
+      setEditorSidebarExpanded(false);
+    }
+  }, [isCreateRoute, isEditorRoute]);
 
   useEffect(() => {
     if (!sidebarPrefsReady) return;
     window.localStorage.setItem("studio-sidebar-collapsed", collapsed ? "true" : "false");
   }, [collapsed, sidebarPrefsReady]);
-
-  useEffect(() => {
-    if (!sidebarPrefsReady) return;
-    window.localStorage.setItem("studio-create-sidebar-expanded", createSidebarExpanded ? "true" : "false");
-  }, [createSidebarExpanded, sidebarPrefsReady]);
-
-  useEffect(() => {
-    if (!sidebarPrefsReady) return;
-    window.localStorage.setItem("studio-editor-sidebar-expanded", editorSidebarExpanded ? "true" : "false");
-  }, [editorSidebarExpanded, sidebarPrefsReady]);
 
   async function handleSignOut() {
     setSigningOut(true);

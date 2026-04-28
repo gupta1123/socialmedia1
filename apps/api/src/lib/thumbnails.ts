@@ -14,6 +14,62 @@ export type ThumbnailMetadata = {
   thumbnailBytes: number;
 };
 
+type ThumbnailFailureContext = {
+  source: string;
+  storagePath: string;
+  mimeType?: string | null;
+};
+
+export function isSupportedThumbnailMimeType(mimeType?: string | null) {
+  if (!mimeType) {
+    return true;
+  }
+
+  return mimeType.toLowerCase().startsWith("image/");
+}
+
+export function logThumbnailFailure(context: ThumbnailFailureContext, error: unknown) {
+  console.warn("[thumbnail] failed", {
+    source: context.source,
+    storagePath: context.storagePath,
+    mimeType: context.mimeType ?? null,
+    error: error instanceof Error ? error.message : error
+  });
+}
+
+export async function createThumbnailFromBufferOrNull(
+  storagePath: string,
+  buffer: Buffer,
+  context: Omit<ThumbnailFailureContext, "storagePath">
+): Promise<ThumbnailMetadata | null> {
+  if (!isSupportedThumbnailMimeType(context.mimeType)) {
+    return null;
+  }
+
+  try {
+    return await createThumbnailFromBuffer(storagePath, buffer);
+  } catch (error) {
+    logThumbnailFailure({ ...context, storagePath }, error);
+    return null;
+  }
+}
+
+export async function createThumbnailFromStorageOrNull(
+  storagePath: string,
+  context: Omit<ThumbnailFailureContext, "storagePath">
+): Promise<ThumbnailMetadata | null> {
+  if (!isSupportedThumbnailMimeType(context.mimeType)) {
+    return null;
+  }
+
+  try {
+    return await createThumbnailFromStorage(storagePath);
+  } catch (error) {
+    logThumbnailFailure({ ...context, storagePath }, error);
+    return null;
+  }
+}
+
 export async function createThumbnailFromBuffer(storagePath: string, buffer: Buffer): Promise<ThumbnailMetadata> {
   const thumbnailStoragePath = buildThumbnailStoragePath(storagePath);
   const transformed = sharp(buffer, { animated: false })
