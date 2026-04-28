@@ -11,6 +11,10 @@ type PostTypePromptInput = {
   brandAssets?: BrandAssetRecord[] | null | undefined;
   projectId?: string | null | undefined;
   selectedReferenceAssetIds?: string[] | null;
+  resolvedAmenityFocus?: {
+    focusAmenity: string | null;
+    source: "explicit" | "inferred" | "none" | "user_selected";
+  } | null;
 };
 
 type PostTypeVisualRecipe = {
@@ -1048,6 +1052,10 @@ function compactStrings(values: Array<string | null | undefined>) {
 function chooseAmenityFocus(
   input: PostTypePromptInput
 ): { focusAmenity: string | null; source: "explicit" | "inferred" | "none" | "user_selected" } {
+  if (input.resolvedAmenityFocus) {
+    return input.resolvedAmenityFocus;
+  }
+
   const selectedRefs = input.selectedReferenceAssetIds ?? [];
   if (selectedRefs.length > 0 && input.brandAssets) {
     const userSelectedFocus = resolveAmenityFocusFromSelectedAssets(selectedRefs, input.brandAssets);

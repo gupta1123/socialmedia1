@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 type ImagePreviewPayload = {
   src: string;
   alt: string;
+  id?: string | undefined;
   title?: string | undefined;
   subtitle?: string | undefined;
   meta?: string | undefined;
@@ -21,8 +22,13 @@ type ImagePreviewPayload = {
   }> | undefined;
 };
 
+type ImagePreviewCollectionItem = ImagePreviewPayload & {
+  id: string;
+  thumbnailSrc?: string | undefined;
+};
+
 type ImagePreviewContextValue = {
-  openPreview: (payload: ImagePreviewPayload) => void;
+  openPreview: (payload: ImagePreviewPayload, collection?: ImagePreviewCollectionItem[]) => void;
   closePreview: () => void;
 };
 
@@ -30,8 +36,14 @@ const ImagePreviewContext = createContext<ImagePreviewContextValue | null>(null)
 
 export function ImagePreviewProvider({ children }: { children: ReactNode }) {
   const [preview, setPreview] = useState<ImagePreviewPayload | null>(null);
+  const [collection, setCollection] = useState<ImagePreviewCollectionItem[]>([]);
   const [mounted, setMounted] = useState(false);
   const [downloading, setDownloading] = useState(false);
+
+  const activeCollectionIndex = preview
+    ? collection.findIndex((item) => item.id === preview.id || item.src === preview.src)
+    : -1;
+  const hasCollectionNavigation = collection.length > 1 && activeCollectionIndex >= 0;
 
   useEffect(() => {
     setMounted(true);
@@ -47,6 +59,17 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setPreview(null);
+        setCollection([]);
+        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        showAdjacentPreview(-1);
+        return;
+      }
+
+      if (event.key === "ArrowRight") {
+        showAdjacentPreview(1);
       }
     }
 
@@ -57,15 +80,38 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [preview]);
+  }, [preview, collection, activeCollectionIndex]);
 
   const value = useMemo<ImagePreviewContextValue>(
     () => ({
-      openPreview: (payload) => setPreview(payload),
-      closePreview: () => setPreview(null)
+      openPreview: (payload, nextCollection) => {
+        setPreview(payload);
+        setCollection(nextCollection?.length ? nextCollection : []);
+      },
+      closePreview: () => {
+        setPreview(null);
+        setCollection([]);
+      }
     }),
     []
   );
+
+  function closePreview() {
+    setPreview(null);
+    setCollection([]);
+  }
+
+  function showAdjacentPreview(direction: -1 | 1) {
+    if (!hasCollectionNavigation) {
+      return;
+    }
+
+    const nextIndex = (activeCollectionIndex + direction + collection.length) % collection.length;
+    const nextPreview = collection[nextIndex];
+    if (nextPreview) {
+      setPreview(nextPreview);
+    }
+  }
 
   async function handleDownloadAsset() {
     if (!preview?.src || downloading) {
@@ -99,7 +145,7 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
         ? createPortal(
             <div
               className="image-preview-overlay"
-              onClick={() => setPreview(null)}
+              onClick={closePreview}
               role="presentation"
             >
               <div
@@ -122,7 +168,7 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                   <button
                     aria-label="Close image preview"
                     className="image-preview-close"
-                    onClick={() => setPreview(null)}
+                    onClick={closePreview}
                     type="button"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -132,9 +178,45 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
                   </button>
 
                   <div className="image-preview-frame">
+                    {hasCollectionNavigation ? (
+                      <>
+                        <button
+                          aria-label="Show previous image"
+                          className="image-preview-nav-button is-prev"
+                          onClick={() => showAdjacentPreview(-1)}
+                          type="button"
+                        >
+                          ←
+                        </button>
+                        <button
+                          aria-label="Show next image"
+                          className="image-preview-nav-button is-next"
+                          onClick={() => showAdjacentPreview(1)}
+                          type="button"
+                        >
+                          →
+                        </button>
+                      </>
+                    ) : null}
                     <div className="image-preview-media">
                       <img alt={preview.alt} src={preview.src} />
                     </div>
+                    {hasCollectionNavigation ? (
+                      <div className="image-preview-strip" aria-label="Preview images">
+                        {collection.map((item, index) => (
+                          <button
+                            aria-label={`Show image ${index + 1}`}
+                            aria-current={index === activeCollectionIndex ? "true" : undefined}
+                            className={`image-preview-strip-item ${index === activeCollectionIndex ? "is-active" : ""}`}
+                            key={item.id}
+                            onClick={() => setPreview(item)}
+                            type="button"
+                          >
+                            <img alt={item.alt} src={item.thumbnailSrc ?? item.src} />
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
 
                   {hasInspectorContent(preview) ? (

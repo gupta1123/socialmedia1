@@ -284,6 +284,12 @@ class VerificationResult(BaseModel):
 class NotebookAnalystInput(BaseModel):
     project_slug: str = Field(..., description="Canonical project slug supplied by orchestration.")
     user_brief: str = Field(..., description="Raw user brief for the social creative.")
+    requested_variation_count: int = Field(
+        default=1,
+        ge=1,
+        le=6,
+        description="Exact number of prompt options requested by orchestration.",
+    )
     selected_post_type: PostType | None = Field(
         None,
         description="Explicit post type selected by the caller. If provided, use this instead of inferring from the brief.",
@@ -339,6 +345,12 @@ class NotebookAssetDecision(BaseModel):
 
 class NotebookBriefAnalysis(BaseModel):
     project_slug: str = Field(..., description="Canonical project slug.")
+    requested_variation_count: int = Field(
+        default=1,
+        ge=1,
+        le=6,
+        description="Exact number of prompt options requested by orchestration.",
+    )
     project_id: str | None = Field(None)
     project_name: str = Field(..., description="Display name of the project.")
     post_type: PostType
@@ -447,6 +459,10 @@ class NotebookCraftedPrompt(BaseModel):
     prompt: str = Field(..., description="Final image generation prompt.")
     negative: str = Field(..., description="Compact negative string.")
     rationale: str = Field(..., description="Short explanation of why this prompt structure works.")
+    variations: list[PromptVariationOutput] = Field(
+        default_factory=list,
+        description="Prompt options. Must contain exactly requested_variation_count items when more than one option is requested.",
+    )
 
 
 class NotebookVerifierInput(BaseModel):
@@ -460,3 +476,7 @@ class NotebookVerificationResult(BaseModel):
     revised_prompt: str = Field(..., description="Verified or revised prompt.")
     revised_negative: str = Field(..., description="Verified or revised negative constraints.")
     verification_summary: str = Field(..., description="Short summary of what was checked.")
+    variations: list[PromptVariationOutput] = Field(
+        default_factory=list,
+        description="Verified prompt options. Must contain exactly requested_variation_count items when more than one option is requested.",
+    )

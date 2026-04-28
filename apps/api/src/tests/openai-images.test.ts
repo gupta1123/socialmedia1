@@ -58,3 +58,49 @@ describe("generateOpenAiImages", () => {
     expect(result.images[0]?.url).toBe("data:image/png;base64,Zm9v");
   });
 });
+
+describe("applyOpenAiDirectEdit", () => {
+  it("sends a direct image edit request with the uploaded source image", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = init?.body as FormData;
+      expect(body).toBeInstanceOf(FormData);
+      expect(body.get("model")).toBe("gpt-image-2");
+      expect(body.get("prompt")).toBe("Remove the extra text and keep the building unchanged");
+      expect(body.get("n")).toBe("1");
+      expect(body.get("size")).toBe("1024x1536");
+      expect(body.get("quality")).toBe("high");
+      expect(body.get("output_format")).toBe("png");
+      expect(body.get("input_fidelity")).toBeNull();
+      expect(body.getAll("image[]")).toHaveLength(1);
+
+      return new Response(
+        JSON.stringify({
+          data: [{ b64_json: "ZWRpdGVk" }],
+          output_format: "png",
+        }),
+        { status: 200 },
+      );
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { applyOpenAiDirectEdit } = await import("../lib/openai-images.js");
+
+    const result = await applyOpenAiDirectEdit({
+      model: "gpt-image-2",
+      prompt: "Remove the extra text and keep the building unchanged",
+      width: 1080,
+      height: 1350,
+      image: {
+        buffer: Buffer.from("source-image"),
+        contentType: "image/png",
+        fileName: "source.png",
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.model).toBe("gpt-image-2");
+    expect(result.imageUrl).toBe("data:image/png;base64,ZWRpdGVk");
+    expect(result.imageDataUrl).toBe("data:image/png;base64,ZWRpdGVk");
+  });
+});

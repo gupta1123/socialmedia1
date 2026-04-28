@@ -477,6 +477,9 @@ select {
 
 .image-preview-frame {
   position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 16px;
   padding: 28px;
   min-height: min(78vh, 900px);
   background:
@@ -502,10 +505,75 @@ select {
 .image-preview-media img {
   display: block;
   max-width: 100%;
-  max-height: calc(100vh - 132px);
+  max-height: calc(100vh - 230px);
   object-fit: contain;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.92);
+}
+
+.image-preview-nav-button {
+  position: absolute;
+  top: 50%;
+  z-index: 3;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(30, 26, 20, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--ink);
+  font-size: 1.35rem;
+  font-weight: 700;
+  box-shadow: 0 14px 32px rgba(31, 24, 15, 0.12);
+  transform: translateY(-50%);
+}
+
+.image-preview-nav-button:hover,
+.image-preview-nav-button:focus-visible {
+  background: white;
+  outline: none;
+}
+
+.image-preview-nav-button.is-prev {
+  left: 42px;
+}
+
+.image-preview-nav-button.is-next {
+  right: 42px;
+}
+
+.image-preview-strip {
+  display: flex;
+  gap: 10px;
+  max-width: 100%;
+  padding: 4px 2px;
+  overflow-x: auto;
+}
+
+.image-preview-strip-item {
+  flex: 0 0 auto;
+  width: 54px;
+  height: 68px;
+  padding: 2px;
+  border: 1px solid rgba(30, 26, 20, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  opacity: 0.72;
+}
+
+.image-preview-strip-item.is-active {
+  border-color: rgba(17, 17, 17, 0.72);
+  opacity: 1;
+}
+
+.image-preview-strip-item img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: 6px;
 }
 
 .image-preview-inspector {
@@ -745,6 +813,19 @@ select {
 
   .image-preview-media img {
     max-height: 52vh;
+  }
+
+  .image-preview-nav-button {
+    width: 38px;
+    height: 38px;
+  }
+
+  .image-preview-nav-button.is-prev {
+    left: 28px;
+  }
+
+  .image-preview-nav-button.is-next {
+    right: 28px;
   }
 
   .image-preview-detail-row {

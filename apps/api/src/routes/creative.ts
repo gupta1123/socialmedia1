@@ -67,7 +67,8 @@ import {
   inferAmenityNameFromAssetParts,
   isAmenityFocusedPostType,
   isAmenityReferenceAsset,
-  isLocationMapAsset
+  isLocationMapAsset,
+  resolveAmenityFocus
 } from "../lib/creative-reference-selection.js";
 import {
   buildV2RoleAwarePrompt,
@@ -205,6 +206,25 @@ async function prepareV2CompileContext(params: {
   const brandReferenceImages = Array.isArray(brandProfileVersion.profile.referenceAssetIds)
     ? brandProfileVersion.profile.referenceAssetIds
     : [];
+  const amenityFocusResolution = isAmenityFocusedPostType(postType.code)
+    ? resolveAmenityFocus({
+        briefText: [brief.prompt, brief.exactText ?? ""].join(" "),
+        projectAmenityNames: [
+          ...(projectProfileVersion?.profile.heroAmenities ?? []),
+          ...(projectProfileVersion?.profile.amenities ?? [])
+        ],
+        allAssets,
+        projectId: project?.id ?? null,
+        seed: [
+          postType.code,
+          project?.name ?? "",
+          brief.prompt,
+          brief.channel,
+          brief.format,
+          brief.templateType ?? ""
+        ].join("|")
+      })
+    : null;
   const postTypeGuidance = buildPostTypePromptGuidance({
     brandName: brand.name,
     brief,
@@ -216,7 +236,9 @@ async function prepareV2CompileContext(params: {
     projectName: project?.name ?? null,
     projectProfile: projectProfileVersion?.profile ?? null,
     brandAssets: allAssets,
-    projectId: project?.id ?? null
+    projectId: project?.id ?? null,
+    selectedReferenceAssetIds: brief.referenceAssetIds,
+    resolvedAmenityFocus: amenityFocusResolution
   });
   const inferredReferenceSelection = buildInferredReferenceSelection({
     postTypeCode: postType.code,
@@ -2852,8 +2874,10 @@ function normalizeAsyncVariations(
   fallback: {
     seedPrompt: string;
     finalPrompt: string;
-  }
+  },
+  requestedCount = 1
 ) {
+  const targetCount = Math.max(1, Math.min(6, Math.floor(requestedCount)));
   const rows = Array.isArray(value) ? value : [];
   const normalized = rows
     .map((row, index) => {
@@ -2880,21 +2904,64 @@ function normalizeAsyncVariations(
     })
     .filter((row): row is NonNullable<typeof row> => Boolean(row));
 
-  if (normalized.length > 0) {
-    return normalized;
-  }
-
-  return [
+  const routeFallbacks = [
     {
-      id: "variation_1",
       title: "Primary route",
-      strategy: "Primary route",
-      seedPrompt: fallback.seedPrompt,
-      finalPrompt: fallback.finalPrompt,
-      resolvedConstraints: {},
-      compilerTrace: {}
+      strategy: "Primary route"
+    },
+    {
+      title: "Alternate hierarchy",
+      strategy: "Different copy and image hierarchy, same grounded facts",
+      suffix:
+        "Use a clearly different composition from the primary route: change the copy/image hierarchy and hero placement while preserving the same grounded project facts and asset truth."
+    },
+    {
+      title: "Graphic proof route",
+      strategy: "Different proof-led graphic system, same grounded facts",
+      suffix:
+        "Use a clearly different graphic system from the primary route: emphasize proof chips, panels, frames, or structured callouts while preserving the same grounded project facts and asset truth."
+    },
+    {
+      title: "Editorial route",
+      strategy: "Different editorial layout, same grounded facts",
+      suffix:
+        "Use a clearly different editorial structure from the primary route: quieter spacing, alternate crop behavior, and different type hierarchy while preserving the same grounded project facts and asset truth."
+    },
+    {
+      title: "Campaign route",
+      strategy: "Different campaign hierarchy, same grounded facts",
+      suffix:
+        "Use a clearly different campaign structure from the primary route: stronger hook block, clearer CTA hierarchy, and controlled proof elements while preserving the same grounded project facts and asset truth."
+    },
+    {
+      title: "Catalog route",
+      strategy: "Different catalog-style layout, same grounded facts",
+      suffix:
+        "Use a clearly different catalog structure from the primary route: framed image behavior, disciplined labels, and a premium proof strip while preserving the same grounded project facts and asset truth."
     }
   ];
+
+  while (normalized.length < targetCount) {
+    const index = normalized.length;
+    const route = routeFallbacks[index] ?? {
+      title: `Route ${index + 1}`,
+      strategy: "Distinct creative route, same grounded facts",
+      suffix:
+        "Use a visibly different layout and hierarchy from the other routes while preserving the same grounded project facts and asset truth."
+    };
+    const suffix = "suffix" in route && typeof route.suffix === "string" ? route.suffix : "";
+    normalized.push({
+      id: `variation_${index + 1}`,
+      title: route.title,
+      strategy: route.strategy,
+      seedPrompt: fallback.seedPrompt,
+      finalPrompt: suffix ? `${fallback.finalPrompt} ${suffix}` : fallback.finalPrompt,
+      resolvedConstraints: {},
+      compilerTrace: { generatedByFallback: rows.length < targetCount }
+    });
+  }
+
+  return normalized.slice(0, targetCount);
 }
 
 async function buildAsyncV2PromptPackage(params: {
@@ -2987,7 +3054,7 @@ async function buildAsyncV2PromptPackage(params: {
     variations: normalizeAsyncVariations(rawCompiled.variations, {
       seedPrompt,
       finalPrompt
-    }),
+    }, sourceBrief.variationCount ?? env.CREATIVE_STYLE_VARIATION_COUNT),
     resolvedConstraints: {
       ...rawResolvedConstraints,
       projectImageAssetIds: asUuidArray(truthProject.actualProjectImageIds ?? truthProjectProfile.actualProjectImageIds),

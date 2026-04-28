@@ -34,6 +34,7 @@ from .schemas import (
     NotebookVerifierInput,
     PostType,
     PromptPackageOutput,
+    PromptVariationOutput,
     PosterArchetype,
     TextPolicy,
     TextArchitecture,
@@ -326,6 +327,7 @@ def build_analyst_input(payload: dict[str, Any]) -> NotebookAnalystInput:
     return NotebookAnalystInput(
         project_slug=project_slug,
         user_brief=build_user_brief(request_context),
+        requested_variation_count=resolve_variation_count(payload),
         selected_post_type=selected_post_type,
         reference_image_paths=reference_image_paths,
         reference_image_note=None,
@@ -739,6 +741,103 @@ def build_prompt_summary(
     return analysis.objective_summary
 
 
+VARIATION_ROUTE_FALLBACKS = [
+    (
+        "Primary route",
+        "The strongest route selected by the analyst and verifier.",
+        "",
+    ),
+    (
+        "Alternate hierarchy",
+        "A distinct route with a different copy and image hierarchy while preserving the same truth anchors.",
+        "Use a clearly different composition from the primary route: change the copy/image hierarchy, rebalance the hero placement, and keep the same grounded project facts and asset truth.",
+    ),
+    (
+        "Graphic proof route",
+        "A distinct route that leans more on graphic proof devices while preserving the same truth anchors.",
+        "Use a clearly different graphic system from the primary route: emphasize proof chips, panels, frames, or structured callouts while keeping the same grounded project facts and asset truth.",
+    ),
+    (
+        "Editorial route",
+        "A distinct route with a calmer editorial structure while preserving the same truth anchors.",
+        "Use a clearly different editorial structure from the primary route: quieter spacing, alternate crop behavior, and a different type hierarchy while keeping the same grounded project facts and asset truth.",
+    ),
+    (
+        "Campaign route",
+        "A distinct route with stronger campaign clarity while preserving the same truth anchors.",
+        "Use a clearly different campaign structure from the primary route: stronger hook block, clearer CTA hierarchy, and controlled proof elements while keeping the same grounded project facts and asset truth.",
+    ),
+    (
+        "Catalog route",
+        "A distinct route with a catalog-like premium system while preserving the same truth anchors.",
+        "Use a clearly different catalog structure from the primary route: framed image behavior, disciplined labels, and a premium proof strip while keeping the same grounded project facts and asset truth.",
+    ),
+]
+
+
+def variation_fallback(index: int) -> tuple[str, str, str]:
+    if 0 <= index < len(VARIATION_ROUTE_FALLBACKS):
+        return VARIATION_ROUTE_FALLBACKS[index]
+    return (
+        f"Route {index + 1}",
+        "A distinct route preserving the same grounded project and asset truth.",
+        "Use a visibly different layout and hierarchy from the other routes while preserving the same grounded project facts and asset truth.",
+    )
+
+
+def coerce_variation_outputs(
+    requested_count: int,
+    analysis: NotebookBriefAnalysis,
+    crafted: NotebookCraftedPrompt,
+    verified: NotebookVerificationResult,
+) -> list[PromptVariationOutput]:
+    raw_variations: list[PromptVariationOutput] = []
+    if verified.variations:
+        raw_variations = verified.variations
+    elif crafted.variations:
+        raw_variations = crafted.variations
+
+    coerced: list[PromptVariationOutput] = []
+    for index, variation in enumerate(raw_variations[:requested_count]):
+        title, strategy, _ = variation_fallback(index)
+        final_prompt = str(variation.finalPrompt or "").strip()
+        if not final_prompt:
+            continue
+        coerced.append(
+            PromptVariationOutput(
+                title=str(variation.title or title).strip() or title,
+                strategy=str(variation.strategy or strategy).strip() or strategy,
+                finalPrompt=final_prompt,
+            )
+        )
+
+    base_prompt = str(verified.revised_prompt or crafted.prompt or "").strip()
+    while len(coerced) < requested_count and base_prompt:
+        index = len(coerced)
+        title, strategy, suffix = variation_fallback(index)
+        final_prompt = base_prompt
+        if suffix:
+            final_prompt = f"{base_prompt} {suffix}"
+        coerced.append(
+            PromptVariationOutput(
+                title=title,
+                strategy=strategy,
+                finalPrompt=final_prompt,
+            )
+        )
+
+    if not coerced:
+        coerced.append(
+            PromptVariationOutput(
+                title=analysis.poster_archetype.value.replace("_", " ").title(),
+                strategy=analysis.objective_summary,
+                finalPrompt=base_prompt or analysis.objective_summary,
+            )
+        )
+
+    return coerced[:requested_count]
+
+
 def normalize_prompt_package(
     payload: dict[str, Any],
     analysis: NotebookBriefAnalysis,
@@ -757,7 +856,14 @@ def normalize_prompt_package(
     generation_contract = bundle.get("generationContract") or {}
     requested_variation_count = resolve_variation_count(payload)
 
-    clean_prompt = sanitize_public_prompt_text(verified.revised_prompt, bundle)
+    variation_outputs = coerce_variation_outputs(
+        requested_variation_count,
+        analysis,
+        crafted,
+        verified,
+    )
+
+    clean_prompt = sanitize_public_prompt_text(variation_outputs[0].finalPrompt, bundle)
     clean_negative = sanitize_negative_prompt_text(verified.revised_negative, bundle)
     final_prompt = clean_prompt
     if clean_negative:
@@ -766,29 +872,37 @@ def normalize_prompt_package(
     seed_prompt = build_seed_prompt(clean_prompt, analysis, bundle)
     prompt_summary = build_prompt_summary(analysis, clean_prompt)
 
-    normalized_variations = [
-        {
-            "id": "variation_1",
-            "title": analysis.poster_archetype.value.replace("_", " ").title(),
-            "strategy": analysis.objective_summary,
-            "seedPrompt": seed_prompt,
-            "finalPrompt": final_prompt,
-            "referenceStrategy": resolve_reference_strategy(payload),
-            "resolvedConstraints": {
-                "posterArchetype": analysis.poster_archetype.value,
-                "heroPresentation": analysis.hero_presentation.value,
-                "layoutGeometry": analysis.layout_geometry.value,
-                "graphicLayer": [layer.value for layer in analysis.graphic_layer],
-                "textArchitecture": analysis.text_architecture.value,
-                "commercialHook": analysis.commercial_hook.value if analysis.commercial_hook else None,
-                "visualMechanism": analysis.visual_mechanism.value if analysis.visual_mechanism else None,
-            },
-            "compilerTrace": {
-                "verified": verified.approved,
-                "verificationSummary": verified.verification_summary,
-            },
-        }
-    ]
+    normalized_variations = []
+    for index, variation in enumerate(variation_outputs, start=1):
+        variation_clean_prompt = sanitize_public_prompt_text(variation.finalPrompt, bundle)
+        variation_final_prompt = variation_clean_prompt
+        if clean_negative:
+            variation_final_prompt = f"{variation_clean_prompt} Negative prompt: {clean_negative}".strip()
+        variation_seed_prompt = build_seed_prompt(variation_clean_prompt, analysis, bundle)
+        normalized_variations.append(
+            {
+                "id": f"variation_{index}",
+                "title": variation.title,
+                "strategy": variation.strategy,
+                "seedPrompt": variation_seed_prompt,
+                "finalPrompt": variation_final_prompt,
+                "referenceStrategy": resolve_reference_strategy(payload),
+                "resolvedConstraints": {
+                    "posterArchetype": analysis.poster_archetype.value,
+                    "heroPresentation": analysis.hero_presentation.value,
+                    "layoutGeometry": analysis.layout_geometry.value,
+                    "graphicLayer": [layer.value for layer in analysis.graphic_layer],
+                    "textArchitecture": analysis.text_architecture.value,
+                    "commercialHook": analysis.commercial_hook.value if analysis.commercial_hook else None,
+                    "visualMechanism": analysis.visual_mechanism.value if analysis.visual_mechanism else None,
+                },
+                "compilerTrace": {
+                    "verified": verified.approved,
+                    "verificationSummary": verified.verification_summary,
+                    "generatedByFallback": index > len(verified.variations or crafted.variations),
+                },
+            }
+        )
 
     skill_tool_calls = [
         call for call in tool_calls if str(call.get("toolName", "")).startswith("get_skill_")
@@ -915,23 +1029,25 @@ def build_agents() -> dict[str, Any]:
                 "Workflow:",
                 "1. Read the supplied project_slug. It is canonical for this run.",
                 "2. If selected_post_type is provided, use it. Otherwise infer post_type from the brief.",
-                "3. Call get_project_details(project_slug) and get_brand_guidelines().",
-                "4. If template_id is provided, call get_template_details(template_id).",
-                "5. The attached images correspond only to reference_image_paths and template_image_path in the input.",
-                "6. If reference_image_paths are provided, use vision to understand what the image(s) show, decide the strongest hero, and decide crop / angle / realism treatment.",
-                "7. Treat template_image_path as a style and composition cue only. It must not change project identity.",
-                "8. Treat logo_image_path as exact brand-mark metadata for downstream placement; do not inspect it with vision in the analyst stage.",
-                "9. If reference_image_paths are provided, prefer uploaded_reference as the primary asset source unless the brief clearly needs a project-library asset instead.",
-                "10. If reference_image_paths are empty and the post type requires a truthful visual anchor, you must use a project-library asset when one exists.",
-                "11. For construction_update, if no uploaded reference image is provided, call list_asset_candidates(project_slug, post_type, specific_amenity, occasion, no_building_image, brief_text=user_brief) and choose the truthful construction_progress asset from the project library when available.",
-                "12. Do not use asset_decision.source='none' for construction_update when a project-library construction asset exists.",
-                "13. If you need a project-library asset, call list_asset_candidates(project_slug, post_type, specific_amenity, occasion, no_building_image, brief_text=user_brief).",
-                "14. If asset_decision.source='project_library', copy category, filename, and reference_tag verbatim from the tool output.",
-                "15. If asset_decision.source='uploaded_reference', copy filepath verbatim from the input, set filename to the basename of the chosen path, and set reference_tag=null.",
-                "16. Use asset_decision.source='none' only when visual_mode is graphic_led or no truthful visual anchor fits.",
-                "17. For ad post types, choose exactly one dominant commercial_hook and one visual_mechanism. Keep them narrow and conversion-oriented rather than stylistic.",
-                "18. For location-advantage, MUST use a split-context proof archetype (split_panel, left_copy_right_hero, right_copy_left_hero, claim_panel_side_crop, or balanced_card_layout). The output must include a project hero on one side and a compact map/connectivity proof panel on the other. Do NOT use philosophy_open_field, white_space_editorial_statement, or other single-hero archetypes.",
-                "19. For location-advantage, commercial_hook MUST be 'location' and the visual must surface connectivity facts (nearby landmarks, travel times, location advantages) in a visual proof panel, not just in copy.",
+                "3. Copy requested_variation_count from the input exactly into the analysis output.",
+                "4. Call get_project_details(project_slug) and get_brand_guidelines().",
+                "5. If template_id is provided, call get_template_details(template_id) at most once. If the tool returns no useful template details, set template_id and template_usage_plan to null and continue without retrying.",
+                "6. The attached images correspond only to reference_image_paths and template_image_path in the input.",
+                "7. If reference_image_paths are provided, use vision to understand what the image(s) show, decide the strongest hero, and decide crop / angle / realism treatment.",
+                "7a. Do not write visual observations, explanations, or captions before or after the JSON. Put any image understanding only inside schema fields such as reference_usage_plan, asset_decision.reason, objective_summary, or conflict_notes.",
+                "8. Treat template_image_path as a style and composition cue only. It must not change project identity.",
+                "9. Treat logo_image_path as exact brand-mark metadata for downstream placement; do not inspect it with vision in the analyst stage.",
+                "10. If reference_image_paths are provided, prefer uploaded_reference as the primary asset source unless the brief clearly needs a project-library asset instead.",
+                "11. If reference_image_paths are empty and the post type requires a truthful visual anchor, you must use a project-library asset when one exists.",
+                "12. For construction_update, if no uploaded reference image is provided, call list_asset_candidates(project_slug, post_type, specific_amenity, occasion, no_building_image, brief_text=user_brief) and choose the truthful construction_progress asset from the project library when available.",
+                "13. Do not use asset_decision.source='none' for construction_update when a project-library construction asset exists.",
+                "14. If you need a project-library asset, call list_asset_candidates(project_slug, post_type, specific_amenity, occasion, no_building_image, brief_text=user_brief).",
+                "15. If asset_decision.source='project_library', copy category, filename, and reference_tag verbatim from the tool output.",
+                "16. If asset_decision.source='uploaded_reference', copy filepath verbatim from the input, set filename to the basename of the chosen path, and set reference_tag=null.",
+                "17. Use asset_decision.source='none' only when visual_mode is graphic_led or no truthful visual anchor fits.",
+                "18. For ad post types, choose exactly one dominant commercial_hook and one visual_mechanism. Keep them narrow and conversion-oriented rather than stylistic.",
+                "19. For location-advantage, MUST use a split-context proof archetype (split_panel, left_copy_right_hero, right_copy_left_hero, claim_panel_side_crop, or balanced_card_layout). The output must include a project hero on one side and a compact map/connectivity proof panel on the other. Do NOT use philosophy_open_field, white_space_editorial_statement, or other single-hero archetypes.",
+                "20. For location-advantage, commercial_hook MUST be 'location' and the visual must surface connectivity facts (nearby landmarks, travel times, location advantages) in a visual proof panel, not just in copy.",
                 "",
                 "Non-negotiable rules:",
                 "- Do not fabricate filenames, filepaths, reference_tags, or template ids.",
@@ -948,7 +1064,7 @@ def build_agents() -> dict[str, Any]:
                 "",
                 "You must fill:",
                 "- reference_image_paths",
-                "- template_id / template_image_path / logo_image_path if present",
+                "- template_id / template_image_path / logo_image_path if present and valid",
                 "- reference_usage_plan",
                 "- template_usage_plan when a template exists",
                 "- logo_usage_plan when a logo image exists",
@@ -988,6 +1104,9 @@ def build_agents() -> dict[str, Any]:
                 "- For ad post types, commercial_hook and visual_mechanism must be visible as the obvious hook device and hierarchy, not as internal labels.",
                 "- If text_policy=exact_text, include the exact text and integrate it into the poster composition.",
                 "- Do not write a generic prompt for construction_update without a truthful primary asset.",
+                "- If requested_variation_count is greater than 1, fill variations with exactly that many distinct prompt routes.",
+                "- Variation routes must use different poster archetypes, hierarchy, or graphic mechanisms where truth allows. They must not be minor wording changes.",
+                "- Keep prompt as the strongest first variation and keep variations[0].finalPrompt aligned with prompt.",
             ],
             NotebookCraftedPrompt,
         ),
@@ -1021,6 +1140,8 @@ def build_agents() -> dict[str, Any]:
                 "- Reject outputs that feel like a plain hero image plus normal text.",
                 "- Reject outputs where the selected style family is named but not visibly executed.",
                 "- For location-advantage, reject if the prompt does not describe a split layout with project hero AND a separate connectivity/map proof panel.",
+                "- If requested_variation_count is greater than 1, return exactly that many verified variations.",
+                "- Reject variation sets where the options are only minor wording changes instead of distinct composition routes.",
                 "",
                 "Approval rules:",
                 "- Approve only if the prompt is grounded, specific, recognisable, and poster-grade.",
@@ -1073,6 +1194,7 @@ def execute_with_trace(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[st
     )
     analysis = repair_analysis_grounding(normalized_payload, analyst_traced["content"])
     analysis = repair_location_advantage_archetype(normalized_payload, analysis)
+    analysis.requested_variation_count = resolve_variation_count(normalized_payload)
 
     crafter_traced = run_agent_with_trace(
         agents["crafter"],

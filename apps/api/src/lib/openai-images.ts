@@ -7,6 +7,20 @@ export type OpenAiGeneratedImage = {
   file_name?: string | null;
 };
 
+type OpenAiDirectEditResult = {
+  imageUrl: string;
+  imageDataUrl?: string;
+  model: string;
+  width?: number;
+  height?: number;
+};
+
+type OpenAiImageEditFile = {
+  buffer: Buffer;
+  contentType: string;
+  fileName?: string;
+};
+
 type OpenAiRequestOptions = {
   model: string;
   prompt: string;
@@ -70,6 +84,70 @@ export async function generateOpenAiImages({
   };
 }
 
+export async function applyOpenAiDirectEdit({
+  prompt,
+  image,
+  width,
+  height,
+  model = env.OPENAI_FINAL_MODEL
+}: {
+  prompt: string;
+  image: OpenAiImageEditFile;
+  width?: number;
+  height?: number;
+  model?: string;
+}): Promise<OpenAiDirectEditResult> {
+  if (!env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is required when IMAGE_GENERATION_PROVIDER=openai");
+  }
+
+  const body = new FormData();
+  body.append("model", model);
+  body.append("prompt", prompt);
+  body.append("n", "1");
+  body.append("size", resolveOpenAiDirectEditSize(width, height));
+  body.append("quality", env.OPENAI_IMAGE_QUALITY);
+  body.append("output_format", env.OPENAI_IMAGE_OUTPUT_FORMAT);
+  body.append("background", env.OPENAI_IMAGE_BACKGROUND);
+  if (supportsOpenAiInputFidelity(model)) {
+    body.append("input_fidelity", env.OPENAI_IMAGE_INPUT_FIDELITY);
+  }
+
+  body.append(
+    "image[]",
+    new Blob([toBlobBytes(image.buffer)], { type: image.contentType || "image/png" }),
+    image.fileName || fileNameForContentType(image.contentType)
+  );
+
+  const response = await fetch(`${resolveOpenAiBaseUrl()}/images/edits`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`
+    },
+    body
+  });
+
+  const raw = await response.text();
+  const payload = raw.length > 0 ? safeParseJson(raw) : null;
+
+  if (!response.ok) {
+    throw new Error(extractOpenAiErrorMessage(payload) ?? `OpenAI image edit failed (${response.status})`);
+  }
+
+  const firstImage = extractOpenAiGeneratedImages(payload)[0];
+  if (!firstImage?.url) {
+    throw new Error("OpenAI image edit returned no image");
+  }
+
+  return {
+    imageUrl: firstImage.url,
+    ...(firstImage.url.startsWith("data:") ? { imageDataUrl: firstImage.url } : {}),
+    model,
+    ...(typeof width === "number" ? { width } : {}),
+    ...(typeof height === "number" ? { height } : {})
+  };
+}
+
 async function submitOpenAiEditRequest({
   model,
   prompt,
@@ -125,6 +203,33 @@ function resolveOpenAiImageSize(aspectRatio: string) {
     default:
       return "1024x1024";
   }
+}
+
+function resolveOpenAiDirectEditSize(width?: number, height?: number) {
+  if (typeof width !== "number" || typeof height !== "number") {
+    return "auto";
+  }
+
+  const ratio = width / height;
+  if (ratio > 1.2) {
+    return "1536x1024";
+  }
+  if (ratio < 0.85) {
+    return "1024x1536";
+  }
+  return "1024x1024";
+}
+
+function fileNameForContentType(contentType: string) {
+  if (contentType === "image/webp") {
+    return "source.webp";
+  }
+
+  if (contentType === "image/jpeg") {
+    return "source.jpg";
+  }
+
+  return "source.png";
 }
 
 function fileNameFromStoragePath(storagePath: string, contentType: string) {
@@ -215,33 +320,10 @@ function extractOpenAiGeneratedImages(payload: unknown): OpenAiGeneratedImage[] 
   return images;
 }
 
-function extractFirstEditedImage(payload: unknown) {
-  if (!isRecord(payload) || !Array.isArray(payload.data)) {
-    return null;
-  }
-
-  for (const item of payload.data) {
-    if (!isRecord(item)) {
-      continue;
-    }
-
-    const b64Json = typeof item.b64_json === "string" && item.b64_json.length > 0 ? item.b64_json : null;
-    const url = typeof item.url === "string" && item.url.length > 0 ? item.url : null;
-
-    if (!b64Json && !url) {
-      continue;
-    }
-
-    return {
-      b64_json: b64Json,
-      url: url ?? "data:image/png;base64,",
-      mimeType: typeof item.mime_type === "string" && item.mime_type.length > 0 ? item.mime_type : "image/png"
-    };
-  }
-
-  return null;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function toBlobBytes(buffer: Buffer) {
+  return Uint8Array.from(buffer);
 }

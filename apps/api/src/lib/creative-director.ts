@@ -24,6 +24,7 @@ import {
   inferAmenityNameFromAssetParts,
   isAmenityFocusedPostType,
   resolveAmenityFocus,
+  type AmenityFocusSelection,
 } from "./creative-reference-selection.js";
 import { buildFestivalPromptGuidance } from "./festival-prompt-guidance.js";
 import { compilePromptPackageMock } from "./mock-creative-director.js";
@@ -1081,7 +1082,67 @@ function normalizeCompilerVariations(
     normalized.push(item);
   }
 
-  return normalized;
+  const routeFallbacks = [
+    {
+      title: "Primary route",
+      strategy: "Primary route"
+    },
+    {
+      title: "Alternate hierarchy",
+      strategy: "Different copy and image hierarchy, same grounded facts",
+      suffix:
+        "Use a clearly different composition from the primary route: change the copy/image hierarchy and hero placement while preserving the same grounded project facts and asset truth."
+    },
+    {
+      title: "Graphic proof route",
+      strategy: "Different proof-led graphic system, same grounded facts",
+      suffix:
+        "Use a clearly different graphic system from the primary route: emphasize proof chips, panels, frames, or structured callouts while preserving the same grounded project facts and asset truth."
+    },
+    {
+      title: "Editorial route",
+      strategy: "Different editorial layout, same grounded facts",
+      suffix:
+        "Use a clearly different editorial structure from the primary route: quieter spacing, alternate crop behavior, and different type hierarchy while preserving the same grounded project facts and asset truth."
+    },
+    {
+      title: "Campaign route",
+      strategy: "Different campaign hierarchy, same grounded facts",
+      suffix:
+        "Use a clearly different campaign structure from the primary route: stronger hook block, clearer CTA hierarchy, and controlled proof elements while preserving the same grounded project facts and asset truth."
+    },
+    {
+      title: "Catalog route",
+      strategy: "Different catalog-style layout, same grounded facts",
+      suffix:
+        "Use a clearly different catalog structure from the primary route: framed image behavior, disciplined labels, and a premium proof strip while preserving the same grounded project facts and asset truth."
+    }
+  ];
+
+  const baseSeedPrompt = normalized[0]?.seedPrompt ?? raw.seedPrompt ?? raw.finalPrompt ?? "";
+  const baseFinalPrompt = normalized[0]?.finalPrompt ?? raw.finalPrompt ?? raw.seedPrompt ?? "";
+  while (normalized.length < requestedCount && baseSeedPrompt && baseFinalPrompt) {
+    const index = normalized.length;
+    const route = routeFallbacks[index] ?? {
+      title: `Route ${index + 1}`,
+      strategy: "Distinct creative route, same grounded facts",
+      suffix:
+        "Use a visibly different layout and hierarchy from the other routes while preserving the same grounded project facts and asset truth."
+    };
+    const suffix = "suffix" in route && typeof route.suffix === "string" ? route.suffix : "";
+    normalized.push({
+      id: `variation_${index + 1}`,
+      title: route.title,
+      strategy: route.strategy,
+      seedPrompt: baseSeedPrompt,
+      finalPrompt: suffix ? `${baseFinalPrompt} ${suffix}` : baseFinalPrompt,
+      referenceStrategy: options.referenceStrategy,
+      resolvedConstraints: { variationIndex: index + 1 },
+      compilerTrace: { generatedByFallback: rawVariations.length < requestedCount }
+    });
+  }
+
+  return normalized.slice(0, requestedCount);
 }
 
 function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResult {
@@ -1094,6 +1155,7 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
   const festivalGuidance = buildFestivalPromptGuidance(input.festival, input.brandName);
   const useProjectContext = !isFestivalGreetingInput(input);
   const projectGuidance = buildProjectPromptGuidance(useProjectContext ? input.projectProfile : null);
+  const amenityFocusResolution = useProjectContext ? resolveInputAmenityFocus(input) : null;
   const postTypeGuidance = buildPostTypePromptGuidance({
     brandName: input.brandName,
     brief: input.brief,
@@ -1102,7 +1164,8 @@ function normalizeV2AgnoResult(raw: CompilerResult, input: Input): CompilerResul
     projectProfile: useProjectContext ? input.projectProfile : null,
     brandAssets: input.brandAssets ?? [],
     projectId: useProjectContext ? input.projectId : null,
-    selectedReferenceAssetIds: input.brief.referenceAssetIds
+    selectedReferenceAssetIds: input.brief.referenceAssetIds,
+    resolvedAmenityFocus: amenityFocusResolution
   });
   const referenceStrategy = normalizeReferenceStrategy(raw.referenceStrategy, input);
   const templateType = normalizeTemplateType(raw.templateType, input);
@@ -1458,8 +1521,33 @@ function hasExactRequestedLogoAsset(input: Input) {
   return Boolean(input.brandAssets?.some((asset) => asset.id === requestedLogoAssetId && asset.kind === "logo"));
 }
 
+function resolveInputAmenityFocus(input: Input): AmenityFocusSelection | null {
+  if (!isAmenityFocusedPostType(input.postType?.code ?? null)) {
+    return null;
+  }
+
+  return resolveAmenityFocus({
+    briefText: [input.brief.prompt, input.brief.exactText ?? ""].join(" "),
+    projectAmenityNames: [
+      ...(input.projectProfile?.heroAmenities ?? []),
+      ...(input.projectProfile?.amenities ?? []),
+    ],
+    allAssets: input.brandAssets ?? [],
+    projectId: input.projectId ?? null,
+    seed: [
+      input.postType?.code ?? "",
+      input.projectName ?? "",
+      input.brief.prompt,
+      input.brief.channel,
+      input.brief.format,
+      input.brief.templateType ?? "",
+    ].join("|"),
+  });
+}
+
 function buildV2CandidateAssets(input: Input) {
   const useProjectContext = !isFestivalGreetingInput(input);
+  const amenityFocusResolution = useProjectContext ? resolveInputAmenityFocus(input) : null;
   const postTypeGuidance = buildPostTypePromptGuidance({
     brandName: input.brandName,
     brief: input.brief,
@@ -1468,27 +1556,9 @@ function buildV2CandidateAssets(input: Input) {
     projectProfile: useProjectContext ? input.projectProfile : null,
     brandAssets: input.brandAssets ?? [],
     projectId: useProjectContext ? input.projectId : null,
-    selectedReferenceAssetIds: input.brief.referenceAssetIds
+    selectedReferenceAssetIds: input.brief.referenceAssetIds,
+    resolvedAmenityFocus: amenityFocusResolution
   });
-  const amenityFocusResolution = isAmenityFocusedPostType(input.postType?.code ?? null)
-    ? resolveAmenityFocus({
-        briefText: [input.brief.prompt, input.brief.exactText ?? ""].join(" "),
-        projectAmenityNames: [
-          ...(input.projectProfile?.heroAmenities ?? []),
-          ...(input.projectProfile?.amenities ?? []),
-        ],
-        allAssets: input.brandAssets ?? [],
-        projectId: input.projectId ?? null,
-        seed: [
-          input.postType?.code ?? "",
-          input.projectName ?? "",
-          input.brief.prompt,
-          input.brief.channel,
-          input.brief.format,
-          input.brief.templateType ?? "",
-        ].join("|"),
-      })
-    : null;
   const templateLinkedAssets = input.template?.linkedAssets ?? input.templateAssets ?? [];
   const templateRoleMap = new Map<string, Array<Pick<CreativeTemplateAssetRecord, "assetId" | "role">>>();
   for (const entry of templateLinkedAssets) {
@@ -1654,6 +1724,7 @@ function buildV2GenerationContract(input: Input) {
 
 function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
   const useProjectContext = !isFestivalGreetingInput(input);
+  const amenityFocusResolution = useProjectContext ? resolveInputAmenityFocus(input) : null;
   const postTypeGuidance = buildPostTypePromptGuidance({
     brandName: input.brandName,
     brief: input.brief,
@@ -1662,7 +1733,8 @@ function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
     projectProfile: useProjectContext ? input.projectProfile : null,
     brandAssets: input.brandAssets ?? [],
     projectId: useProjectContext ? input.projectId : null,
-    selectedReferenceAssetIds: input.brief.referenceAssetIds
+    selectedReferenceAssetIds: input.brief.referenceAssetIds,
+    resolvedAmenityFocus: amenityFocusResolution
   });
   const candidateAssetState = buildV2CandidateAssets(input);
   return {
@@ -1786,7 +1858,7 @@ function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
         }
       : null,
     candidateAssets: candidateAssetState.candidateAssets,
-    amenityResolution: buildTruthBundleAmenityResolution(input, postTypeGuidance.manifest.amenityFocus ?? null),
+    amenityResolution: buildTruthBundleAmenityResolution(input, amenityFocusResolution),
     exactAssetContract: {
       logoAssetId: candidateAssetState.brandLogoId,
       reraQrAssetId: candidateAssetState.reraQrId,
@@ -1801,7 +1873,7 @@ function buildV2CreativeTruthBundle(input: Input): CreativeTruthBundle {
 
 function buildTruthBundleAmenityResolution(
   input: Input,
-  selectedAmenity: string | null
+  selectionOverride: AmenityFocusSelection | null
 ) {
   const projectAmenityNames = [
     ...(input.projectProfile?.heroAmenities ?? []),
@@ -1824,24 +1896,15 @@ function buildTruthBundleAmenityResolution(
       : null;
   }
 
-  const selection = resolveAmenityFocus({
-    briefText: [input.brief.prompt, input.brief.exactText ?? ""].join(" "),
-    projectAmenityNames,
-    allAssets: input.brandAssets ?? [],
-    projectId: input.projectId ?? null,
-    seed: [
-      input.postType?.code ?? "",
-      input.projectName ?? "",
-      input.brief.prompt,
-      input.brief.channel,
-      input.brief.format,
-      input.brief.templateType ?? "",
-    ].join("|"),
-  });
+  const selection = selectionOverride ?? resolveInputAmenityFocus(input) ?? {
+    focusAmenity: null,
+    source: "none" as const,
+    amenityAssetIds: [],
+  };
 
   return {
     availableAmenities,
-    selectedAmenity: selectedAmenity ?? selection.focusAmenity ?? null,
+    selectedAmenity: selection.focusAmenity ?? null,
     selectionSource: selection.source,
     selectedAssetIds: selection.amenityAssetIds,
     hasExactAssetMatch: selection.amenityAssetIds.length > 0,
@@ -1864,13 +1927,23 @@ export async function buildCanonicalV2AgentPayload(input: CreativeDirectorInput)
 }
 
 async function buildV2CompileMediaContext(input: Input, truthBundle: CreativeTruthBundle): Promise<V2AgentPayload["mediaContext"] | undefined> {
-  const referenceAssetIds = dedupeStrings([
-    ...truthBundle.candidateAssets
-      .filter((asset) => asset.eligibility.isSelectedReference)
-      .map((asset) => asset.id),
-    truthBundle.exactAssetContract.requiredProjectAnchorAssetId ?? null,
-    ...(truthBundle.amenityResolution?.selectedAssetIds ?? []),
-  ]);
+  const selectedReferenceAssetIds = truthBundle.candidateAssets
+    .filter((asset) => asset.eligibility.isSelectedReference)
+    .map((asset) => asset.id);
+  const isAmenitySpotlight = truthBundle.postTypeContract.code === "amenity-spotlight";
+  const referenceAssetIds = dedupeStrings(
+    isAmenitySpotlight
+      ? [
+          ...(truthBundle.amenityResolution?.selectedAssetIds ?? []),
+          ...selectedReferenceAssetIds,
+          truthBundle.exactAssetContract.requiredProjectAnchorAssetId ?? null,
+        ]
+      : [
+          ...selectedReferenceAssetIds,
+          truthBundle.exactAssetContract.requiredProjectAnchorAssetId ?? null,
+          ...(truthBundle.amenityResolution?.selectedAssetIds ?? []),
+        ]
+  );
 
   const candidateById = new Map(truthBundle.candidateAssets.map((asset) => [asset.id, asset]));
 

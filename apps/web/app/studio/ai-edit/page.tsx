@@ -1261,7 +1261,7 @@ export default function StudioAiEditPage() {
     }
 
     if (canvasLayers.length === 0) {
-      return normalizeImageFile(currentImage.file, currentImage.width, currentImage.height, fileName);
+      return cloneFileWithName(currentImage.file, fileName);
     }
 
     return renderCompositionToFile(currentImage, canvasLayers, fileName);
@@ -1435,9 +1435,9 @@ export default function StudioAiEditPage() {
       setCanvasLayers([]);
       setSelectedLayerId(null);
       setToolMode("select");
-      setStatus(`Edit applied with ${result.model}. Describe the next change to continue editing.`);
+      setStatus("Edit applied. Describe the next change to continue editing.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "AI edit failed.");
+      setError(getUserSafeImageEditError(cause));
       setStatus(null);
     } finally {
       setIsApplying(false);
@@ -2475,6 +2475,14 @@ async function sourceToFile(source: string, fileName: string, fallbackType: stri
   return new File([blob], ensureExtension(fileName, contentType), { type: contentType });
 }
 
+function cloneFileWithName(file: File, fileName: string) {
+  const contentType = file.type || "image/png";
+  return new File([file], ensureExtension(fileName, contentType), {
+    type: contentType,
+    lastModified: file.lastModified
+  });
+}
+
 async function loadImage(source: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
@@ -2582,40 +2590,6 @@ function buildComposedFileName(fileName: string) {
 
 function buildNormalizedSourceFileName(fileName: string) {
   return `${stripFileExtension(fileName)}-source.png`;
-}
-
-async function normalizeImageFile(file: File, width: number, height: number, fileName: string) {
-  const objectUrl = URL.createObjectURL(file);
-
-  try {
-    const image = await loadImage(objectUrl);
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-
-    if (!ctx) {
-      throw new Error("Unable to normalize the source image.");
-    }
-
-    ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(image, 0, 0, width, height);
-
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((value) => {
-        if (!value) {
-          reject(new Error("Unable to export the normalized source image."));
-          return;
-        }
-
-        resolve(value);
-      }, "image/png");
-    });
-
-    return new File([blob], fileName, { type: "image/png" });
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
 }
 
 async function renderCompositionToFile(sourceImage: EditableImage, layers: CanvasLayer[], fileName: string) {
@@ -3012,8 +2986,17 @@ function stripFileExtension(fileName: string) {
 }
 
 function ensureExtension(fileName: string, contentType: string) {
-  if (/\.[a-z0-9]+$/i.test(fileName)) return fileName;
-  if (contentType === "image/webp") return `${fileName}.webp`;
-  if (contentType === "image/jpeg") return `${fileName}.jpg`;
-  return `${fileName}.png`;
+  const baseName = stripFileExtension(fileName);
+  if (contentType === "image/webp") return `${baseName}.webp`;
+  if (contentType === "image/jpeg") return `${baseName}.jpg`;
+  return `${baseName}.png`;
+}
+
+function getUserSafeImageEditError(cause: unknown) {
+  const message = cause instanceof Error ? cause.message : "";
+  if (/payment required|insufficient|credit/i.test(message)) {
+    return message;
+  }
+
+  return "AI edit failed. Please try again with a simpler edit or a smaller image.";
 }

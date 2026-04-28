@@ -8,6 +8,7 @@ import {
 } from "@image-lab/contracts";
 import { env } from "../lib/config.js";
 import { applyFalDirectEdit } from "../lib/fal.js";
+import { applyOpenAiDirectEdit } from "../lib/openai-images.js";
 import {
   isInsufficientWorkspaceCreditsError,
   releaseWorkspaceCreditReservation,
@@ -82,35 +83,7 @@ function readFieldValue(value: unknown) {
 }
 
 function extractImageEditErrorMessage(error: unknown) {
-  if (
-    error &&
-    typeof error === "object" &&
-    "body" in error &&
-    error.body &&
-    typeof error.body === "object" &&
-    "detail" in error.body &&
-    typeof (error.body as { detail?: unknown }).detail === "string"
-  ) {
-    return (error.body as { detail: string }).detail;
-  }
-
-  if (
-    error &&
-    typeof error === "object" &&
-    "body" in error &&
-    error.body &&
-    typeof error.body === "object" &&
-    "message" in error.body &&
-    typeof (error.body as { message?: unknown }).message === "string"
-  ) {
-    return (error.body as { message: string }).message;
-  }
-
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-
-  return "AI image edit failed";
+  return "AI image edit failed. Please try again with a simpler edit or a smaller image.";
 }
 
 function insufficientCreditsMessage(error: unknown) {
@@ -843,7 +816,13 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
         ...(typeof parsedFields.data.width === "number" ? { width: parsedFields.data.width } : {}),
         ...(typeof parsedFields.data.height === "number" ? { height: parsedFields.data.height } : {})
       };
-      const response = await applyFalDirectEdit(editInput);
+      const response =
+        env.IMAGE_GENERATION_PROVIDER === "openai"
+          ? await applyOpenAiDirectEdit({
+              ...editInput,
+              model: env.OPENAI_FINAL_MODEL
+            })
+          : await applyFalDirectEdit(editInput);
 
       if (reservationId) {
         await settleWorkspaceCreditReservation({

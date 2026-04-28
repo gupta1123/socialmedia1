@@ -112,19 +112,25 @@ export default function GalleryPage() {
   const pageStart = outputs.length === 0 ? 0 : (page - 1) * GALLERY_PAGE_SIZE + 1;
   const pageEnd = outputs.length === 0 ? 0 : pageStart + outputs.length - 1;
 
-  async function openOutputPreview(output: CreativeOutputRecord, creator: string, statusLabel: string) {
-    const resolved = sessionToken ? await getCreativeOutput(sessionToken, output.id).catch(() => output) : output;
+  async function buildGalleryPreviewPayload(
+    output: CreativeOutputRecord,
+    creator: string,
+    statusLabel: string,
+    resolved?: CreativeOutputRecord
+  ) {
+    const source = resolved ?? output;
     const previewSrc =
-      resolved.originalUrl ?? resolved.previewUrl ?? resolved.thumbnailUrl ?? output.thumbnailUrl ?? output.previewUrl;
+      source.originalUrl ?? source.previewUrl ?? source.thumbnailUrl ?? output.thumbnailUrl ?? output.previewUrl;
     if (!previewSrc) {
-      return;
+      return null;
     }
-    const previewContext = (resolved as CreativeOutputRecord & { previewContext?: CreativePreviewInput | null })
+    const previewContext = (source as CreativeOutputRecord & { previewContext?: CreativePreviewInput | null })
       .previewContext;
 
-    imagePreview.openPreview({
+    return {
+      id: output.id,
       alt: `Generated option ${output.outputIndex + 1}`,
-      actions: [{ href: `/studio/ai-edit?outputId=${output.id}`, label: "Open in Editor", tone: "primary" }],
+      actions: [{ href: `/studio/ai-edit?outputId=${output.id}`, label: "Open in Editor", tone: "primary" as const }],
       badges: [`#${output.outputIndex + 1}`, `v${output.versionNumber}`, statusLabel],
       details: [
         { label: "Created by", value: creator }
@@ -140,9 +146,32 @@ export default function GalleryPage() {
         templateType: previewContext?.templateType
       }),
       src: previewSrc,
+      thumbnailSrc: output.thumbnailUrl ?? output.previewUrl ?? previewSrc,
       subtitle: output.kind.replaceAll("_", " "),
       title: `Output ${output.outputIndex + 1} · v${output.versionNumber}`
-    });
+    };
+  }
+
+  async function openOutputPreview(output: CreativeOutputRecord, creator: string, statusLabel: string) {
+    const resolved = sessionToken ? await getCreativeOutput(sessionToken, output.id).catch(() => output) : output;
+    const activePreview = await buildGalleryPreviewPayload(output, creator, statusLabel, resolved);
+    if (!activePreview) {
+      return;
+    }
+
+    const previewCollection = (
+      await Promise.all(
+        outputs.map((item) =>
+          buildGalleryPreviewPayload(
+            item,
+            createdByLabel(item.createdBy, workspaceMembers),
+            item.reviewState.replaceAll("_", " ")
+          )
+        )
+      )
+    ).filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+    imagePreview.openPreview(activePreview, previewCollection);
   }
 
   if (error) {

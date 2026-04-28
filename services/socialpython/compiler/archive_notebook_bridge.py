@@ -1890,6 +1890,14 @@ def derive_template_id(namespace: dict[str, Any], bundle: dict[str, Any]) -> str
 def build_reference_image_note(bundle: dict[str, Any], payload: dict[str, Any]) -> str | None:
     if not derive_reference_image_urls(payload):
         return None
+    post_type_code = str((bundle.get("postTypeContract") or {}).get("code") or "")
+    if post_type_code == "amenity-spotlight" and (
+        (bundle.get("amenityResolution") or {}).get("selectedAssetIds") or []
+    ):
+        return (
+            "Use the supplied amenity reference as the primary visual truth anchor. "
+            "Use any supplied project reference only as supporting project-identity context."
+        )
     exact_assets = bundle.get("exactAssetContract") or {}
     if exact_assets.get("requiredProjectAnchorAssetId"):
         return (

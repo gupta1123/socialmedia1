@@ -257,14 +257,28 @@ def resolve_reference_image_paths(bundle: dict[str, Any]) -> list[str]:
     exact = bundle.get("exactAssetContract") or {}
     selected: list[str] = []
     candidate_assets = bundle.get("candidateAssets") or []
-    preferred_ids = [
-        exact.get("requiredProjectAnchorAssetId"),
-        *[
-            asset.get("id")
-            for asset in candidate_assets
-            if (asset.get("eligibility") or {}).get("isSelectedReference")
-        ],
+    post_type_code = ((bundle.get("postTypeContract") or {}).get("code") or "").strip()
+    selected_reference_ids = [
+        asset.get("id")
+        for asset in candidate_assets
+        if (asset.get("eligibility") or {}).get("isSelectedReference")
     ]
+    amenity_asset_ids = []
+    if post_type_code == "amenity-spotlight":
+        amenity_asset_ids = (bundle.get("amenityResolution") or {}).get("selectedAssetIds") or []
+
+    preferred_ids = (
+        [
+            *amenity_asset_ids,
+            *selected_reference_ids,
+            exact.get("requiredProjectAnchorAssetId"),
+        ]
+        if post_type_code == "amenity-spotlight"
+        else [
+            exact.get("requiredProjectAnchorAssetId"),
+            *selected_reference_ids,
+        ]
+    )
     seen = set()
     for asset_id in preferred_ids:
         if not isinstance(asset_id, str) or not asset_id or asset_id in seen:

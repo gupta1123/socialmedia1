@@ -493,12 +493,7 @@ function scoreAmenityTextMatch(text: string, candidate: string) {
 }
 
 function chooseRandom(values: string[], _seed: string) {
-  if (values.length === 1) {
-    return values[0]!;
-  }
-
-  const randomIndex = Math.floor(Math.random() * values.length);
-  return values[randomIndex]!;
+  return chooseDeterministic(values, _seed);
 }
 
 function chooseDeterministic(values: string[], seed: string) {
