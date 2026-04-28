@@ -190,9 +190,11 @@ export default function StudioAiEditPage() {
   const [saveMode, setSaveMode] = useState<"new" | "version" | "replace">("new");
   const [isSavingOutput, setIsSavingOutput] = useState(false);
   const [isGeneratedPostsModalOpen, setIsGeneratedPostsModalOpen] = useState(false);
+  const [stageZoom, setStageZoom] = useState(1);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const layerImageInputRef = useRef<HTMLInputElement>(null);
+  const stageShellRef = useRef<HTMLDivElement>(null);
   const stageFrameRef = useRef<HTMLDivElement>(null);
   const layerDragRef = useRef<LayerDragState | null>(null);
   const drawPathRef = useRef<CanvasDrawLayer | null>(null);
@@ -255,6 +257,31 @@ export default function StudioAiEditPage() {
       setReraBlockTextColor(normalizeHexColor(selectedReraBlockLayer.reraBlock.textColor, "#111111"));
     }
   }, [selectedReraBlockLayer?.id, selectedReraBlockLayer?.reraBlock?.textColor]);
+
+  useEffect(() => {
+    setStageZoom(1);
+  }, [currentImage?.file]);
+
+  useEffect(() => {
+    const shell = stageShellRef.current;
+    if (!shell) {
+      return;
+    }
+
+    const handleWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) {
+        return;
+      }
+
+      event.preventDefault();
+      const delta = event.deltaY > 0 ? -0.08 : 0.08;
+      setStageZoom((current) => clamp(Number((current + delta).toFixed(2)), 0.4, 3));
+    };
+
+    shell.addEventListener("wheel", handleWheel, { passive: false });
+    return () => shell.removeEventListener("wheel", handleWheel);
+  }, [currentImage?.file]);
+
   const generatedOutputAssets = useMemo(
     () => recentOutputs.filter((output) => (output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl) && output.id !== outputId),
     [recentOutputs, outputId]
@@ -264,7 +291,8 @@ export default function StudioAiEditPage() {
   const canUndo = useMemo(() => editorHistory.length > 0, [editorHistory]);
   const canRedo = useMemo(() => editorFuture.length > 0, [editorFuture]);
   const canReplaceCurrentSource = currentSourceReviewState === "pending_review" || currentSourceReviewState === "needs_revision";
-  const stageScale = currentImage && stageWidth ? stageWidth / currentImage.width : 1;
+  const displayStageWidth = stageWidth ? Math.round(stageWidth * stageZoom) : null;
+  const stageScale = currentImage && displayStageWidth ? displayStageWidth / currentImage.width : 1;
   const promptTrimmed = prompt.trim();
   const normalizedListPromptItems = useMemo(
     () => listPromptItems.map((item) => item.trim()).filter((item) => item.length > 0),
@@ -2066,29 +2094,48 @@ export default function StudioAiEditPage() {
                 <h3>{currentImage.file.name}</h3>
                 <span className="ai-edit-stage-dimensions">{dimensionsLabel}</span>
               </div>
-              <span className="pill pill-sm">Direct edit</span>
+              <div className="ai-edit-stage-zoom-controls" aria-label="Canvas zoom controls">
+                <button
+                  aria-label="Zoom out"
+                  onClick={() => setStageZoom((current) => clamp(Number((current - 0.1).toFixed(2)), 0.4, 3))}
+                  type="button"
+                >
+                  -
+                </button>
+                <button aria-label="Reset canvas zoom" onClick={() => setStageZoom(1)} type="button">
+                  {Math.round(stageZoom * 100)}%
+                </button>
+                <button
+                  aria-label="Zoom in"
+                  onClick={() => setStageZoom((current) => clamp(Number((current + 0.1).toFixed(2)), 0.4, 3))}
+                  type="button"
+                >
+                  +
+                </button>
+              </div>
             </div>
           ) : null}
 
-          <div className="ai-edit-stage-shell">
+          <div className="ai-edit-stage-shell" ref={stageShellRef}>
             {currentImage && currentImageUrl ? (
-              <div
-                className="ai-edit-stage-frame"
-                onPointerCancel={handleLayerPointerUp}
-                onPointerDown={handleStagePointerDown}
-                onPointerMove={handleLayerPointerMove}
-                onPointerUp={handleLayerPointerUp}
-                ref={stageFrameRef}
-                style={{
-                  aspectRatio: `${currentImage.width} / ${currentImage.height}`,
-                  width: stageWidth ? `${stageWidth}px` : undefined
-                }}
-              >
-                <img alt="Source" className="ai-edit-stage-image" draggable={false} src={currentImageUrl} />
-                <div className="ai-editor-layer-surface" aria-label="Editable layers">
-                  {canvasLayers.map((layer) => {
-                    const selected = layer.id === selectedLayerId;
-                    if (layer.type === "text") {
+              <div className="ai-edit-stage-scroll-content">
+                <div
+                  className="ai-edit-stage-frame"
+                  onPointerCancel={handleLayerPointerUp}
+                  onPointerDown={handleStagePointerDown}
+                  onPointerMove={handleLayerPointerMove}
+                  onPointerUp={handleLayerPointerUp}
+                  ref={stageFrameRef}
+                  style={{
+                    aspectRatio: `${currentImage.width} / ${currentImage.height}`,
+                    width: displayStageWidth ? `${displayStageWidth}px` : undefined
+                  }}
+                >
+                  <img alt="Source" className="ai-edit-stage-image" draggable={false} src={currentImageUrl} />
+                  <div className="ai-editor-layer-surface" aria-label="Editable layers">
+                    {canvasLayers.map((layer) => {
+                      const selected = layer.id === selectedLayerId;
+                      if (layer.type === "text") {
                       return (
                         <div
                           className={`ai-editor-layer ai-editor-text-layer ${selected ? "is-selected" : ""}`}
@@ -2146,38 +2193,39 @@ export default function StudioAiEditPage() {
                       const points = layer.points.map((point) => `${point.x * 100},${point.y * 100}`).join(" ");
                       return (
                         <svg className="ai-editor-layer ai-editor-draw-layer" key={layer.id} preserveAspectRatio="none" style={{ inset: 0, opacity: layer.opacity }} viewBox="0 0 100 100">
-                          <polyline fill="none" points={points} stroke={layer.color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={Math.max(0.12, (layer.size * stageScale * 100) / Math.max(1, stageWidth ?? 1))} />
+                          <polyline fill="none" points={points} stroke={layer.color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={Math.max(0.12, (layer.size * stageScale * 100) / Math.max(1, displayStageWidth ?? 1))} />
                         </svg>
                       );
                     }
 
-                    return (
-                      <div
-                        className={`ai-editor-layer ai-editor-image-layer ${selected ? "is-selected" : ""}`}
-                        key={layer.id}
-                        onPointerDown={(event) => handleLayerPointerDown(event, layer)}
-                        style={{
-                          left: `${layer.x * 100}%`,
-                          top: `${layer.y * 100}%`,
-                          width: `${layer.width * 100}%`,
-                          height: `${layer.height * 100}%`,
-                          opacity: layer.opacity,
-                          transform: `rotate(${layer.rotation}deg)`,
-                          filter: layer.filter === "grayscale" ? "grayscale(1)" : layer.filter === "sepia" ? "sepia(0.85)" : "none"
-                        }}
-                      >
-                        <img alt={layer.name} draggable={false} src={layer.src} />
-                        {selected ? <span className="ai-editor-resize-handle" onPointerDown={(event) => handleLayerPointerDown(event, layer, "resize")} /> : null}
-                      </div>
-                    );
-                  })}
-                </div>
-                {stageBusyMessage ? (
-                  <div className="ai-edit-stage-overlay" role="status" aria-live="polite">
-                    <div className="ai-edit-stage-spinner" />
-                    <span>{stageBusyMessage}</span>
+                      return (
+                        <div
+                          className={`ai-editor-layer ai-editor-image-layer ${selected ? "is-selected" : ""}`}
+                          key={layer.id}
+                          onPointerDown={(event) => handleLayerPointerDown(event, layer)}
+                          style={{
+                            left: `${layer.x * 100}%`,
+                            top: `${layer.y * 100}%`,
+                            width: `${layer.width * 100}%`,
+                            height: `${layer.height * 100}%`,
+                            opacity: layer.opacity,
+                            transform: `rotate(${layer.rotation}deg)`,
+                            filter: layer.filter === "grayscale" ? "grayscale(1)" : layer.filter === "sepia" ? "sepia(0.85)" : "none"
+                          }}
+                        >
+                          <img alt={layer.name} draggable={false} src={layer.src} />
+                          {selected ? <span className="ai-editor-resize-handle" onPointerDown={(event) => handleLayerPointerDown(event, layer, "resize")} /> : null}
+                        </div>
+                      );
+                    })}
                   </div>
-                ) : null}
+                  {stageBusyMessage ? (
+                    <div className="ai-edit-stage-overlay" role="status" aria-live="polite">
+                      <div className="ai-edit-stage-spinner" />
+                      <span>{stageBusyMessage}</span>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             ) : (
               <div className="ai-edit-empty-canvas">

@@ -13273,8 +13273,8 @@ textarea {
   flex: 1;
   min-height: 520px;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
+  justify-content: flex-start;
   background-color: var(--paper-soft);
   background-image: 
     radial-gradient(var(--line-strong) 1px, transparent 1px);
@@ -13283,6 +13283,48 @@ textarea {
   overflow: auto;
   position: relative;
   box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.03);
+}
+
+.ai-edit-stage-scroll-content {
+  min-width: 100%;
+  min-height: 100%;
+  width: max-content;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  box-sizing: border-box;
+}
+
+.ai-edit-stage-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-strong);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+
+.ai-edit-stage-zoom-controls button {
+  min-width: 44px;
+  height: 36px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ai-edit-stage-zoom-controls button:last-child {
+  border-right: 0;
+}
+
+.ai-edit-stage-zoom-controls button:hover {
+  background: var(--paper-soft);
 }
 
 .ai-edit-empty-canvas {
@@ -13324,7 +13366,7 @@ textarea {
 
 .ai-edit-stage-frame {
   position: relative;
-  max-width: 100%;
+  max-width: none;
   border-radius: 12px;
   overflow: hidden;
   background: var(--paper-strong);
