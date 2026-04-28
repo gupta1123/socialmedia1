@@ -16,7 +16,7 @@ import {
   settleWorkspaceCreditReservation
 } from "../lib/credits.js";
 import { assertWorkspaceRole, getActiveBrandProfile, getBrand, getPrimaryWorkspace } from "../lib/repository.js";
-import { createSignedImageUrls, uploadBufferToStorage } from "../lib/storage.js";
+import { createSignedImageUrls, downloadStorageBlob, uploadBufferToStorage } from "../lib/storage.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { createThumbnailFromBufferOrNull } from "../lib/thumbnails.js";
 import { ensurePostVersionForOutput } from "../lib/deliverable-flow.js";
@@ -28,6 +28,22 @@ const ImageEditFieldsSchema = z.object({
   prompt: z.string().trim().min(3).max(2000),
   width: z.coerce.number().int().positive().max(10000).optional(),
   height: z.coerce.number().int().positive().max(10000).optional()
+});
+
+const AsyncImageEditJobInputSchema = z.object({
+  type: z.literal("image-edit"),
+  brandId: z.string().uuid(),
+  workspaceId: z.string().uuid(),
+  prompt: z.string().trim().min(3).max(2000),
+  sourceStoragePath: z.string().min(1),
+  sourceContentType: z.string().min(1),
+  sourceFileName: z.string().min(1),
+  actorUserId: z.string().nullable(),
+  reservationId: z.string().nullable(),
+  provider: z.string(),
+  model: z.string(),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional()
 });
 
 const EditorSaveFieldsSchema = z.object({
@@ -68,6 +84,8 @@ type EditorSourceOutputRow = {
   reviewed_at: string | null;
   created_by: string | null;
 };
+
+type ImageEditJobInput = z.infer<typeof AsyncImageEditJobInputSchema>;
 
 function multipartLimits(files: number) {
   return {
@@ -126,6 +144,168 @@ async function getImageDimensions(buffer: Buffer) {
 
   const needsSwap = orientation >= 5 && orientation <= 8;
   return needsSwap ? { width: height, height: width } : { width, height };
+}
+
+async function applyConfiguredImageEdit(input: {
+  prompt: string;
+  image: {
+    buffer: Buffer;
+    contentType: string;
+    fileName: string;
+  };
+  width?: number;
+  height?: number;
+}) {
+  return env.IMAGE_GENERATION_PROVIDER === "openai"
+    ? applyOpenAiDirectEdit({
+        ...input,
+        model: env.OPENAI_FINAL_MODEL
+      })
+    : applyFalDirectEdit(input);
+}
+
+async function reserveImageEditCredits(params: {
+  workspaceId: string;
+  actorUserId: string | null;
+  endpoint: string;
+}) {
+  const reservationAmount = Math.max(0, env.CREDITS_IMAGE_EDIT_PER_REQUEST);
+  if (reservationAmount <= 0) {
+    return null;
+  }
+
+  const reservation = await reserveWorkspaceCredits({
+    workspaceId: params.workspaceId,
+    source: "image_edit_request",
+    sourceRef: `image-edit:${randomId()}`,
+    amount: reservationAmount,
+    actorUserId: params.actorUserId,
+    metadata: {
+      endpoint: params.endpoint
+    }
+  });
+
+  return reservation.reservationId;
+}
+
+async function releaseImageEditReservationIfPresent(params: {
+  reservationId: string | null;
+  actorUserId: string | null;
+  endpoint: string;
+  log?: { warn: (payload: unknown, message?: string) => void };
+}) {
+  if (!params.reservationId) {
+    return;
+  }
+
+  await releaseWorkspaceCreditReservation({
+    reservationId: params.reservationId,
+    actorUserId: params.actorUserId,
+    note: "image edit failed",
+    metadata: {
+      endpoint: params.endpoint,
+      reason: "provider_error"
+    }
+  }).catch((releaseError) => {
+    params.log?.warn({ releaseError }, "failed to release image edit credit reservation");
+  });
+}
+
+async function settleImageEditReservationIfPresent(params: {
+  reservationId: string | null;
+  endpoint: string;
+}) {
+  if (!params.reservationId) {
+    return;
+  }
+
+  await settleWorkspaceCreditReservation({
+    reservationId: params.reservationId,
+    metadata: {
+      endpoint: params.endpoint,
+      status: "completed"
+    }
+  });
+}
+
+async function processImageEditJobLocally(params: {
+  jobId: string;
+  log: {
+    error: (payload: unknown, message?: string) => void;
+    warn: (payload: unknown, message?: string) => void;
+  };
+}) {
+  const endpoint = "/api/creative/image-edit-async";
+  const { data: claimedJob, error: claimError } = await supabaseAdmin
+    .from("compile_jobs")
+    .update({
+      status: "processing",
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", params.jobId)
+    .eq("status", "pending")
+    .select("*")
+    .maybeSingle();
+
+  if (claimError) {
+    params.log.error({ error: claimError, jobId: params.jobId }, "failed to claim async image edit job locally");
+    return;
+  }
+
+  if (!claimedJob) {
+    return;
+  }
+
+  let jobInput: ImageEditJobInput | null = null;
+
+  try {
+    jobInput = AsyncImageEditJobInputSchema.parse(claimedJob.input_brief);
+    const sourceBlob = await downloadStorageBlob(jobInput.sourceStoragePath);
+    const sourceBuffer = Buffer.from(await sourceBlob.arrayBuffer());
+    const result = await applyConfiguredImageEdit({
+      prompt: jobInput.prompt,
+      image: {
+        buffer: sourceBuffer,
+        contentType: jobInput.sourceContentType,
+        fileName: jobInput.sourceFileName
+      },
+      ...(typeof jobInput.width === "number" ? { width: jobInput.width } : {}),
+      ...(typeof jobInput.height === "number" ? { height: jobInput.height } : {})
+    });
+
+    await settleImageEditReservationIfPresent({
+      reservationId: jobInput.reservationId,
+      endpoint
+    });
+
+    await supabaseAdmin
+      .from("compile_jobs")
+      .update({
+        status: "completed",
+        result,
+        completed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", params.jobId);
+  } catch (error) {
+    params.log.error({ error, jobId: params.jobId }, "async image edit job failed locally");
+    await releaseImageEditReservationIfPresent({
+      reservationId: jobInput?.reservationId ?? null,
+      actorUserId: jobInput?.actorUserId ?? null,
+      endpoint,
+      log: params.log
+    });
+    await supabaseAdmin
+      .from("compile_jobs")
+      .update({
+        status: "failed",
+        error_json: {
+          message: extractImageEditErrorMessage(error)
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", params.jobId);
+  }
 }
 
 async function createEditorSaveArtifacts(params: {
@@ -720,6 +900,189 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
       request.log.warn({ error }, "failed to compose list-mode prompt with model, using fallback");
       return ImageEditPromptComposerResponseSchema.parse(composePromptFallback(parsedBody.data.changes));
     }
+  });
+
+  app.post("/api/creative/image-edit-async", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    let brandIdValue: string | undefined;
+    let promptValue: string | undefined;
+    let widthValue: string | undefined;
+    let heightValue: string | undefined;
+    let imagePart: UploadedImagePart | null = null;
+
+    for await (const part of request.parts({ limits: multipartLimits(1) })) {
+      if (part.type === "file") {
+        const uploadedPart: UploadedImagePart = {
+          filename: part.filename,
+          mimetype: part.mimetype,
+          buffer: await part.toBuffer()
+        };
+
+        if (part.fieldname === "image") imagePart = uploadedPart;
+
+        continue;
+      }
+
+      if (part.fieldname === "brandId") brandIdValue = readFieldValue(part.value);
+      if (part.fieldname === "prompt") promptValue = readFieldValue(part.value);
+      if (part.fieldname === "width") widthValue = readFieldValue(part.value);
+      if (part.fieldname === "height") heightValue = readFieldValue(part.value);
+    }
+
+    if (!imagePart) {
+      return reply.badRequest("Source image is required");
+    }
+
+    if (!imagePart.mimetype.startsWith("image/")) {
+      return reply.badRequest("Source upload must be an image");
+    }
+
+    const parsedFields = ImageEditFieldsSchema.safeParse({
+      brandId: brandIdValue,
+      prompt: promptValue,
+      width: widthValue,
+      height: heightValue
+    });
+
+    if (!parsedFields.success) {
+      return reply.badRequest(parsedFields.error.issues[0]?.message ?? "Invalid image edit request");
+    }
+
+    const brand = await getBrand(parsedFields.data.brandId);
+    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
+
+    const endpoint = "/api/creative/image-edit-async";
+    let reservationId: string | null = null;
+
+    try {
+      reservationId = await reserveImageEditCredits({
+        workspaceId: brand.workspaceId,
+        actorUserId: viewer.userId,
+        endpoint
+      });
+    } catch (error) {
+      if (isInsufficientWorkspaceCreditsError(error)) {
+        return reply.code(402).send({
+          statusCode: 402,
+          error: "Payment Required",
+          message: insufficientCreditsMessage(error)
+        });
+      }
+
+      throw error;
+    }
+
+    const jobId = randomId();
+    const sourceStoragePath = buildStoragePath({
+      workspaceId: brand.workspaceId,
+      brandId: brand.id,
+      section: "outputs",
+      id: `image-edit-${jobId}`,
+      fileName: imagePart.filename || "source.png"
+    });
+
+    try {
+      await uploadBufferToStorage(sourceStoragePath, imagePart.buffer, imagePart.mimetype, true);
+
+      const jobInput: ImageEditJobInput = {
+        type: "image-edit",
+        brandId: brand.id,
+        workspaceId: brand.workspaceId,
+        prompt: parsedFields.data.prompt,
+        sourceStoragePath,
+        sourceContentType: imagePart.mimetype,
+        sourceFileName: imagePart.filename || "source.png",
+        actorUserId: viewer.userId ?? null,
+        reservationId,
+        provider: env.IMAGE_GENERATION_PROVIDER,
+        model: env.IMAGE_GENERATION_PROVIDER === "openai" ? env.OPENAI_FINAL_MODEL : env.AI_EDIT_DIRECT_MODEL,
+        ...(typeof parsedFields.data.width === "number" ? { width: parsedFields.data.width } : {}),
+        ...(typeof parsedFields.data.height === "number" ? { height: parsedFields.data.height } : {})
+      };
+
+      const { error: jobError } = await supabaseAdmin
+        .from("compile_jobs")
+        .insert({
+          id: jobId,
+          workspace_id: brand.workspaceId,
+          brand_id: brand.id,
+          status: "pending",
+          input_brief: jobInput,
+          session_token: request.headers.authorization?.replace("Bearer ", "") || ""
+        });
+
+      if (jobError) {
+        throw jobError;
+      }
+
+      void processImageEditJobLocally({
+        jobId,
+        log: request.log.child({ jobId, route: "image-edit-async" })
+      });
+
+      return { jobId, status: "pending" };
+    } catch (error) {
+      await releaseImageEditReservationIfPresent({
+        reservationId,
+        actorUserId: viewer.userId,
+        endpoint,
+        log: request.log
+      });
+      request.log.error({ error }, "failed to create async image edit job");
+      return reply.code(500).send({
+        statusCode: 500,
+        error: "Internal Server Error",
+        message: "Unable to start the image edit. Please try again."
+      });
+    }
+  });
+
+  app.get("/api/creative/image-edit-async/:jobId", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    const { jobId } = request.params as { jobId: string };
+    const { data: job, error: jobError } = await supabaseAdmin
+      .from("compile_jobs")
+      .select("*")
+      .eq("id", jobId)
+      .maybeSingle();
+
+    if (jobError || !job) {
+      return reply.notFound();
+    }
+
+    const parsedJobInput = AsyncImageEditJobInputSchema.safeParse(job.input_brief);
+    if (!parsedJobInput.success || parsedJobInput.data.type !== "image-edit") {
+      return reply.notFound();
+    }
+
+    const brand = await getBrand(job.brand_id);
+    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
+
+    if (job.status === "completed") {
+      return {
+        status: "completed",
+        result: job.result
+      };
+    }
+
+    if (job.status === "failed") {
+      return {
+        status: "failed",
+        error: job.error_json ?? {
+          message: "AI image edit failed. Please try again with a simpler edit or a smaller image."
+        }
+      };
+    }
+
+    return { status: job.status as "pending" | "processing" };
   });
 
   app.post("/api/creative/image-edit", { preHandler: app.authenticate }, async (request, reply) => {

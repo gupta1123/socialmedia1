@@ -4,7 +4,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, PointerEvent as ReactPointerEvent } from "react";
 import type { BootstrapResponse } from "@image-lab/contracts";
 import { useRouter, useSearchParams } from "next/navigation";
-import { applyImageEdit, composeImageEditPrompt, getCreativeOutput, saveEditedCreativeOutput } from "../../../lib/api";
+import {
+  composeImageEditPrompt,
+  getCreativeOutput,
+  getImageEditJobStatus,
+  saveEditedCreativeOutput,
+  startImageEditJob
+} from "../../../lib/api";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions, useRegisterTopbarControls, useRegisterTopbarMeta } from "../topbar-actions-context";
 
@@ -18,6 +24,10 @@ type EditableImage = {
   width: number;
   height: number;
 };
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
 type CanvasTextLayer = {
   id: string;
@@ -1414,7 +1424,7 @@ export default function StudioAiEditPage() {
       }
 
       const sourceFile = await getComposedImageFile(buildNormalizedSourceFileName(currentImage.file.name));
-      const result = await applyImageEdit(sessionToken, {
+      const job = await startImageEditJob(sessionToken, {
         brandId: activeBrandId,
         prompt: resolvedPrompt,
         width: currentImage.width,
@@ -1422,6 +1432,32 @@ export default function StudioAiEditPage() {
         image: sourceFile,
         imageFileName: sourceFile.name
       });
+      setStatus("Applying the edit. This can take a few minutes.");
+
+      let result = null;
+      const startedAt = Date.now();
+      const timeoutMs = 10 * 60 * 1000;
+
+      while (Date.now() - startedAt < timeoutMs) {
+        await wait(2_500);
+        const jobStatus = await getImageEditJobStatus(sessionToken, job.jobId);
+
+        if (jobStatus.status === "completed") {
+          if (!jobStatus.result) {
+            throw new Error("AI edit completed without an image.");
+          }
+          result = jobStatus.result;
+          break;
+        }
+
+        if (jobStatus.status === "failed") {
+          throw new Error(jobStatus.error?.message ?? "AI edit failed.");
+        }
+      }
+
+      if (!result) {
+        throw new Error("AI edit is taking longer than expected. Please try again shortly.");
+      }
 
       const nextFile = await sourceToFile(
         result.imageDataUrl ?? result.imageUrl,

@@ -754,6 +754,44 @@ export function applyImageEdit(
   });
 }
 
+export function startImageEditJob(
+  token: string,
+  payload: {
+    brandId: string;
+    prompt: string;
+    width?: number;
+    height?: number;
+    image: File | Blob;
+    imageFileName?: string;
+  }
+) {
+  const body = new FormData();
+  body.append("brandId", payload.brandId);
+  body.append("prompt", payload.prompt);
+
+  if (typeof payload.width === "number") {
+    body.append("width", String(payload.width));
+  }
+
+  if (typeof payload.height === "number") {
+    body.append("height", String(payload.height));
+  }
+
+  body.append("image", payload.image, payload.imageFileName ?? "source.png");
+
+  return request<{ jobId: string; status: string }>("/api/creative/image-edit-async", token, {
+    method: "POST",
+    body
+  });
+}
+
+export function getImageEditJobStatus(token: string, jobId: string) {
+  return request<{ status: string; result?: AiImageEditResponse; error?: { message?: string } }>(
+    `/api/creative/image-edit-async/${jobId}`,
+    token
+  );
+}
+
 export function saveEditedCreativeOutput(
   token: string,
   payload: {
