@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, PointerEvent as ReactPointerEvent } from "react";
-import type { BootstrapResponse } from "@image-lab/contracts";
+import type { BootstrapResponse, CreativeOutputRecord } from "@image-lab/contracts";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   composeImageEditPrompt,
+  getBrandAssetImageUrls,
   getCreativeOutput,
+  getCreativeOutputs,
   getImageEditJobStatus,
   saveEditedCreativeOutput,
   startImageEditJob
@@ -156,7 +158,7 @@ const TEMPLATE_PRESETS: Array<{
 const DRAW_COLORS = ["#111111", "#7c3aed", "#ef4444", "#10b981", "#f59e0b", "#000000"];
 
 export default function StudioAiEditPage() {
-  const { sessionToken, activeBrand, activeBrandId, activeAssets, bootstrap, recentOutputs } = useStudio();
+  const { sessionToken, activeBrand, activeBrandId, activeAssets, bootstrap } = useStudio();
   const router = useRouter();
   const searchParams = useSearchParams();
   const outputId = searchParams.get("outputId");
@@ -191,6 +193,7 @@ export default function StudioAiEditPage() {
   const [isSavingOutput, setIsSavingOutput] = useState(false);
   const [isGeneratedPostsModalOpen, setIsGeneratedPostsModalOpen] = useState(false);
   const [stageZoom, setStageZoom] = useState(1);
+  const [editorRecentOutputs, setEditorRecentOutputs] = useState<CreativeOutputRecord[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const layerImageInputRef = useRef<HTMLInputElement>(null);
@@ -282,9 +285,44 @@ export default function StudioAiEditPage() {
     return () => shell.removeEventListener("wheel", handleWheel);
   }, [currentImage?.file]);
 
+  useEffect(() => {
+    if (!sessionToken || !activeBrandId) {
+      setEditorRecentOutputs([]);
+      return;
+    }
+
+    let cancelled = false;
+    const token = sessionToken;
+    const brandId = activeBrandId;
+
+    async function loadRecentOutputs() {
+      try {
+        const outputs = await getCreativeOutputs(token, {
+          brandId,
+          imageMode: "thumbnail",
+          limit: 24
+        });
+
+        if (!cancelled) {
+          setEditorRecentOutputs(outputs);
+        }
+      } catch {
+        if (!cancelled) {
+          setEditorRecentOutputs([]);
+        }
+      }
+    }
+
+    void loadRecentOutputs();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBrandId, sessionToken]);
+
   const generatedOutputAssets = useMemo(
-    () => recentOutputs.filter((output) => (output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl) && output.id !== outputId),
-    [recentOutputs, outputId]
+    () => editorRecentOutputs.filter((output) => (output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl) && output.id !== outputId),
+    [editorRecentOutputs, outputId]
   );
   const recentGeneratedOutputAssets = useMemo(() => generatedOutputAssets.slice(0, 5), [generatedOutputAssets]);
   const hasCanvasLayers = canvasLayers.length > 0;
@@ -740,13 +778,26 @@ export default function StudioAiEditPage() {
     }
   }
 
+  async function resolveBrandAssetOriginalUrl(asset: BootstrapResponse["brandAssets"][number]) {
+    if (asset.originalUrl) {
+      return asset.originalUrl;
+    }
+
+    if (!sessionToken) {
+      return asset.previewUrl ?? null;
+    }
+
+    const urls = await getBrandAssetImageUrls(sessionToken, asset.brandId, asset.id).catch(() => null);
+    return urls?.originalUrl ?? asset.previewUrl ?? null;
+  }
+
   async function handleAddBrandAssetLayer(asset: BootstrapResponse["brandAssets"][number]) {
     if (!currentImage) {
       setError("Upload a source image or choose a template before adding brand assets.");
       return;
     }
 
-    const sourceUrl = asset.originalUrl ?? asset.previewUrl;
+    const sourceUrl = await resolveBrandAssetOriginalUrl(asset);
     if (!sourceUrl) {
       setError(`${asset.label} does not have a preview URL yet.`);
       return;
@@ -787,7 +838,12 @@ export default function StudioAiEditPage() {
   }
 
   async function handleAddGeneratedOutputLayer(output: BootstrapResponse["recentOutputs"][number]) {
-    const sourceUrl = output.originalUrl ?? output.previewUrl;
+    const sourceUrl =
+      output.originalUrl ??
+      (sessionToken
+        ? (await getCreativeOutput(sessionToken, output.id).catch(() => null))?.originalUrl
+        : null) ??
+      output.previewUrl;
     if (!sourceUrl) {
       setError("This generated post is missing a preview URL.");
       return;
@@ -853,7 +909,7 @@ export default function StudioAiEditPage() {
     }
 
     const number = option.registration.registrationNumber?.trim();
-    const qrSourceUrl = option.qrAsset?.originalUrl ?? option.qrAsset?.previewUrl;
+    const qrSourceUrl = option.qrAsset ? await resolveBrandAssetOriginalUrl(option.qrAsset) : null;
 
     if (!number && !qrSourceUrl) {
       setError("This RERA registration does not have a number or QR asset.");

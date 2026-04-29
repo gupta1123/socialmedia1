@@ -3,10 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { CreativeOutputRecord, WorkspaceMemberRecord } from "@image-lab/contracts";
-import { getCreativeOutput, getCreativeOutputs, getWorkspaceMembers } from "../../../lib/api";
+import { getCreativeOutputPreviewUrl, getCreativeOutputs, getWorkspaceMembers } from "../../../lib/api";
 import { formatRelativeTime } from "../../../lib/formatters";
-import { buildCreativePreviewSections, type CreativePreviewInput } from "../../../lib/creative-preview-sections";
-import { useImagePreview } from "../image-preview";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions } from "../topbar-actions-context";
 import { Skeleton } from "../skeleton";
@@ -24,7 +22,6 @@ const GALLERY_PAGE_SIZE = 10;
 
 export default function GalleryPage() {
   const { sessionToken, activeBrandId } = useStudio();
-  const imagePreview = useImagePreview();
   const [outputs, setOutputs] = useState<CreativeOutputRecord[]>([]);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,15 +68,12 @@ export default function GalleryPage() {
         const outputFilters: Parameters<typeof getCreativeOutputs>[1] = {
           limit: GALLERY_PAGE_SIZE + 1,
           offset: (page - 1) * GALLERY_PAGE_SIZE,
-          imageMode: "thumbnail",
+          imageMode: "metadata",
           ...(activeBrandId ? { brandId: activeBrandId } : {}),
           ...(reviewFilter === "all" ? {} : { reviewState: reviewFilter })
         };
 
-        const [outputRecords, members] = await Promise.all([
-          getCreativeOutputs(token, outputFilters),
-          getWorkspaceMembers(token)
-        ]);
+        const outputRecords = await getCreativeOutputs(token, outputFilters);
 
         if (cancelled) {
           return;
@@ -87,8 +81,18 @@ export default function GalleryPage() {
 
         setHasNextPage(outputRecords.length > GALLERY_PAGE_SIZE);
         setOutputs(outputRecords.slice(0, GALLERY_PAGE_SIZE));
-        setWorkspaceMembers(members);
         setError(null);
+        void getWorkspaceMembers(token)
+          .then((members) => {
+            if (!cancelled) {
+              setWorkspaceMembers(members);
+            }
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setWorkspaceMembers([]);
+            }
+          });
       } catch (cause) {
         if (cancelled) {
           return;
@@ -111,68 +115,7 @@ export default function GalleryPage() {
 
   const pageStart = outputs.length === 0 ? 0 : (page - 1) * GALLERY_PAGE_SIZE + 1;
   const pageEnd = outputs.length === 0 ? 0 : pageStart + outputs.length - 1;
-
-  async function buildGalleryPreviewPayload(
-    output: CreativeOutputRecord,
-    creator: string,
-    statusLabel: string,
-    resolved?: CreativeOutputRecord
-  ) {
-    const source = resolved ?? output;
-    const previewSrc =
-      source.originalUrl ?? source.previewUrl ?? source.thumbnailUrl ?? output.thumbnailUrl ?? output.previewUrl;
-    if (!previewSrc) {
-      return null;
-    }
-    const previewContext = (source as CreativeOutputRecord & { previewContext?: CreativePreviewInput | null })
-      .previewContext;
-
-    return {
-      id: output.id,
-      alt: `Generated option ${output.outputIndex + 1}`,
-      actions: [{ href: `/studio/ai-edit?outputId=${output.id}`, label: "Open in Editor", tone: "primary" as const }],
-      badges: [`#${output.outputIndex + 1}`, `v${output.versionNumber}`, statusLabel],
-      details: [
-        { label: "Created by", value: creator }
-      ],
-      meta: `#${output.outputIndex + 1}`,
-      sections: buildCreativePreviewSections({
-        brief: previewContext?.brief,
-        projectName: previewContext?.projectName,
-        postTypeName: previewContext?.postTypeName,
-        channel: previewContext?.channel,
-        format: previewContext?.format,
-        aspectRatio: previewContext?.aspectRatio,
-        templateType: previewContext?.templateType
-      }),
-      src: previewSrc,
-      thumbnailSrc: output.thumbnailUrl ?? output.previewUrl ?? previewSrc,
-      subtitle: output.kind.replaceAll("_", " "),
-      title: `Output ${output.outputIndex + 1} · v${output.versionNumber}`
-    };
-  }
-
-  async function openOutputPreview(output: CreativeOutputRecord, creator: string, statusLabel: string) {
-    const resolved = sessionToken ? await getCreativeOutput(sessionToken, output.id).catch(() => output) : output;
-    const activePreview = await buildGalleryPreviewPayload(output, creator, statusLabel, resolved);
-    if (!activePreview) {
-      return;
-    }
-
-    const previewCollection = (
-      await Promise.all(
-        outputs.map((item) =>
-          buildGalleryPreviewPayload(
-            item,
-            createdByLabel(item.createdBy, workspaceMembers),
-            item.reviewState.replaceAll("_", " ")
-          )
-        )
-      )
-    ).filter((item): item is NonNullable<typeof item> => Boolean(item));
-
-    imagePreview.openPreview(activePreview, previewCollection);
-  }
+  const stripIds = useMemo(() => outputs.map((output) => output.id).join(","), [outputs]);
 
   if (error) {
     return (
@@ -227,20 +170,16 @@ export default function GalleryPage() {
                   return (
                     <article className="work-gallery-card" key={output.id}>
                       <div className="work-gallery-media">
-                        <button
+                        <Link
                           className="image-preview-trigger"
-                          onClick={() => void openOutputPreview(output, creator, statusLabel)}
-                          type="button"
+                          href={`/studio/outputs/${output.id}?from=gallery&stripIds=${encodeURIComponent(stripIds)}`}
                         >
-                          {output.thumbnailUrl ?? output.previewUrl ? (
-                            <img
-                              alt={`Generated option ${output.outputIndex + 1}`}
-                              src={output.thumbnailUrl ?? output.previewUrl}
-                            />
-                          ) : (
-                            <div className="work-gallery-fallback" />
-                          )}
-                        </button>
+                          <ProgressiveOutputThumbnail
+                            alt={`Generated option ${output.outputIndex + 1}`}
+                            outputId={output.id}
+                            token={sessionToken}
+                          />
+                        </Link>
                       </div>
                       <div className="work-gallery-body">
                         <div className="work-gallery-copy">
@@ -259,7 +198,7 @@ export default function GalleryPage() {
                   );
                 })}
               </div>
-              <div className="data-table-footer">
+              <div className="floating-pagination-bar">
                 <p className="data-table-summary">
                   Showing {pageStart}-{pageEnd}
                 </p>
@@ -308,4 +247,47 @@ function createdByLabel(createdBy: string | null, members: WorkspaceMemberRecord
 
   const creator = members.find((member) => member.id === createdBy);
   return creator?.displayName ?? creator?.email ?? "Unknown";
+}
+
+function ProgressiveOutputThumbnail({
+  alt,
+  outputId,
+  token
+}: {
+  alt: string;
+  outputId: string;
+  token: string | null;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token) {
+      setSrc(null);
+      return;
+    }
+
+    let cancelled = false;
+    setSrc(null);
+    getCreativeOutputPreviewUrl(token, outputId)
+      .then((result) => {
+        if (!cancelled) {
+          setSrc(result.previewUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSrc(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [outputId, token]);
+
+  if (src) {
+    return <img alt={alt} decoding="async" loading="lazy" src={src} />;
+  }
+
+  return <div className="work-gallery-fallback" />;
 }

@@ -68,6 +68,32 @@ export async function registerBrandRoutes(app: FastifyInstance) {
     );
   });
 
+  app.get("/api/brands/:brandId/assets/:assetId/image-url", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    const { brandId, assetId } = request.params as { brandId: string; assetId: string };
+    const brand = await getBrand(brandId);
+    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
+
+    const assets = await listBrandAssets(brand.id);
+    const asset = assets.find((item) => item.id === assetId);
+
+    if (!asset) {
+      return reply.notFound("Asset not found");
+    }
+
+    const urls = await createSignedImageUrls(asset.storagePath, asset.thumbnailStoragePath);
+    return {
+      previewUrl: urls.originalUrl,
+      thumbnailUrl: urls.thumbnailUrl,
+      originalUrl: urls.originalUrl
+    };
+  });
+
   app.get("/api/brands/:brandId/rera-registrations", { preHandler: app.authenticate }, async (request, reply) => {
     const viewer = request.viewer;
 

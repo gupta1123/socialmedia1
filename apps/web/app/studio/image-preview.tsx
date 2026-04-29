@@ -354,6 +354,7 @@ type ImagePreviewTriggerProps = {
   children: ReactNode;
   className?: string | undefined;
   mode?: "button" | "inline";
+  resolveSrc?: (() => Promise<string | null | undefined>) | undefined;
 };
 
 export function ImagePreviewTrigger({
@@ -368,7 +369,8 @@ export function ImagePreviewTrigger({
   actions,
   children,
   className,
-  mode = "button"
+  mode = "button",
+  resolveSrc
 }: ImagePreviewTriggerProps) {
   const context = useContext(ImagePreviewContext);
 
@@ -379,10 +381,11 @@ export function ImagePreviewTrigger({
   const previewSrc = src;
   const previewContext = context;
 
-  function handleActivate(event: React.MouseEvent<HTMLElement>) {
+  async function handleActivate(event: React.MouseEvent<HTMLElement>) {
     event.preventDefault();
     event.stopPropagation();
-    previewContext.openPreview({ src: previewSrc, alt, title, subtitle, meta, badges, details, sections, actions });
+    const resolvedSrc = resolveSrc ? await resolveSrc().catch(() => null) : null;
+    previewContext.openPreview({ src: resolvedSrc || previewSrc, alt, title, subtitle, meta, badges, details, sections, actions });
   }
 
   if (mode === "inline") {

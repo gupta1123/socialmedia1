@@ -403,6 +403,7 @@ export async function registerWorkRoutes(app: FastifyInstance) {
       statusGroup?: string;
       planningMode?: string;
       dueWindow?: string;
+      imageMode?: string;
       limit?: string;
       offset?: string;
     };
@@ -416,6 +417,7 @@ export async function registerWorkRoutes(app: FastifyInstance) {
       ...(query.statusGroup ? { statusGroup: query.statusGroup as QueueStatusGroup } : {}),
       ...(query.planningMode ? { planningMode: query.planningMode as DeliverableRecord["planningMode"] } : {}),
       ...(query.dueWindow ? { dueWindow: query.dueWindow as "today" | "week" | "overdue" } : {}),
+      ...(query.imageMode === "metadata" ? { imageMode: "metadata" as const } : {}),
       ...(Number.isFinite(parsedLimit) ? { limit: parsedLimit } : {}),
       ...(Number.isFinite(parsedOffset) ? { offset: parsedOffset } : {})
     });

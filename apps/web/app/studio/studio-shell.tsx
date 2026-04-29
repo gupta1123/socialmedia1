@@ -440,6 +440,7 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   const topbarMenuRef = useRef<HTMLDivElement>(null);
   const isCreateRoute = pathname === "/studio/create" || pathname.startsWith("/studio/create/");
   const isEditorRoute = pathname === "/studio/ai-edit" || pathname.startsWith("/studio/ai-edit/");
+  const isOutputRoute = pathname === "/studio/outputs" || pathname.startsWith("/studio/outputs/");
   const isCalendarRoute = pathname === "/studio/calendar" || pathname.startsWith("/studio/calendar/");
   const isAdminRoute = pathname === "/studio/admin" || pathname.startsWith("/studio/admin/");
   const isWorkspaceAdminRoute = pathname === "/studio/workspace-admin" || pathname.startsWith("/studio/workspace-admin/");
@@ -827,7 +828,7 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <div className={`workspace-content ${isCreateRoute ? "is-create" : ""}`}>
+        <div className={`workspace-content ${isCreateRoute ? "is-create" : ""}${isOutputRoute ? " is-output-detail" : ""}`}>
           {children}
         </div>
         <div aria-atomic="true" aria-live="polite" className="studio-toast-viewport">
@@ -983,8 +984,13 @@ function resolveBootstrapMode(pathname: string) {
     return "create" as const;
   }
 
-  if (pathname === "/studio/ai-edit" || pathname.startsWith("/studio/ai-edit/")) {
-    return "full" as const;
+  if (
+    pathname === "/studio/ai-edit" ||
+    pathname.startsWith("/studio/ai-edit/") ||
+    pathname === "/studio/templates" ||
+    pathname.startsWith("/studio/templates/")
+  ) {
+    return "editor" as const;
   }
 
   if (
@@ -997,6 +1003,8 @@ function resolveBootstrapMode(pathname: string) {
     pathname.startsWith("/studio/review/") ||
     pathname === "/studio/gallery" ||
     pathname.startsWith("/studio/gallery/") ||
+    pathname === "/studio/outputs" ||
+    pathname.startsWith("/studio/outputs/") ||
     pathname === "/studio/library" ||
     pathname.startsWith("/studio/library/") ||
     pathname === "/studio/workspace-admin" ||

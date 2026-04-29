@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { QueueEntry } from "@image-lab/contracts";
-import { getQueue } from "../../../lib/api";
+import { getDeliverablePreviewUrl, getQueue } from "../../../lib/api";
 import { deriveCreativeFormatFromDeliverable } from "../../../lib/deliverable-helpers";
 import { formatDisplayDateTime } from "../../../lib/formatters";
 import { getQueueNextActionHref } from "../../../lib/workflow";
@@ -113,6 +113,7 @@ export default function QueuePage() {
       ...(planningMode ? { planningMode } : {}),
       ...(dueWindow ? { dueWindow } : {}),
       ...(activeBrandId ? { brandId: activeBrandId } : {}),
+      imageMode: "metadata",
       limit: QUEUE_PAGE_SIZE + 1,
       offset: (page - 1) * QUEUE_PAGE_SIZE
     })
@@ -211,7 +212,7 @@ export default function QueuePage() {
       ) : null}
 
       {viewMode === "cards" ? (
-        <QueueCardGallery rows={rows} loading={loading} />
+        <QueueCardGallery rows={rows} loading={loading} sessionToken={sessionToken} />
       ) : (
         <DataTable
           columns={columns}
@@ -282,7 +283,7 @@ export default function QueuePage() {
   );
 }
 
-function QueueCardGallery({ rows, loading }: { rows: QueueEntry[]; loading: boolean }) {
+function QueueCardGallery({ rows, loading, sessionToken }: { rows: QueueEntry[]; loading: boolean; sessionToken: string | null }) {
   if (loading) {
     return (
       <div className="work-gallery-grid" aria-label="Loading queue cards">
@@ -330,13 +331,7 @@ function QueueCardGallery({ rows, loading }: { rows: QueueEntry[]; loading: bool
         return (
           <article className="work-gallery-card" key={deliverable.id}>
             <Link className="work-gallery-media" href={`/studio/deliverables/${deliverable.id}`}>
-              {deliverable.previewUrl ? (
-                <img alt={`Preview for ${deliverable.title}`} src={deliverable.previewUrl} />
-              ) : (
-                <div className="work-gallery-fallback">
-                  <span>{getInitials(deliverable.title)}</span>
-                </div>
-              )}
+              <ProgressiveDeliverableThumbnail deliverableId={deliverable.id} title={deliverable.title} token={sessionToken} />
               <span className={`planner-status planner-status-${deliverable.status}`}>
                 {deliverable.status.replaceAll("_", " ")}
               </span>
@@ -361,6 +356,53 @@ function QueueCardGallery({ rows, loading }: { rows: QueueEntry[]; loading: bool
           </article>
         );
       })}
+    </div>
+  );
+}
+
+function ProgressiveDeliverableThumbnail({
+  deliverableId,
+  title,
+  token
+}: {
+  deliverableId: string;
+  title: string;
+  token: string | null;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token) {
+      setSrc(null);
+      return;
+    }
+
+    let cancelled = false;
+    setSrc(null);
+    getDeliverablePreviewUrl(token, deliverableId)
+      .then((result) => {
+        if (!cancelled) {
+          setSrc(result.previewUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSrc(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [deliverableId, token]);
+
+  if (src) {
+    return <img alt={`Preview for ${title}`} decoding="async" loading="lazy" src={src} />;
+  }
+
+  return (
+    <div className="work-gallery-fallback">
+      <span>{getInitials(title)}</span>
     </div>
   );
 }

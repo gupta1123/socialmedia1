@@ -94,7 +94,7 @@ const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const rawStyleVariationCount = Number(process.env.NEXT_PUBLIC_STYLE_VARIATION_COUNT ?? "3");
 
 export type CreativeFlowVersion = "v2";
-export type BootstrapMode = "full" | "light" | "create";
+export type BootstrapMode = "full" | "light" | "create" | "editor";
 export const creativeFlowVersion: CreativeFlowVersion = "v2";
 export const styleVariationLimit = 3;
 export const defaultStyleVariationCount = clampInt(rawStyleVariationCount, 1, styleVariationLimit, 1);
@@ -176,7 +176,15 @@ function getCacheTtlMs(path: string) {
       return 12_000;
     }
 
+    if (path.includes("view=editor")) {
+      return 12_000;
+    }
+
     return 12_000;
+  }
+
+  if (path.includes("/preview-url") || path.includes("/image-url")) {
+    return 60_000;
   }
 
   if (path.startsWith("/api/home")) {
@@ -456,6 +464,8 @@ export function bootstrapSession(token: string, mode: BootstrapMode = "full", br
     params.set("view", "light");
   } else if (mode === "create") {
     params.set("view", "create");
+  } else if (mode === "editor") {
+    params.set("view", "editor");
   }
   if (brandId) {
     params.set("brandId", brandId);
@@ -479,6 +489,13 @@ export function getBrandDetail(token: string, brandId: string) {
 
 export function getBrandAssets(token: string, brandId: string) {
   return request<BrandAssetRecord[]>(`/api/brands/${brandId}/assets`, token);
+}
+
+export function getBrandAssetImageUrls(token: string, brandId: string, assetId: string) {
+  return request<{ previewUrl: string; thumbnailUrl?: string; originalUrl: string }>(
+    `/api/brands/${brandId}/assets/${assetId}/image-url`,
+    token
+  );
 }
 
 export function getProjects(token: string, filters?: { brandId?: string }) {
@@ -865,6 +882,7 @@ export function getReviewQueue(
     brandId?: string;
     deliverableId?: string;
     scope?: "my" | "team" | "unassigned";
+    imageMode?: "thumbnail" | "metadata";
     limit?: number;
     offset?: number;
   }
@@ -874,6 +892,7 @@ export function getReviewQueue(
       brandId: filters?.brandId,
       deliverableId: filters?.deliverableId,
       scope: filters?.scope,
+      imageMode: filters?.imageMode,
       limit: typeof filters?.limit === "number" ? String(filters.limit) : undefined,
       offset: typeof filters?.offset === "number" ? String(filters.offset) : undefined
     }),
@@ -944,6 +963,7 @@ export function getQueue(
     statusGroup?: "todo" | "in_progress" | "ready_to_ship" | "done" | "blocked";
     planningMode?: "campaign" | "series" | "one_off" | "always_on" | "ad_hoc";
     dueWindow?: "today" | "week" | "overdue";
+    imageMode?: "thumbnail" | "metadata";
     limit?: number;
     offset?: number;
   }
@@ -956,6 +976,7 @@ export function getQueue(
       statusGroup: filters?.statusGroup,
       planningMode: filters?.planningMode,
       dueWindow: filters?.dueWindow,
+      imageMode: filters?.imageMode,
       limit: typeof filters?.limit === "number" ? String(filters.limit) : undefined,
       offset: typeof filters?.offset === "number" ? String(filters.offset) : undefined
     }),
@@ -1433,11 +1454,16 @@ export function getCreativeOutput(token: string, outputId: string) {
   return request<CreativeOutputRecord>(`/api/creative/outputs/${outputId}`, token);
 }
 
+export function getCreativeOutputPreviewUrl(token: string, outputId: string) {
+  return request<{ previewUrl: string | null }>(`/api/creative/outputs/${outputId}/preview-url`, token);
+}
+
 export function getCreativeOutputs(
   token: string,
   filters?: {
     brandId?: string;
-    imageMode?: "full" | "thumbnail";
+    ids?: string[];
+    imageMode?: "full" | "thumbnail" | "metadata";
     reviewState?: CreativeOutputRecord["reviewState"];
     limit?: number;
     offset?: number;
@@ -1446,6 +1472,7 @@ export function getCreativeOutputs(
   return request<CreativeOutputRecord[]>(
     withQuery("/api/creative/outputs", {
       brandId: filters?.brandId,
+      ids: filters?.ids?.length ? filters.ids.join(",") : undefined,
       imageMode: filters?.imageMode,
       reviewState: filters?.reviewState,
       limit: typeof filters?.limit === "number" ? String(filters.limit) : undefined,
@@ -1453,6 +1480,10 @@ export function getCreativeOutputs(
     }),
     token
   );
+}
+
+export function getDeliverablePreviewUrl(token: string, deliverableId: string) {
+  return request<{ previewUrl: string | null }>(`/api/deliverables/${deliverableId}/preview-url`, token);
 }
 
 export function submitFeedback(token: string, outputId: string, payload: FeedbackRequest) {

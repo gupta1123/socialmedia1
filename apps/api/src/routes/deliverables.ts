@@ -41,7 +41,7 @@ import {
 } from "../lib/deliverables-repository.js";
 import { getCreativeTemplate, getPostType, getProject } from "../lib/planning-repository.js";
 import { getOrPopulateRuntimeCache, invalidateRuntimeCache } from "../lib/runtime-cache.js";
-import { createSignedImageUrls, removeStorageObjects, uploadBufferToStorage } from "../lib/storage.js";
+import { createSignedImageUrls, createSignedPreviewUrl, removeStorageObjects, uploadBufferToStorage } from "../lib/storage.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { createThumbnailFromBufferOrNull } from "../lib/thumbnails.js";
 import { buildStoragePath, deriveAspectRatio, randomId } from "../lib/utils.js";
@@ -131,6 +131,18 @@ export async function registerDeliverableRoutes(app: FastifyInstance) {
     const includePreviews = query.includePreviews === "1" || query.includePreviews === "true";
     const responseDeliverables = includePreviews ? await attachDeliverablePreviews(deliverables) : deliverables;
     return responseDeliverables.map((deliverable) => DeliverableSchema.parse(deliverable));
+  });
+
+  app.get("/api/deliverables/:deliverableId/preview-url", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    const deliverable = await getDeliverable((request.params as { deliverableId: string }).deliverableId);
+    await assertWorkspaceRole(viewer, deliverable.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
+    const [withPreview] = await attachDeliverablePreviews([deliverable]);
+    return { previewUrl: withPreview?.previewUrl ?? null };
   });
 
   app.get("/api/deliverables/:deliverableId", { preHandler: app.authenticate }, async (request, reply) => {
@@ -830,14 +842,16 @@ export async function registerDeliverableRoutes(app: FastifyInstance) {
       brandId?: string;
       deliverableId?: string;
       scope?: string;
+      imageMode?: string;
       limit?: string;
       offset?: string;
     };
     const scope = query.scope === "my" || query.scope === "team" || query.scope === "unassigned" ? query.scope : "team";
+    const imageMode = query.imageMode === "metadata" ? "metadata" : "thumbnail";
     const parsedLimit = Number.parseInt(query.limit ?? "", 10);
     const parsedOffset = Number.parseInt(query.offset ?? "", 10);
 
-    const cacheKey = `review-queue:${workspace.id}:${query.brandId ?? "all"}:${query.deliverableId ?? "all"}:${scope}:${parsedLimit}:${parsedOffset}`;
+    const cacheKey = `review-queue:${workspace.id}:${query.brandId ?? "all"}:${query.deliverableId ?? "all"}:${scope}:${imageMode}:${parsedLimit}:${parsedOffset}`;
 
     const items = await getOrPopulateRuntimeCache(cacheKey, 5000, async () => {
       return listReviewQueue(workspace.id, query.brandId, query.deliverableId, {
@@ -857,18 +871,18 @@ export async function registerDeliverableRoutes(app: FastifyInstance) {
           };
         }
 
-        const urls = await createSignedImageUrls(
-          item.previewOutput.storagePath,
-          item.previewOutput.thumbnailStoragePath
-        );
+        if (imageMode === "metadata") {
+          return item;
+        }
+
+        const previewUrl = await createSignedPreviewUrl(item.previewOutput.storagePath, item.previewOutput.thumbnailStoragePath);
 
         return {
           ...item,
           previewOutput: {
             ...item.previewOutput,
-            previewUrl: urls.originalUrl,
-            thumbnailUrl: urls.thumbnailUrl,
-            originalUrl: urls.originalUrl
+            previewUrl: previewUrl ?? undefined,
+            thumbnailUrl: previewUrl ?? undefined
           }
         };
       })

@@ -2,17 +2,17 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import type { PostTypeRecord, ProjectRecord, ReviewQueueEntry, WorkspaceMemberRecord } from "@image-lab/contracts";
-import { getPostTypes, getProjects, getReviewQueue, getWorkspaceMembers } from "../../../lib/api";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
+import type { ReviewQueueEntry, WorkspaceMemberRecord } from "@image-lab/contracts";
+import {
+  getCreativeOutputPreviewUrl,
+  getReviewQueue,
+  getWorkspaceMembers
+} from "../../../lib/api";
 import { formatRelativeTime } from "../../../lib/formatters";
-import { DataTable } from "../data-table";
 import { deriveCreativeFormatFromDeliverable } from "../../../lib/deliverable-helpers";
-import { buildCreativePreviewSections } from "../../../lib/creative-preview-sections";
-import { ImagePreviewTrigger } from "../image-preview";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions, useRegisterTopbarControls } from "../topbar-actions-context";
-import { PlacementIcons } from "../placement-icons";
 import { Skeleton } from "../skeleton";
 import { FloatingTooltip } from "../floating-tooltip";
 
@@ -20,11 +20,6 @@ const REVIEW_SCOPES = [
   { id: "my", label: "My review" },
   { id: "team", label: "Team review" },
   { id: "unassigned", label: "Unassigned" }
-] as const;
-
-const VIEW_MODES = [
-  { id: "cards", label: "Cards" },
-  { id: "table", label: "Table" }
 ] as const;
 
 type ReviewVerdict = "approved" | "close" | "off-brand";
@@ -35,6 +30,12 @@ type CommentDialogState = {
   verdict: ReviewVerdict;
   comment: string;
 } | null;
+
+type ProgressiveReviewThumbnailProps = {
+  children: (src: string | null) => ReactNode;
+  outputId: string | null;
+  token: string | null;
+};
 
 export default function ReviewPage() {
   const searchParams = useSearchParams();
@@ -49,18 +50,14 @@ export default function ReviewPage() {
     workspaceMembers: contextWorkspaceMembers
   } = useStudio();
   const [queue, setQueue] = useState<ReviewQueueEntry[]>([]);
-  const [projects, setProjects] = useState<ProjectRecord[]>([]);
-  const [postTypes, setPostTypes] = useState<PostTypeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [recentApproval, setRecentApproval] = useState<{ deliverableId: string; postVersionId: string } | null>(null);
-  const [tableMode, setTableMode] = useState(false);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRecord[]>([]);
   const focusedDeliverableId = searchParams.get("deliverableId");
   const initialScope =
     (searchParams.get("scope") as (typeof REVIEW_SCOPES)[number]["id"] | null) ?? "team";
   const [scope, setScope] = useState<(typeof REVIEW_SCOPES)[number]["id"]>(initialScope);
-  const [viewMode, setViewMode] = useState<(typeof VIEW_MODES)[number]["id"]>("cards");
   const [page, setPage] = useState(1);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [commentDialog, setCommentDialog] = useState<CommentDialogState>(null);
@@ -101,23 +98,9 @@ export default function ReviewPage() {
             </button>
           ))}
         </div>
-        <div className="queue-scope-switch queue-view-switch" role="tablist" aria-label="Review view">
-          {VIEW_MODES.map((item) => (
-            <button
-              aria-selected={viewMode === item.id}
-              className={`filter-chip ${viewMode === item.id ? "is-active" : ""}`}
-              key={item.id}
-              onClick={() => setViewMode(item.id)}
-              role="tab"
-              type="button"
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
       </div>
     ),
-    [scope, viewMode]
+    [scope]
   );
 
   useRegisterTopbarControls(topbarControls);
@@ -144,6 +127,7 @@ export default function ReviewPage() {
           scope,
           limit: REVIEW_PAGE_SIZE + 1,
           offset: (page - 1) * REVIEW_PAGE_SIZE,
+          imageMode: "metadata",
           ...(activeBrandId ? { brandId: activeBrandId } : {}),
           ...(focusedDeliverableId ? { deliverableId: focusedDeliverableId } : {})
         });
@@ -152,17 +136,6 @@ export default function ReviewPage() {
 
         setHasNextPage(entries.length > REVIEW_PAGE_SIZE);
         setQueue(entries.slice(0, REVIEW_PAGE_SIZE));
-
-        if (tableMode) {
-          const [projectRecords, postTypeRecords] = await Promise.all([
-            getProjects(token, activeBrandId ? { brandId: activeBrandId } : undefined),
-            getPostTypes(token)
-          ]);
-          if (!cancelled) {
-            setProjects(projectRecords);
-            setPostTypes(postTypeRecords);
-          }
-        }
 
         if (!cancelled) {
           setError(null);
@@ -183,14 +156,7 @@ export default function ReviewPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeBrandId, focusedDeliverableId, page, scope, sessionToken, tableMode]);
-
-  useEffect(() => {
-    if (tableMode && projects.length === 0 && sessionToken && activeBrandId) {
-      getProjects(sessionToken, { brandId: activeBrandId }).then(setProjects).catch(() => null);
-      getPostTypes(sessionToken).then(setPostTypes).catch(() => null);
-    }
-  }, [tableMode, projects.length, sessionToken, activeBrandId]);
+  }, [activeBrandId, focusedDeliverableId, page, scope, sessionToken]);
 
   useEffect(() => {
     if (!sessionToken) {
@@ -205,166 +171,13 @@ export default function ReviewPage() {
 
   const pageStart = queue.length === 0 ? 0 : (page - 1) * REVIEW_PAGE_SIZE + 1;
   const pageEnd = queue.length === 0 ? 0 : pageStart + queue.length - 1;
-  const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
-  const postTypeMap = useMemo(() => new Map(postTypes.map((postType) => [postType.id, postType])), [postTypes]);
-  const getPreviewSections = (entry: ReviewQueueEntry) => {
-    const format = deriveCreativeFormatFromDeliverable(
-      entry.deliverable.placementCode,
-      entry.deliverable.contentFormat,
-      entry.deliverable.sourceJson
-    );
-
-    return buildCreativePreviewSections({
-      brief: {
-        prompt: entry.deliverable.briefText ?? "",
-        channel: entry.deliverable.placementCode,
-        format
-      },
-      projectName: entry.deliverable.projectId ? projectMap.get(entry.deliverable.projectId)?.name : null,
-      postTypeName: postTypeMap.get(entry.deliverable.postTypeId)?.name,
-      channel: entry.deliverable.placementCode,
-      format
-    });
-  };
-
-  const tableColumns = useMemo(
-    () => [
-      {
-        id: "preview",
-        header: "Preview",
-        cell: (entry: ReviewQueueEntry) => (
-          <ImagePreviewTrigger
-            alt={`Preview for ${entry.deliverable.title}`}
-            actions={
-              entry.previewOutput?.id
-                ? [{ href: `/studio/ai-edit?outputId=${entry.previewOutput.id}`, label: "Open in Editor", tone: "primary" }]
-                : undefined
-            }
-            badges={[
-              formatObjective(entry.deliverable.objectiveCode),
-              formatOrdinal(entry.postVersion.versionNumber)
-            ]}
-            className="data-table-thumbnail"
-            details={[
-              { label: "Placement", value: entry.deliverable.placementCode },
-              { label: "Status", value: entry.deliverable.status },
-              { label: "Created by", value: createdByLabel(entry.previewOutput?.createdBy ?? null, workspaceMembers) }
-            ]}
-            meta={`${formatOrdinal(entry.postVersion.versionNumber)} version`}
-            sections={getPreviewSections(entry)}
-            src={entry.previewOutput?.originalUrl ?? entry.previewOutput?.previewUrl}
-            title={entry.deliverable.title}
-          >
-            {entry.previewOutput?.thumbnailUrl ?? entry.previewOutput?.previewUrl ? (
-              <img
-                alt={`Preview for ${entry.deliverable.title}`}
-                src={entry.previewOutput?.thumbnailUrl ?? entry.previewOutput?.previewUrl}
-              />
-            ) : (
-              <div className="table-thumbnail-fallback" />
-            )}
-          </ImagePreviewTrigger>
-        )
-      },
-      {
-        id: "deliverable",
-        header: "Post task",
-        sortValue: (entry: ReviewQueueEntry) => entry.deliverable.title,
-        cell: (entry: ReviewQueueEntry) => (
-          <div className="data-table-primary">
-            <strong className="data-table-title">{entry.deliverable.title}</strong>
-            <span className="data-table-subtitle">
-              {entry.previewOutput
-                ? `${formatOrdinal(entry.postVersion.versionNumber)} version · Created by ${createdByLabel(entry.previewOutput.createdBy, workspaceMembers)}`
-                : "Missing preview output"}
-            </span>
-          </div>
-        )
-      },
-      {
-        id: "placement",
-        header: "Placement",
-        cell: (entry: ReviewQueueEntry) => {
-          const format = deriveCreativeFormatFromDeliverable(
-            entry.deliverable.placementCode,
-            entry.deliverable.contentFormat,
-            entry.deliverable.sourceJson
-          );
-
-          return <PlacementIcons channel={entry.deliverable.placementCode} format={format} />;
-        }
-      },
-      {
-        id: "objective",
-        header: "Objective",
-        sortValue: (entry: ReviewQueueEntry) => entry.deliverable.objectiveCode,
-        cell: (entry: ReviewQueueEntry) => (
-          <div className="data-table-chip-row">
-            <span className="pill">{formatObjective(entry.deliverable.objectiveCode)}</span>
-            {entry.deliverable.priority === "urgent" || entry.deliverable.priority === "high" ? (
-              <span className="pill pill-review-needs_revision">{entry.deliverable.priority}</span>
-            ) : null}
-          </div>
-        )
-      },
-      {
-        id: "reviewer",
-        header: "Reviewer",
-        sortValue: (entry: ReviewQueueEntry) => reviewerLabel(entry.deliverable.reviewerUserId, workspaceMembers),
-        cell: (entry: ReviewQueueEntry) => reviewerLabel(entry.deliverable.reviewerUserId, workspaceMembers)
-      },
-      {
-        id: "actions",
-        header: "Actions",
-        align: "end" as const,
-        className: "data-table-actions-cell",
-        cell: (entry: ReviewQueueEntry) => {
-          const previewId = entry.previewOutput?.id ?? null;
-          const isRowPending = previewId
-            ? pendingAction === "submit-feedback" && pendingTargetKey?.startsWith(`output:${previewId}:feedback:`)
-            : false;
-          const isApprovePending = previewId
-            ? pendingAction === "submit-feedback" && pendingTargetKey === `output:${previewId}:feedback:approved`
-            : false;
-          const isClosePending = previewId
-            ? pendingAction === "submit-feedback" && pendingTargetKey === `output:${previewId}:feedback:close`
-            : false;
-          const isOffBrandPending = previewId
-            ? pendingAction === "submit-feedback" && pendingTargetKey === `output:${previewId}:feedback:off-brand`
-            : false;
-
-          return (
-            <div className="table-action-group">
-              <button
-                className="button button-ghost table-action-button approve-button"
-                disabled={!previewId || isRowPending}
-                onClick={() => void handleDecision(previewId, "approved")}
-                type="button"
-              >
-                {isApprovePending ? "Saving…" : "Approve"}
-              </button>
-              <button
-                className="button button-ghost table-action-button"
-                disabled={!previewId || isRowPending}
-                onClick={() => void handleDecision(previewId, "close")}
-                type="button"
-              >
-                {isClosePending ? "Saving…" : "Needs changes"}
-              </button>
-              <button
-                className="button button-ghost table-action-button reject-button"
-                disabled={!previewId || isRowPending}
-                onClick={() => void handleDecision(previewId, "off-brand")}
-                type="button"
-              >
-                {isOffBrandPending ? "Saving…" : "Reject"}
-              </button>
-            </div>
-          );
-        }
-      }
-    ],
-    [pendingAction, pendingTargetKey, postTypeMap, projectMap, workspaceMembers]
+  const stripIds = useMemo(
+    () =>
+      queue
+        .map((entry) => entry.previewOutput?.id)
+        .filter((id): id is string => Boolean(id))
+        .join(","),
+    [queue]
   );
 
   async function handleDecision(outputId: string | null, verdict: ReviewVerdict) {
@@ -457,8 +270,7 @@ export default function ReviewPage() {
 
       <section className="page-grid">
         <div className="page-span-12">
-          {viewMode === "cards" ? (
-            <ReviewCardGallery
+          <ReviewCardGallery
               entries={queue}
               loading={loading}
               onDecision={handleDecision}
@@ -466,71 +278,12 @@ export default function ReviewPage() {
               pendingTargetKey={pendingTargetKey}
               reviewerLabelFor={(reviewerUserId) => reviewerLabel(reviewerUserId, workspaceMembers)}
               createdByLabelFor={(createdBy) => createdByLabel(createdBy, workspaceMembers)}
-              getPreviewSections={getPreviewSections}
+              sessionToken={sessionToken}
               focusedDeliverableId={focusedDeliverableId}
+              stripIds={stripIds}
             />
-          ) : (
-            <DataTable
-              columns={tableColumns}
-              defaultSort={{ columnId: "deliverable", direction: "asc" }}
-              emptyAction={
-                <Link
-                  className="button button-primary"
-                  href={focusedDeliverableId ? `/studio/deliverables/${focusedDeliverableId}` : "/studio/deliverables"}
-                >
-                  {focusedDeliverableId ? "Open post task" : "Open post tasks"}
-                </Link>
-              }
-              emptyBody={
-                focusedDeliverableId
-                  ? "This post task has no options waiting for review right now."
-                  : "Create post options from a post task and they will show up here when they are ready for approval."
-              }
-              emptyTitle={focusedDeliverableId ? "Nothing to review for this post task" : "No post tasks are awaiting review"}
-              filters={[
-                {
-                  id: "objective",
-                  label: "Objective",
-                  options: Array.from(new Set(queue.map((entry) => entry.deliverable.objectiveCode))).map((value) => ({
-                    label: formatObjective(value),
-                    value
-                  })),
-                  getValue: (entry) => entry.deliverable.objectiveCode
-                },
-                {
-                  id: "priority",
-                  label: "Priority",
-                  options: [
-                    { label: "Urgent", value: "urgent" },
-                    { label: "High", value: "high" },
-                    { label: "Normal", value: "normal" },
-                    { label: "Low", value: "low" }
-                  ],
-                  getValue: (entry) => entry.deliverable.priority
-                }
-              ]}
-              initialPageSize={queue.length || REVIEW_PAGE_SIZE}
-              loading={loading}
-              pageSizeOptions={[queue.length || REVIEW_PAGE_SIZE]}
-              rowHref={(entry) => `/studio/deliverables/${entry.deliverable.id}`}
-              rowKey={(entry) => entry.postVersion.id}
-              rows={queue}
-              search={{
-                placeholder: "Search post tasks, reviewers, and option details",
-                getText: (entry) =>
-                  [
-                    entry.deliverable.title,
-                    entry.deliverable.briefText,
-                    entry.deliverable.ctaText,
-                    reviewerLabel(entry.deliverable.reviewerUserId, workspaceMembers)
-                  ]
-                    .filter(Boolean)
-                    .join(" ")
-              }}
-            />
-          )}
           {!loading && queue.length > 0 ? (
-            <div className="data-table-footer">
+            <div className="floating-pagination-bar">
               <p className="data-table-summary">
                 Showing {pageStart}-{pageEnd}
               </p>
@@ -633,8 +386,9 @@ function ReviewCardGallery({
   pendingTargetKey,
   reviewerLabelFor,
   createdByLabelFor,
-  getPreviewSections,
-  focusedDeliverableId
+  sessionToken,
+  focusedDeliverableId,
+  stripIds
 }: {
   entries: ReviewQueueEntry[];
   loading: boolean;
@@ -643,8 +397,9 @@ function ReviewCardGallery({
   pendingTargetKey: string | null;
   reviewerLabelFor: (reviewerUserId: string | null) => string;
   createdByLabelFor: (createdBy: string | null) => string;
-  getPreviewSections: (entry: ReviewQueueEntry) => ReturnType<typeof buildCreativePreviewSections>;
+  sessionToken: string | null;
   focusedDeliverableId: string | null;
+  stripIds: string;
 }) {
   if (loading) {
     return (
@@ -697,6 +452,8 @@ function ReviewCardGallery({
           entry.deliverable.contentFormat,
           entry.deliverable.sourceJson
         );
+        const creator = createdByLabelFor(entry.previewOutput?.createdBy ?? null);
+        const createdAt = entry.previewOutput?.createdAt ? formatRelativeTime(entry.previewOutput.createdAt) : null;
 
         return (
           <article className="work-gallery-card review-option-card" key={entry.postVersion.id}>
@@ -712,8 +469,12 @@ function ReviewCardGallery({
                     </Link>
                   </FloatingTooltip>
                 ) : null}
-                <FloatingTooltip content="Open post task">
-                  <Link className="review-card-media-action" href={`/studio/deliverables/${entry.deliverable.id}`} aria-label="Open post task">
+                <FloatingTooltip content="Open preview">
+                  <Link
+                    className="review-card-media-action"
+                    href={previewId ? `/studio/outputs/${previewId}?from=review&stripIds=${encodeURIComponent(stripIds)}` : `/studio/deliverables/${entry.deliverable.id}`}
+                    aria-label="Open preview"
+                  >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M7 7h10v10" />
                       <path d="M7 17 17 7" />
@@ -721,45 +482,42 @@ function ReviewCardGallery({
                   </Link>
                 </FloatingTooltip>
               </div>
-              <ImagePreviewTrigger
-                alt={`Preview for ${entry.deliverable.title}`}
-                actions={
+              <Link
+                className="image-preview-trigger"
+                href={
                   previewId
-                    ? [{ href: `/studio/ai-edit?outputId=${previewId}`, label: "Open in Editor", tone: "primary" }]
-                    : undefined
+                    ? `/studio/outputs/${previewId}?from=review&stripIds=${encodeURIComponent(stripIds)}`
+                    : `/studio/deliverables/${entry.deliverable.id}`
                 }
-                badges={[
-                  entry.deliverable.status.replaceAll("_", " ")
-                ]}
-                details={[
-                  { label: "Placement", value: format },
-                  { label: "Created by", value: createdByLabelFor(entry.previewOutput?.createdBy ?? null) }
-                ]}
-                sections={getPreviewSections(entry)}
-                src={entry.previewOutput?.originalUrl ?? entry.previewOutput?.previewUrl}
-                subtitle={entry.deliverable.briefText ?? "Ready for review"}
-                title={entry.deliverable.title}
               >
-                {entry.previewOutput?.thumbnailUrl ?? entry.previewOutput?.previewUrl ? (
-                  <img
-                    alt={`Preview for ${entry.deliverable.title}`}
-                    src={entry.previewOutput?.thumbnailUrl ?? entry.previewOutput?.previewUrl}
-                  />
-                ) : (
-                  <div className="work-gallery-fallback" />
-                )}
-              </ImagePreviewTrigger>
+                <ProgressiveReviewThumbnail outputId={entry.previewOutput?.id ?? null} token={sessionToken}>
+                  {(src) => src ? (
+                    <img alt={`Preview for ${entry.deliverable.title}`} decoding="async" loading="lazy" src={src} />
+                  ) : (
+                    <div className="work-gallery-fallback" />
+                  )}
+                </ProgressiveReviewThumbnail>
+              </Link>
+              <span className={`review-card-status pill-review-${entry.previewOutput?.reviewState ?? "pending_review"}`}>
+                {(entry.previewOutput?.reviewState ?? "pending_review").replaceAll("_", " ")}
+              </span>
             </div>
 
-            <div className="work-gallery-body">
+<div className="work-gallery-body">
               <div className="work-gallery-copy">
                 <Link href={`/studio/deliverables/${entry.deliverable.id}`}>{entry.deliverable.title}</Link>
-                <p>Created by: {createdByLabelFor(entry.previewOutput?.createdBy ?? null)}</p>
-                {entry.previewOutput?.createdAt && (
-                  <p className="work-gallery-time">{formatRelativeTime(entry.previewOutput.createdAt)}</p>
-                )}
+                <div className="review-card-author-row">
+                  <span className="review-card-avatar">{creator.charAt(0).toUpperCase()}</span>
+                  <span>{creator}</span>
+                  {createdAt ? (
+                    <>
+                      <span aria-hidden="true">•</span>
+                      <span>{createdAt}</span>
+                    </>
+                  ) : null}
+                </div>
               </div>
-                <div className="review-decision-group">
+              <div className="review-decision-group">
                   <FloatingTooltip content="Approve">
                     <button
                       className="button button-primary decision-button approve-decision"
@@ -767,25 +525,29 @@ function ReviewCardGallery({
                       onClick={() => void onDecision(previewId, "approved")}
                       type="button"
                       aria-label="Approve"
+                      style={{ fontSize: "11px" }}
                     >
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
+                      <span>Approve</span>
                     </button>
                   </FloatingTooltip>
-                  <FloatingTooltip content="Needs changes">
+                  <FloatingTooltip content="Comment">
                     <button
                       className="button button-ghost decision-button revision-decision"
                       disabled={!previewId || isRowPending}
                       onClick={() => void onDecision(previewId, "close")}
                       type="button"
-                      aria-label="Needs changes"
+                      aria-label="Comment"
+                      style={{ fontSize: "11px" }}
                     >
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                         <line x1="9" y1="10" x2="15" y2="10" />
                         <line x1="9" y1="14" x2="13" y2="14" />
                       </svg>
+                      <span>Comment</span>
                     </button>
                   </FloatingTooltip>
                   <FloatingTooltip content="Reject">
@@ -795,11 +557,12 @@ function ReviewCardGallery({
                       onClick={() => void onDecision(previewId, "off-brand")}
                       type="button"
                       aria-label="Reject"
+                      style={{ fontSize: "11px" }}
                     >
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18" />
-                        <line x1="6" y1="6" x2="18" y2="18" />
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="8" />
                       </svg>
+                      <span>Reject</span>
                     </button>
                   </FloatingTooltip>
                 </div>
@@ -811,8 +574,53 @@ function ReviewCardGallery({
   );
 }
 
+function ProgressiveReviewThumbnail({
+  children,
+  outputId,
+  token
+}: ProgressiveReviewThumbnailProps) {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token || !outputId) {
+      setSrc(null);
+      return;
+    }
+
+    let cancelled = false;
+    setSrc(null);
+    getCreativeOutputPreviewUrl(token, outputId)
+      .then((result) => {
+        if (!cancelled) {
+          setSrc(result.previewUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSrc(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [outputId, token]);
+
+  return <>{children(src)}</>;
+}
+
 function formatObjective(value: string) {
   return value.replaceAll("_", " ");
+}
+
+function formatLabel(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function reviewerLabel(reviewerUserId: string | null, members: WorkspaceMemberRecord[]) {

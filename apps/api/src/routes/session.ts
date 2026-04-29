@@ -11,9 +11,8 @@ import {
   listProjectReraRegistrations,
   listWorkspaceTemplates
 } from "../lib/repository.js";
-import { listWorkspaceMembers } from "../lib/deliverables-repository.js";
 import { isPlatformAdminUser } from "../lib/credits.js";
-import { createSignedImageUrls, createSignedUrl } from "../lib/storage.js";
+import { createSignedImageUrls, createSignedPreviewUrl, createSignedUrl } from "../lib/storage.js";
 import { toViewerResponse } from "../lib/viewer.js";
 
 export async function registerSessionRoutes(app: FastifyInstance) {
@@ -25,6 +24,7 @@ export async function registerSessionRoutes(app: FastifyInstance) {
       : "full";
     const isLightView = view === "light";
     const isCreateView = view === "create";
+    const isEditorView = view === "editor";
 
     if (!viewer) {
       return reply.unauthorized();
@@ -73,18 +73,30 @@ export async function registerSessionRoutes(app: FastifyInstance) {
       });
     }
 
-    const [workspaceComplianceSettings, brandAssets, projectReraRegistrations, styleTemplates, recentJobs, recentOutputs, workspaceMembers] = await Promise.all([
+    const shouldLoadStyleTemplates = view === "full";
+    const shouldLoadRecentJobs = view === "full" || isCreateView;
+    const shouldLoadRecentOutputs = view === "full";
+
+    const [workspaceComplianceSettings, brandAssets, projectReraRegistrations, styleTemplates, recentJobs, recentOutputs] = await Promise.all([
       getWorkspaceComplianceSettings(workspace.id),
       listWorkspaceAssets(workspace.id, scopedBrandId),
       listProjectReraRegistrations(workspace.id, scopedBrandId),
-      listWorkspaceTemplates(workspace.id, scopedBrandId),
-      listWorkspaceJobs(workspace.id, scopedBrandId),
-      isCreateView ? Promise.resolve([]) : listWorkspaceOutputs(workspace.id, scopedBrandId),
-      listWorkspaceMembers(workspace.id)
+      shouldLoadStyleTemplates ? listWorkspaceTemplates(workspace.id, scopedBrandId) : Promise.resolve([]),
+      shouldLoadRecentJobs ? listWorkspaceJobs(workspace.id, scopedBrandId) : Promise.resolve([]),
+      shouldLoadRecentOutputs ? listWorkspaceOutputs(workspace.id, scopedBrandId) : Promise.resolve([])
     ]);
 
     const [assetUrls, templateUrls, outputUrls] = await Promise.all([
-      Promise.all(brandAssets.map((asset) => createSignedImageUrls(asset.storagePath, asset.thumbnailStoragePath))),
+      Promise.all(
+        brandAssets.map((asset) =>
+          isEditorView
+            ? createSignedPreviewUrl(asset.storagePath, asset.thumbnailStoragePath).then((previewUrl) => ({
+                previewUrl: previewUrl ?? undefined,
+                thumbnailUrl: previewUrl ?? undefined
+              }))
+            : createSignedImageUrls(asset.storagePath, asset.thumbnailStoragePath)
+        )
+      ),
       Promise.all(styleTemplates.map((template) => createSignedUrl(template.storagePath).catch(() => null))),
       isCreateView
         ? Promise.resolve([])
@@ -98,9 +110,14 @@ export async function registerSessionRoutes(app: FastifyInstance) {
       brands,
       brandAssets: brandAssets.map((asset, index) => ({
         ...asset,
-        previewUrl: assetUrls[index]?.originalUrl,
+        previewUrl:
+          assetUrls[index] && "originalUrl" in assetUrls[index]
+            ? assetUrls[index]?.originalUrl
+            : assetUrls[index]?.previewUrl,
         thumbnailUrl: assetUrls[index]?.thumbnailUrl,
-        originalUrl: assetUrls[index]?.originalUrl
+        ...(assetUrls[index] && "originalUrl" in assetUrls[index] && assetUrls[index]?.originalUrl
+          ? { originalUrl: assetUrls[index]?.originalUrl }
+          : {})
       })),
       projectReraRegistrations,
       styleTemplates: styleTemplates.map((template, index) => ({
@@ -114,7 +131,7 @@ export async function registerSessionRoutes(app: FastifyInstance) {
         thumbnailUrl: outputUrls[index]?.thumbnailUrl,
         originalUrl: outputUrls[index]?.originalUrl
       })),
-      workspaceMembers
+      workspaceMembers: []
     });
 
     return response;

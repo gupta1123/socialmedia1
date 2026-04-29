@@ -167,7 +167,7 @@ type DeliverableRow = {
   approved_post_version_id: string | null;
   latest_post_version_id: string | null;
   series_occurrence_date: string | null;
-  source_json: Record<string, unknown> | null;
+  source_json?: Record<string, unknown> | null;
 };
 
 type PostVersionRow = {
@@ -276,7 +276,7 @@ type ReviewPreviewOutputRow = {
   kind: "style_seed" | "final";
   storage_path: string;
   thumbnail_storage_path: string | null;
-  provider_url: string | null;
+  provider_url?: string | null;
   output_index: number;
   parent_output_id: string | null;
   root_output_id: string | null;
@@ -292,6 +292,8 @@ type ReviewPreviewOutputRow = {
 
 const DELIVERABLE_SELECT =
   "id, workspace_id, brand_id, project_id, campaign_id, series_id, persona_id, content_pillar_id, post_type_id, creative_template_id, channel_account_id, planning_mode, objective_code, placement_code, content_format, title, brief_text, cta_text, scheduled_for, due_at, owner_user_id, reviewer_user_id, priority, status, approved_post_version_id, latest_post_version_id, series_occurrence_date, source_json";
+const DELIVERABLE_LIST_SELECT =
+  "id, workspace_id, brand_id, project_id, campaign_id, series_id, persona_id, content_pillar_id, post_type_id, creative_template_id, channel_account_id, planning_mode, objective_code, placement_code, content_format, title, brief_text, cta_text, scheduled_for, due_at, owner_user_id, reviewer_user_id, priority, status, approved_post_version_id, latest_post_version_id, series_occurrence_date";
 
 type DeliverableListFilters = {
   brandId?: string;
@@ -307,6 +309,7 @@ type DeliverableListFilters = {
   scheduledTo?: string;
   limit?: number;
   ascending?: boolean;
+  includeSourceJson?: boolean;
 };
 
 export async function listBrandPersonas(workspaceId: string, brandId?: string) {
@@ -540,7 +543,7 @@ function buildDeliverableQuery(
 ) {
   let query = supabaseAdmin
     .from("deliverables")
-    .select(DELIVERABLE_SELECT, options?.includeCount ? { count: "exact" } : undefined)
+    .select(filters?.includeSourceJson === false ? DELIVERABLE_LIST_SELECT : DELIVERABLE_SELECT, options?.includeCount ? { count: "exact" } : undefined)
     .eq("workspace_id", workspaceId)
     .order("scheduled_for", { ascending: filters?.ascending ?? true });
 
@@ -796,8 +799,7 @@ export async function listReviewQueue(
         status,
         approved_post_version_id,
         latest_post_version_id,
-        series_occurrence_date,
-        source_json
+        series_occurrence_date
       )
     `)
     .eq("deliverable.workspace_id", workspaceId)
@@ -847,7 +849,6 @@ export async function listReviewQueue(
         kind,
         storage_path,
         thumbnail_storage_path,
-        provider_url,
         output_index,
         parent_output_id,
         root_output_id,
@@ -1048,6 +1049,7 @@ export async function listQueueEntries(
     statusGroup?: QueueStatusGroup;
     planningMode?: DeliverableRecord["planningMode"];
     dueWindow?: "today" | "week" | "overdue";
+    imageMode?: "thumbnail" | "metadata";
     limit?: number;
     offset?: number;
   }
@@ -1066,7 +1068,8 @@ export async function listQueueEntries(
         ...(filters?.planningMode ? { planningMode: filters.planningMode } : {}),
         ...(filters?.scope === "my" ? { ownerUserId: viewerUserId } : {}),
         ...(filters?.scope === "unassigned" ? { ownerUserId: "unassigned" } : {}),
-        statusIn
+        statusIn,
+        includeSourceJson: false
       });
 
       if (filters?.dueWindow) {
@@ -1087,23 +1090,6 @@ export async function listQueueEntries(
         return [];
       }
 
-      deliverables = await attachDeliverablePreviews(deliverables);
-
-      const ownerIds = Array.from(
-        new Set(deliverables.map((deliverable) => deliverable.ownerUserId).filter((value): value is string => Boolean(value)))
-      );
-      const projectIds = deliverables.map((deliverable) => deliverable.projectId);
-      const campaignIds = deliverables.map((deliverable) => deliverable.campaignId).filter(Boolean) as string[];
-      const seriesIds = deliverables.map((deliverable) => deliverable.seriesId).filter(Boolean) as string[];
-
-      const [members, projectMap, campaignMap, seriesMap] = await Promise.all([
-        ownerIds.length > 0 ? listWorkspaceMembers(workspaceId) : Promise.resolve([]),
-        listProjectNames(projectIds),
-        loadCampaignMap(workspaceId, campaignIds),
-        loadSeriesMap(workspaceId, seriesIds)
-      ]);
-
-      const memberMap = new Map(members.map((member) => [member.id, member]));
       const sortedDeliverables = deliverables.sort((left, right) => {
         const leftDate = new Date(left.dueAt ?? left.scheduledFor).getTime();
         const rightDate = new Date(right.dueAt ?? right.scheduledFor).getTime();
@@ -1115,8 +1101,28 @@ export async function listQueueEntries(
           : typeof filters?.limit === "number"
             ? sortedDeliverables.slice(0, filters.limit)
             : sortedDeliverables;
+      const deliverablesWithPreviews =
+        filters?.imageMode === "metadata"
+          ? pagedDeliverables
+          : await attachDeliverablePreviews(pagedDeliverables);
 
-      return pagedDeliverables
+      const ownerIds = Array.from(
+        new Set(deliverablesWithPreviews.map((deliverable) => deliverable.ownerUserId).filter((value): value is string => Boolean(value)))
+      );
+      const projectIds = deliverablesWithPreviews.map((deliverable) => deliverable.projectId);
+      const campaignIds = deliverablesWithPreviews.map((deliverable) => deliverable.campaignId).filter(Boolean) as string[];
+      const seriesIds = deliverablesWithPreviews.map((deliverable) => deliverable.seriesId).filter(Boolean) as string[];
+
+      const [members, projectMap, campaignMap, seriesMap] = await Promise.all([
+        ownerIds.length > 0 ? listWorkspaceMembers(workspaceId) : Promise.resolve([]),
+        listProjectNames(projectIds),
+        loadCampaignMap(workspaceId, campaignIds),
+        loadSeriesMap(workspaceId, seriesIds)
+      ]);
+
+      const memberMap = new Map(members.map((member) => [member.id, member]));
+
+      return deliverablesWithPreviews
         .map((deliverable) => ({
           deliverable,
           assignee: deliverable.ownerUserId ? memberMap.get(deliverable.ownerUserId) ?? null : null,
@@ -1477,7 +1483,7 @@ function mapReviewOutputRow(row: ReviewPreviewOutputRow | null) {
     kind: row.kind,
     storagePath: row.storage_path,
     thumbnailStoragePath: row.thumbnail_storage_path,
-    providerUrl: row.provider_url,
+    providerUrl: null,
     outputIndex: row.output_index,
     parentOutputId: row.parent_output_id,
     rootOutputId: row.root_output_id,

@@ -300,7 +300,7 @@ export function StudioProvider({
       const payload = await bootstrapSession(
         accessToken,
         bootstrapMode,
-        bootstrapMode === "full" || bootstrapMode === "create" ? storedBrandId ?? undefined : undefined
+        bootstrapMode === "full" || bootstrapMode === "create" || bootstrapMode === "editor" ? storedBrandId ?? undefined : undefined
       );
 
       if (cancelled) {
@@ -473,7 +473,7 @@ export function StudioProvider({
           const payload = await bootstrapSession(
             sessionToken,
             bootstrapMode,
-            bootstrapMode === "full" ? activeBrandId ?? undefined : undefined
+            bootstrapMode === "full" || bootstrapMode === "editor" ? activeBrandId ?? undefined : undefined
           );
           if (cancelled) {
             return;
@@ -540,7 +540,7 @@ export function StudioProvider({
     const payload = await bootstrapSession(
       sessionToken,
       bootstrapMode,
-      bootstrapMode === "full" || bootstrapMode === "create" ? scopedBrandId : undefined
+      bootstrapMode === "full" || bootstrapMode === "create" || bootstrapMode === "editor" ? scopedBrandId : undefined
     );
     const normalizedPayload = normalizeBootstrapPayload(payload);
     setBootstrap(normalizedPayload);
@@ -579,7 +579,7 @@ export function StudioProvider({
       selectedReferenceAssetIds: []
     }));
 
-    if (sessionToken && (bootstrapMode === "full" || bootstrapMode === "create")) {
+    if (sessionToken && (bootstrapMode === "full" || bootstrapMode === "create" || bootstrapMode === "editor")) {
       void refresh(value).catch(() => null);
     }
   }

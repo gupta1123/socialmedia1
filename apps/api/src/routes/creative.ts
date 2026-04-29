@@ -38,7 +38,7 @@ import {
   getCampaignDeliverablePlan,
   getSeries
 } from "../lib/deliverables-repository.js";
-import { createSignedImageUrls } from "../lib/storage.js";
+import { createSignedImageUrls, createSignedPreviewUrl } from "../lib/storage.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { deriveAspectRatio, randomId } from "../lib/utils.js";
 import {
@@ -94,7 +94,20 @@ const GenerateOptionsRequestSchema = z.object({
 });
 const CreativeOutputsQuerySchema = z.object({
   brandId: z.string().uuid().optional(),
+  ids: z
+    .string()
+    .optional()
+    .transform((value) =>
+      value
+        ? value
+            .split(",")
+            .map((id) => id.trim())
+            .filter(Boolean)
+        : undefined
+    )
+    .pipe(z.array(z.string().uuid()).max(50).optional()),
   reviewState: z.enum(["pending_review", "approved", "needs_revision", "closed"]).optional(),
+  imageMode: z.enum(["full", "thumbnail", "metadata"]).default("full"),
   limit: z.coerce.number().int().min(1).max(200).default(48),
   offset: z.coerce.number().int().min(0).default(0)
 });
@@ -2355,7 +2368,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       return reply.badRequest(parsedQuery.error.issues[0]?.message ?? "Invalid outputs query");
     }
 
-    const { brandId, reviewState, limit, offset } = parsedQuery.data;
+    const { brandId, ids, reviewState, imageMode, limit, offset } = parsedQuery.data;
 
     if (brandId) {
       const brand = await getBrand(brandId);
@@ -2367,7 +2380,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     let query = supabaseAdmin
       .from("creative_outputs")
       .select(
-        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by"
+        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by"
       )
       .eq("workspace_id", workspace.id);
 
@@ -2379,9 +2392,15 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       query = query.eq("review_state", reviewState);
     }
 
-    const { data, error } = await query
-      .order("created_at", { ascending: false })
-      .range(offset, offset + limit - 1)
+    if (ids?.length) {
+      query = query.in("id", ids);
+    }
+
+    const shouldPage = !ids?.length;
+    const orderedQuery = query.order("created_at", { ascending: false });
+    const finalQuery = shouldPage ? orderedQuery.range(offset, offset + limit - 1) : orderedQuery.limit(Math.min(ids.length, limit));
+
+    const { data, error } = await finalQuery
       .returns<
         Array<{
           id: string;
@@ -2397,7 +2416,6 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           kind: "style_seed" | "final";
           storage_path: string;
           thumbnail_storage_path: string | null;
-          provider_url: string | null;
           output_index: number;
           parent_output_id: string | null;
           root_output_id: string | null;
@@ -2417,38 +2435,91 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
     const rows = data ?? [];
     const signedUrls = await Promise.all(
-      rows.map((row) => createSignedImageUrls(row.storage_path, row.thumbnail_storage_path))
+      rows.map((row) =>
+        imageMode === "metadata"
+          ? Promise.resolve({})
+          : imageMode === "thumbnail"
+          ? createSignedPreviewUrl(row.storage_path, row.thumbnail_storage_path).then((thumbnailUrl) => ({
+              thumbnailUrl: thumbnailUrl ?? undefined
+            }))
+          : createSignedImageUrls(row.storage_path, row.thumbnail_storage_path)
+      )
     );
 
-    return rows.map((output, index) => ({
-      id: output.id,
-      workspaceId: output.workspace_id,
-      brandId: output.brand_id,
-      deliverableId: output.deliverable_id,
-      projectId: output.project_id,
-      postTypeId: output.post_type_id,
-      creativeTemplateId: output.creative_template_id,
-      calendarItemId: output.calendar_item_id,
-      jobId: output.job_id,
-      postVersionId: output.post_version_id,
-      kind: output.kind,
-      storagePath: output.storage_path,
-      thumbnailStoragePath: output.thumbnail_storage_path,
-      providerUrl: output.provider_url,
-      outputIndex: output.output_index,
-      parentOutputId: output.parent_output_id,
-      rootOutputId: output.root_output_id,
-      editedFromOutputId: output.edited_from_output_id,
-      versionNumber: output.version_number,
-      isLatestVersion: output.is_latest_version,
-      reviewState: output.review_state,
-      latestVerdict: output.latest_feedback_verdict,
-      reviewedAt: output.reviewed_at,
-      createdBy: output.created_by,
-      previewUrl: signedUrls[index]?.originalUrl,
-      thumbnailUrl: signedUrls[index]?.thumbnailUrl,
-      originalUrl: signedUrls[index]?.originalUrl
-    }));
+    return rows.map((output, index) => {
+      const urls = signedUrls[index];
+      const thumbnailUrl =
+        urls && "thumbnailUrl" in urls
+          ? (urls as { thumbnailUrl?: string }).thumbnailUrl
+          : undefined;
+      const originalUrl =
+        urls && "originalUrl" in urls
+          ? (urls as { originalUrl?: string }).originalUrl
+          : undefined;
+
+      return {
+        id: output.id,
+        workspaceId: output.workspace_id,
+        brandId: output.brand_id,
+        deliverableId: output.deliverable_id,
+        projectId: output.project_id,
+        postTypeId: output.post_type_id,
+        creativeTemplateId: output.creative_template_id,
+        calendarItemId: output.calendar_item_id,
+        jobId: output.job_id,
+        postVersionId: output.post_version_id,
+        kind: output.kind,
+        storagePath: output.storage_path,
+        thumbnailStoragePath: output.thumbnail_storage_path,
+        providerUrl: null,
+        outputIndex: output.output_index,
+        parentOutputId: output.parent_output_id,
+        rootOutputId: output.root_output_id,
+        editedFromOutputId: output.edited_from_output_id,
+        versionNumber: output.version_number,
+        isLatestVersion: output.is_latest_version,
+        reviewState: output.review_state,
+        latestVerdict: output.latest_feedback_verdict,
+        reviewedAt: output.reviewed_at,
+        createdBy: output.created_by,
+        ...(imageMode === "metadata" ? {} : { previewUrl: imageMode === "thumbnail" ? thumbnailUrl : originalUrl }),
+        ...(thumbnailUrl ? { thumbnailUrl } : {}),
+        ...(imageMode === "full" && originalUrl ? { originalUrl } : {})
+      };
+    });
+  });
+
+  app.get("/api/creative/outputs/:outputId/preview-url", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    const outputId = (request.params as { outputId: string }).outputId;
+    const { data, error } = await supabaseAdmin
+      .from("creative_outputs")
+      .select("id, workspace_id, storage_path, thumbnail_storage_path")
+      .eq("id", outputId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    const output = data as {
+      id: string;
+      workspace_id: string;
+      storage_path: string;
+      thumbnail_storage_path: string | null;
+    } | null;
+
+    if (!output) {
+      return reply.notFound("Output not found");
+    }
+
+    await assertWorkspaceRole(viewer, output.workspace_id, ["owner", "admin", "editor", "viewer"], request.log);
+    const previewUrl = await createSignedPreviewUrl(output.storage_path, output.thumbnail_storage_path);
+    return { previewUrl };
   });
 
   app.get("/api/creative/outputs/:outputId", { preHandler: app.authenticate }, async (request, reply) => {
