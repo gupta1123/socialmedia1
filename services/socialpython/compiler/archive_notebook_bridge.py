@@ -907,7 +907,39 @@ def patch_notebook_run_pipeline(namespace: dict[str, Any]) -> None:
             crafted,
             variation_count,
         )
-        validate_verified_prompt_contract(analysis_payload, verified)
+        try:
+            validate_verified_prompt_contract(analysis_payload, verified)
+        except RuntimeError as exc:
+            if "Verifier failed agent fact boundary" not in str(exc):
+                raise
+
+            repair_analysis_payload = {
+                **analysis_payload,
+                "fact_boundary_repair_required": True,
+                "fact_boundary_repair_issues": [str(exc)],
+                "fact_boundary_repair_instruction": (
+                    "Revise the public image prompt so it uses required grounded facts, "
+                    "removes available-but-unrequested facts, and does not mention "
+                    "unsupported field labels or internal policy text."
+                ),
+            }
+            repair_crafted = build_fact_boundary_repair_crafted_set(verified, str(exc))
+            repair_response = verifier.run(
+                input=BridgeVerifierInput(
+                    brief_analysis=repair_analysis_payload,
+                    crafted_set=repair_crafted,
+                    requested_variation_count=variation_count,
+                ),
+                session_id=step_session_id(session_id, "verifier-repair"),
+            )
+            verified = sanitize_verification_set(
+                repair_response.content,
+                repair_analysis_payload,
+                repair_crafted,
+                variation_count,
+            )
+            validate_verified_prompt_contract(repair_analysis_payload, verified)
+            analysis_payload = repair_analysis_payload
 
         if print_steps:
             print("=" * 90)
@@ -1742,6 +1774,59 @@ def validate_agent_fact_boundary(analysis: dict[str, Any], verified: dict[str, A
         raise RuntimeError(
             "Verifier failed agent fact boundary: " + "; ".join(violations)
         )
+
+
+def build_fact_boundary_repair_crafted_set(
+    verified: BridgeVerificationSet,
+    issue: str,
+) -> BridgeCraftedSet:
+    verified_payload = verified.model_dump() if isinstance(verified, BaseModel) else verified
+    variations: list[BridgePromptVariationDraft] = []
+
+    for index, variation in enumerate(verified_payload.get("variations") or [], start=1):
+        title = str(variation.get("title") or f"Option {index}").strip()
+        strategy = str(variation.get("strategy") or "").strip()
+        poster_archetype = str(variation.get("poster_archetype") or "").strip()
+        prompt = str(variation.get("revised_prompt") or "").strip()
+        negative = str(variation.get("revised_negative") or "").strip()
+        difference = variation.get("difference_from_others")
+
+        variations.append(
+            BridgePromptVariationDraft(
+                title=title or f"Option {index}",
+                strategy=(
+                    f"{strategy}\n\nFact-boundary repair required: {issue}\n"
+                    "Rewrite the public image prompt using only requested grounded facts. "
+                    "Do not add policy prose; remove disallowed facts by changing the creative copy direction."
+                ).strip(),
+                poster_archetype=poster_archetype or "grounded_poster",
+                prompt=prompt,
+                negative=negative,
+                difference_from_others=str(difference).strip() if difference else None,
+            )
+        )
+
+    if not variations:
+        variations.append(
+            BridgePromptVariationDraft(
+                title="Option 1",
+                strategy=(
+                    f"Fact-boundary repair required: {issue}. "
+                    "Rewrite the public image prompt using only requested grounded facts."
+                ),
+                poster_archetype="grounded_poster",
+                prompt="Create a grounded finished social poster using only the supplied facts.",
+                negative="",
+            )
+        )
+
+    return BridgeCraftedSet(
+        prompt_summary=(
+            "Verifier repair pass for grounded fact boundary. "
+            "The final revised prompts must remove available-but-unrequested facts and keep required grounded facts."
+        ),
+        variations=variations[:3],
+    )
 
 
 def validate_prompt_hygiene_contract(verified: dict[str, Any]) -> None:

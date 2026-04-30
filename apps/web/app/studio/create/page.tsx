@@ -349,6 +349,8 @@ function CreatePageContent() {
     useState<OneStageGenerationUiSession | null>(null);
   const [activePicker, setActivePicker] = useState<CreatePicker | null>(null);
   const [pickerQuery, setPickerQuery] = useState("");
+  const [logoMenuOpen, setLogoMenuOpen] = useState(false);
+  const logoMenuRef = useRef<HTMLDivElement | null>(null);
   const [postTaskStatusFilter, setPostTaskStatusFilter] = useState<PostTaskPickerStatusFilter>("all");
   const [postTaskProjectFilter, setPostTaskProjectFilter] = useState<string>("all");
   const [festivalFilter, setFestivalFilter] = useState<"all" | "upcoming">("upcoming");
@@ -358,16 +360,24 @@ function CreatePageContent() {
   const [seriesCreateForm, setSeriesCreateForm] = useState<SeriesCreateFormState>(createEmptySeriesCreateForm);
   const [savingCampaignCreate, setSavingCampaignCreate] = useState(false);
   const [savingSeriesCreate, setSavingSeriesCreate] = useState(false);
-  // Sidebar section open/closed state
-  const [sidebarSections, setSidebarSections] = useState({
-    context: true,
-    brief: true,
-    style: true
-  });
-
   useEffect(() => {
     appliedQueryRef.current = false;
   }, [searchKey, activeBrandId]);
+
+  useEffect(() => {
+    if (!logoMenuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (logoMenuRef.current && !logoMenuRef.current.contains(event.target as Node)) {
+        setLogoMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [logoMenuOpen]);
 
   useEffect(() => {
     setPickerQuery("");
@@ -749,14 +759,14 @@ function CreatePageContent() {
   const filteredPostTypes = useMemo(
     () =>
       postTypes.filter((postType) => {
-        if (!normalizedPickerQuery) {
+        if (activePicker === "post-type" || !normalizedPickerQuery) {
           return true;
         }
 
         const haystack = [postType.name, postType.code, postType.description ?? ""].join(" ").toLowerCase();
         return haystack.includes(normalizedPickerQuery);
       }),
-    [normalizedPickerQuery, postTypes]
+    [activePicker, normalizedPickerQuery, postTypes]
   );
   const filteredFestivals = useMemo(
     () =>
@@ -2285,10 +2295,6 @@ function CreatePageContent() {
     }));
   }
 
-  function toggleSection(key: keyof typeof sidebarSections) {
-    setSidebarSections((prev) => ({ ...prev, [key]: !prev[key] }));
-  }
-
   if (isCampaignCreateMode) {
     return (
       <div className="create-v2-shell">
@@ -2650,30 +2656,8 @@ function CreatePageContent() {
       ────────────────────────────────────────── */}
       <aside className="create-v2-sidebar">
 
-        {/* ① CONTEXT */}
         <div className="create-section create-section-context">
-          <button
-            className="create-section-toggle"
-            onClick={() => toggleSection("context")}
-            type="button"
-          >
-            <span className="create-section-icon">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 8v4" />
-                <path d="M12 16h.01" />
-              </svg>
-            </span>
-            <span className="create-section-label">Context</span>
-            <span className={`create-section-chevron ${sidebarSections.context ? "is-open" : ""}`}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </span>
-          </button>
-
-          {sidebarSections.context && (
-            <div className="create-section-body">
+          <div className="create-section-body">
               {isPostMode ? (
                 <>
                   {/* Post tasks are hidden for now. Keep this block so task linking can be restored later.
@@ -2878,7 +2862,6 @@ function CreatePageContent() {
 
               {!canUseDeliverableInheritance && !isCampaignAssetMode && (
                 <div className="create-editorial-group">
-                  <p className="create-editorial-label">Base Configuration</p>
                   {!locksProjectSelection ? (
                     <SelectionRow
                       actionLabel={selectedProject ? "Change" : "Select"}
@@ -2957,36 +2940,11 @@ function CreatePageContent() {
                   )}
                 </>
               ) : null}
-            </div>
-          )}
+          </div>
         </div>
 
-        {/* ② STYLE */}
         <div className="create-section create-section-style">
-          <button
-            className="create-section-toggle"
-            onClick={() => toggleSection("style")}
-            type="button"
-          >
-            <span className="create-section-icon">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
-                <circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
-                <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
-                <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
-                <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.477-1.125-.288-.29-.472-.686-.472-1.187 0-.926.75-1.688 1.688-1.688H16c2.188 0 4-1.813 4-4 0-4.97-4.478-9-10-9z" />
-              </svg>
-            </span>
-            <span className="create-section-label">Style</span>
-            <span className={`create-section-chevron ${sidebarSections.style ? "is-open" : ""}`}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </span>
-          </button>
-
-          {sidebarSections.style && (
-            <div className="create-section-body">
+          <div className="create-section-body">
               {/* Template picker hidden temporarily. Restore by setting SHOW_CREATE_TEMPLATE_CONTROLS to true. */}
               {SHOW_CREATE_TEMPLATE_CONTROLS ? (
                 <SelectionRow
@@ -3096,60 +3054,98 @@ function CreatePageContent() {
 
               {logoAssets.length > 0 ? (
                 <div className="create-references-section">
-                  <p className="create-references-label">Brand assets</p>
-                  <div className="create-brand-asset-toggle-grid">
+                  <div className="create-brand-logo-picker" ref={logoMenuRef}>
                     <button
-                      className={`create-brand-asset-toggle ${briefForm.includeBrandLogo ? "is-selected" : ""}`}
-                      onClick={() =>
-                        setBriefForm((state) => ({
-                          ...state,
-                          includeBrandLogo: !state.includeBrandLogo,
-                          logoAssetId:
-                            !state.includeBrandLogo && !state.logoAssetId && logoAssets[0]
-                              ? logoAssets[0].id
-                              : state.logoAssetId
-                        }))
-                      }
+                      className={`create-brand-logo-tile ${briefForm.includeBrandLogo ? "is-selected" : ""}`}
+                      onClick={() => setLogoMenuOpen((open) => !open)}
                       type="button"
                     >
-                      <div className="create-brand-asset-toggle-preview">
-                        {selectedLogoAsset?.thumbnailUrl ?? selectedLogoAsset?.previewUrl ? (
+                      {briefForm.includeBrandLogo ? (
+                        <span
+                          aria-label="Clear logo"
+                          className="create-brand-logo-clear"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setBriefForm((state) => ({
+                              ...state,
+                              includeBrandLogo: false,
+                              logoAssetId: state.logoAssetId
+                            }));
+                            setLogoMenuOpen(false);
+                          }}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setBriefForm((state) => ({
+                                ...state,
+                                includeBrandLogo: false,
+                                logoAssetId: state.logoAssetId
+                              }));
+                              setLogoMenuOpen(false);
+                            }
+                          }}
+                        >
+                          ×
+                        </span>
+                      ) : null}
+                      <span className="create-brand-logo-preview">
+                        {briefForm.includeBrandLogo && (selectedLogoAsset?.thumbnailUrl ?? selectedLogoAsset?.previewUrl) ? (
                           <img
                             alt={selectedLogoAsset.label}
                             src={selectedLogoAsset?.thumbnailUrl ?? selectedLogoAsset?.previewUrl}
                           />
-                        ) : selectedLogoAsset ? (
+                        ) : briefForm.includeBrandLogo && selectedLogoAsset ? (
                           <span>{getInitials(selectedLogoAsset.label)}</span>
                         ) : (
-                          <span>LG</span>
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                          </svg>
                         )}
-                      </div>
-                      <div className="create-brand-asset-toggle-copy">
-                        <strong>Use brand logo</strong>
-                        <span>{selectedLogoAsset?.label ?? "Select a logo"}</span>
-                      </div>
-                      <span className="create-brand-asset-toggle-state">
-                        {briefForm.includeBrandLogo ? "On" : "Off"}
                       </span>
+                      <strong>Logo</strong>
                     </button>
 
-                    <div
-                      className="create-reference-selection-row"
-                      style={{ width: "100%", gap: "10px", flexWrap: "wrap", marginTop: "6px" }}
-                    >
-                      {logoAssets.map((asset) => {
-                        const isSelected = asset.id === selectedLogoAsset?.id;
-                        return (
+                    {logoMenuOpen ? (
+                      <div className="create-brand-logo-menu">
+                        {logoAssets.map((asset) => {
+                          const isSelected = briefForm.includeBrandLogo && asset.id === selectedLogoAsset?.id;
+                          return (
+                            <button
+                              key={asset.id}
+                              className={`create-brand-logo-option ${isSelected ? "is-selected" : ""}`}
+                              onClick={() => {
+                                setBriefForm((state) => ({
+                                  ...state,
+                                  includeBrandLogo: true,
+                                  logoAssetId: asset.id
+                                }));
+                                setLogoMenuOpen(false);
+                              }}
+                              type="button"
+                            >
+                              <span className="create-brand-logo-option-preview">
+                                {asset.thumbnailUrl ?? asset.previewUrl ? (
+                                  <img alt={asset.label} src={asset.thumbnailUrl ?? asset.previewUrl} />
+                                ) : (
+                                  <span>{getInitials(asset.label)}</span>
+                                )}
+                              </span>
+                              <span>{asset.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                  {/* Old compact pills kept for quick restore if needed.
+                    <div className="create-reference-selection-row">
+                      {logoAssets.map((asset) => (
                           <button
                             key={asset.id}
-                            className={`create-reference-pill ${isSelected ? "is-selected" : ""}`}
-                            onClick={() =>
-                              setBriefForm((state) => ({
-                                ...state,
-                                includeBrandLogo: true,
-                                logoAssetId: asset.id
-                              }))
-                            }
+                            className="create-reference-pill"
                             type="button"
                           >
                             {asset.thumbnailUrl ?? asset.previewUrl ? (
@@ -3158,39 +3154,16 @@ function CreatePageContent() {
                               <span>{getInitials(asset.label)}</span>
                             )}
                           </button>
-                        );
-                      })}
+                        ))}
                     </div>
-                  </div>
+                  */}
                 </div>
               ) : null}
-            </div>
-          )}
+          </div>
         </div>
 
-        {/* ③ BRIEF */}
         <div className="create-section create-section-brief">
-          <button
-            className="create-section-toggle"
-            onClick={() => toggleSection("brief")}
-            type="button"
-          >
-            <span className="create-section-icon">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-            </span>
-            <span className="create-section-label">Brief</span>
-            <span className={`create-section-chevron ${sidebarSections.brief ? "is-open" : ""}`}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </span>
-          </button>
-
-          {sidebarSections.brief && (
-            <div className="create-section-body">
+          <div className="create-section-body">
               {/* Main Prompt */}
               <label className="create-field-label create-field-label-prominent">
                 {isSeriesEpisodeMode
@@ -3214,10 +3187,7 @@ function CreatePageContent() {
                   </span>
                 ) : null}
               </label>
-              {/* Copy & Strategy Group */}
               <div className="create-editorial-group">
-                <p className="create-editorial-label">Copy & Strategy</p>
-
                 <div className="create-field-group">
                   <label className="create-field-label">
                     Target Audience
@@ -3350,9 +3320,8 @@ function CreatePageContent() {
                     ) : null}
                   </div>
                 </div>
-              </div>
             </div>
-          )}
+          </div>
         </div>
 
       </aside>
@@ -3806,21 +3775,29 @@ function CreatePageContent() {
                     )}
                   </h2>
                   {activePicker === "festival" ? (
-                    <div className="create-filter-chips">
-                      <button
-                        className={`create-filter-chip ${festivalFilter === "all" ? "is-active" : ""}`}
-                        onClick={() => setFestivalFilter("all")}
-                        type="button"
-                      >
-                        All
-                      </button>
-                      <button
-                        className={`create-filter-chip ${festivalFilter === "upcoming" ? "is-active" : ""}`}
-                        onClick={() => setFestivalFilter("upcoming")}
-                        type="button"
-                      >
-                        Upcoming
-                      </button>
+                    <div className="create-festival-filter-row">
+                      <div className="create-filter-chips">
+                        <button
+                          className={`create-filter-chip ${festivalFilter === "all" ? "is-active" : ""}`}
+                          onClick={() => setFestivalFilter("all")}
+                          type="button"
+                        >
+                          All
+                        </button>
+                        <button
+                          className={`create-filter-chip ${festivalFilter === "upcoming" ? "is-active" : ""}`}
+                          onClick={() => setFestivalFilter("upcoming")}
+                          type="button"
+                        >
+                          Upcoming
+                        </button>
+                      </div>
+                      <input
+                        className="create-field-input create-festival-search"
+                        onChange={(event) => setPickerQuery(event.target.value)}
+                        placeholder={getPickerPlaceholder(activePicker)}
+                        value={pickerQuery}
+                      />
                     </div>
                   ) : null}
                 </div>
@@ -3835,25 +3812,21 @@ function CreatePageContent() {
                 )}
               </div>
               <div className={`drawer-body create-picker-body ${activePicker === "post-type" ? "create-picker-body-post-type" : ""}`}>
-                <div className="create-picker-toolbar">
-                  {activePicker === "post-type" ? (
-                    <svg className="create-picker-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
-                      <path d="m20 20-4.5-4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                    </svg>
-                  ) : null}
-                  <input
-                    className="create-field-input"
-                    onChange={(event) => setPickerQuery(event.target.value)}
-                    placeholder={getPickerPlaceholder(activePicker)}
-                    value={pickerQuery}
-                  />
-                  {allowsReferenceImages && activePicker === "references" && selectedReferenceAssets.length > 0 ? (
-                    <button className="button button-ghost" onClick={clearSelectedReferences} type="button">
-                      Clear selected
-                    </button>
-                  ) : null}
-                </div>
+                {activePicker !== "post-type" && activePicker !== "festival" ? (
+                  <div className="create-picker-toolbar">
+                    <input
+                      className="create-field-input"
+                      onChange={(event) => setPickerQuery(event.target.value)}
+                      placeholder={getPickerPlaceholder(activePicker)}
+                      value={pickerQuery}
+                    />
+                    {allowsReferenceImages && activePicker === "references" && selectedReferenceAssets.length > 0 ? (
+                      <button className="button button-ghost" onClick={clearSelectedReferences} type="button">
+                        Clear selected
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 {/* Post task picker hidden for now. Keep implementation commented for quick restore.
                 {activePicker === "post-task" ? (
