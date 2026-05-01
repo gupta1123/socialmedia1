@@ -39,11 +39,15 @@ export async function generateOpenAiImages({
   if (!env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is required when IMAGE_GENERATION_PROVIDER=openai");
   }
+  const resolvedModel = model?.trim() || env.OPENAI_FINAL_MODEL || "gpt-image-2";
+  if (!resolvedModel.trim()) {
+    throw new Error("OPENAI_FINAL_MODEL is required for OpenAI image generation.");
+  }
 
   const response =
     referencePaths.length > 0
       ? await submitOpenAiEditRequest({
-          model,
+          model: resolvedModel,
           prompt,
           aspectRatio,
           count,
@@ -56,7 +60,7 @@ export async function generateOpenAiImages({
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            model,
+            model: resolvedModel,
             prompt,
             n: count,
             size: resolveOpenAiImageSize(aspectRatio),

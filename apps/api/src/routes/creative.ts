@@ -2380,7 +2380,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     let query = supabaseAdmin
       .from("creative_outputs")
       .select(
-        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by"
+        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by, metadata_json"
       )
       .eq("workspace_id", workspace.id);
 
@@ -2426,6 +2426,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           latest_feedback_verdict: CreativeOutputRecord["latestVerdict"];
           reviewed_at: string | null;
           created_by: string | null;
+          metadata_json: Record<string, unknown> | null;
         }>
       >();
 
@@ -2482,6 +2483,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
         latestVerdict: output.latest_feedback_verdict,
         reviewedAt: output.reviewed_at,
         createdBy: output.created_by,
+        metadataJson: output.metadata_json ?? {},
         ...(imageMode === "metadata" ? {} : { previewUrl: imageMode === "thumbnail" ? thumbnailUrl : originalUrl }),
         ...(thumbnailUrl ? { thumbnailUrl } : {}),
         ...(imageMode === "full" && originalUrl ? { originalUrl } : {})
@@ -2532,7 +2534,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     const { data, error } = await supabaseAdmin
       .from("creative_outputs")
       .select(
-        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by"
+        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by, metadata_json"
       )
       .eq("id", outputId)
       .maybeSingle();
@@ -2563,6 +2565,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
           latest_feedback_verdict: "approved" | "close" | "off-brand" | "wrong-layout" | "wrong-text" | null;
           reviewed_at: string | null;
           created_by: string | null;
+          metadata_json: Record<string, unknown> | null;
         }
       | null;
 
@@ -2603,6 +2606,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       latestVerdict: output.latest_feedback_verdict,
       reviewedAt: output.reviewed_at,
       createdBy: output.created_by,
+      metadataJson: output.metadata_json ?? {},
       previewUrl: signedUrls.originalUrl,
       thumbnailUrl: signedUrls.thumbnailUrl,
       originalUrl: signedUrls.originalUrl

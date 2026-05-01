@@ -133,19 +133,21 @@ export default function GalleryPage() {
     <div className="page-stack">
       <section className="page-grid">
         <div className="page-span-12">
-          <div className="queue-scope-switch" role="tablist" aria-label="Gallery filter" style={{ marginBottom: "16px" }}>
-            {REVIEW_FILTERS.map((item) => (
-              <button
-                aria-selected={reviewFilter === item.id}
-                className={`filter-chip ${reviewFilter === item.id ? "is-active" : ""}`}
-                key={item.id}
-                onClick={() => setReviewFilter(item.id)}
-                role="tab"
-                type="button"
-              >
-                {item.label}
-              </button>
-            ))}
+          <div className="gallery-filter-container" role="tablist" aria-label="Gallery filter">
+            <div className="queue-scope-switch">
+              {REVIEW_FILTERS.map((item) => (
+                <button
+                  aria-selected={reviewFilter === item.id}
+                  className={`filter-chip ${reviewFilter === item.id ? "is-active" : ""}`}
+                  key={item.id}
+                  onClick={() => setReviewFilter(item.id)}
+                  role="tab"
+                  type="button"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {loading ? (
@@ -180,13 +182,26 @@ export default function GalleryPage() {
                             token={sessionToken}
                           />
                         </Link>
+                        <div className="gallery-card-badges">
+                          <span className="gallery-card-badge is-version">v{output.versionNumber}</span>
+                          <span className={`gallery-card-badge pill-review-${output.reviewState}`}>
+                            {statusLabel}
+                          </span>
+                        </div>
                       </div>
                       <div className="work-gallery-body">
                         <div className="work-gallery-copy">
-                          <strong>{`Output #${output.outputIndex + 1} · v${output.versionNumber}`}</strong>
-                          <p>{statusLabel}</p>
-                          <p>Created by {creator}</p>
-                          {output.createdAt && <p className="work-gallery-time">{formatRelativeTime(output.createdAt)}</p>}
+                          <strong>Output #{output.outputIndex + 1}</strong>
+                          <div className="review-card-author-row">
+                            <span className="review-card-avatar">{creator.charAt(0).toUpperCase()}</span>
+                            <span>{creator}</span>
+                            {output.createdAt && (
+                              <>
+                                <span aria-hidden="true">•</span>
+                                <span className="work-gallery-time">{formatRelativeTime(output.createdAt)}</span>
+                              </>
+                            )}
+                          </div>
                         </div>
                         <div className="work-gallery-footer">
                           <Link className="button button-ghost button-sm" href={`/studio/ai-edit?outputId=${output.id}`}>

@@ -9,6 +9,7 @@ import { registerCampaignRoutes } from "./routes/campaigns.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerCreditRoutes } from "./routes/credits.js";
 import { registerCreativeRoutes } from "./routes/creative.js";
+import { registerCreativeV3Routes } from "./routes/creative-v3.js";
 import { registerDeliverableRoutes } from "./routes/deliverables.js";
 import { registerDomainRoutes } from "./routes/domain.js";
 import { registerFalRoutes } from "./routes/fal.js";
@@ -79,6 +80,7 @@ export async function buildApp() {
   await registerCreditRoutes(app);
   await registerWorkRoutes(app);
   await registerCreativeRoutes(app);
+  await registerCreativeV3Routes(app);
   await registerImageEditRoutes(app);
   await registerFalRoutes(app);
 

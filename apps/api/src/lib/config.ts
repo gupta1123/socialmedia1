@@ -37,6 +37,15 @@ const optionalCsvList = z.preprocess((value) => {
   return entries.length > 0 ? entries : undefined;
 }, z.array(z.string()).optional());
 
+const stringWithDefault = (fallback: string) =>
+  z.preprocess((value) => {
+    if (typeof value === "string" && value.trim().length === 0) {
+      return undefined;
+    }
+
+    return value;
+  }, z.string().default(fallback));
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().default(4000),
@@ -51,25 +60,25 @@ const EnvSchema = z.object({
   IMAGE_GENERATION_PROVIDER: z.enum(["fal", "openrouter", "openai"]).default("fal"),
   FAL_KEY: z.string().optional(),
   FAL_WEBHOOK_URL: z.string().url().optional(),
-  FAL_STYLE_SEED_MODEL: z.string().default("fal-ai/nano-banana"),
-  FAL_FINAL_MODEL: z.string().default("fal-ai/nano-banana/edit"),
-  OPENAI_STYLE_SEED_MODEL: z.string().default("gpt-image-2"),
-  OPENAI_FINAL_MODEL: z.string().default("gpt-image-2"),
+  FAL_STYLE_SEED_MODEL: stringWithDefault("fal-ai/nano-banana"),
+  FAL_FINAL_MODEL: stringWithDefault("fal-ai/nano-banana/edit"),
+  OPENAI_STYLE_SEED_MODEL: stringWithDefault("gpt-image-2"),
+  OPENAI_FINAL_MODEL: stringWithDefault("gpt-image-2"),
   OPENAI_IMAGE_QUALITY: z.enum(["auto", "low", "medium", "high"]).default("high"),
   OPENAI_IMAGE_OUTPUT_FORMAT: z.enum(["png", "jpeg", "webp"]).default("png"),
   OPENAI_IMAGE_BACKGROUND: z.enum(["auto", "opaque", "transparent"]).default("auto"),
   OPENAI_IMAGE_INPUT_FIDELITY: z.enum(["low", "high"]).default("high"),
   OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
-  OPENROUTER_STYLE_SEED_MODEL: z.string().default("google/gemini-2.5-flash-image"),
-  OPENROUTER_FINAL_MODEL: z.string().default("google/gemini-2.5-flash-image"),
-  OPENROUTER_IMAGE_EDIT_MODEL: z.string().default("google/gemini-2.5-flash-image"),
-  OPENROUTER_PROMPT_COMPOSER_MODEL: z.string().default("google/gemini-2.5-flash"),
+  OPENROUTER_STYLE_SEED_MODEL: stringWithDefault("google/gemini-2.5-flash-image"),
+  OPENROUTER_FINAL_MODEL: stringWithDefault("google/gemini-2.5-flash-image"),
+  OPENROUTER_IMAGE_EDIT_MODEL: stringWithDefault("google/gemini-2.5-flash-image"),
+  OPENROUTER_PROMPT_COMPOSER_MODEL: stringWithDefault("google/gemini-2.5-flash"),
   OPENROUTER_IMAGE_MODALITIES: optionalCsvList,
   OPENROUTER_IMAGE_SIZE: z.string().optional(),
   OPENROUTER_HTTP_REFERER: optionalUrl,
   OPENROUTER_X_TITLE: z.string().optional(),
-  AI_EDIT_DIRECT_MODEL: z.string().default("fal-ai/nano-banana/edit"),
+  AI_EDIT_DIRECT_MODEL: stringWithDefault("fal-ai/nano-banana/edit"),
   CREATIVE_DIRECTOR_V2_MODE: z.enum(["auto", "mock", "agno"]).default("auto"),
   CREATIVE_DIRECTOR_V2_TRANSPORT: z.enum(["server", "worker"]).default("server"),
   CREATIVE_STYLE_VARIATION_COUNT: z.coerce.number().int().min(1).max(6).default(3),
@@ -80,11 +89,13 @@ const EnvSchema = z.object({
   AGNO_AGENT_V2_SCRIPT: z.string().default("../../services/socialpython/agents/creative_director_notebook.py"),
   AGNO_AGENT_V2_SERVER_URL: z.string().url().default("http://127.0.0.1:8787/api/compile-v2"),
   AGNO_AGENT_V2_SERVER_TIMEOUT_SEC: z.coerce.number().positive().default(600),
+  PROMPT_ENGINE_V3_URL: optionalUrl,
+  PROMPT_ENGINE_V3_TIMEOUT_SEC: z.coerce.number().positive().default(120),
   AGNO_OPENAI_TIMEOUT_SEC: z.coerce.number().positive().default(20),
   AGNO_OPENAI_MAX_RETRIES: z.coerce.number().min(0).default(1),
   AGNO_RESTRICT_TO_AMENITIES_WITH_IMAGES: z.enum(["0", "1"]).default("0"),
   OPENAI_API_KEY: z.string().optional(),
-  OPENAI_MODEL: z.string().default("gpt-4.1-mini"),
+  OPENAI_MODEL: stringWithDefault("gpt-4.1-mini"),
   OPENAI_BASE_URL: optionalUrl
 });
 

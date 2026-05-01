@@ -129,6 +129,154 @@ export type GenerateOptionsResponse = {
   }>;
 };
 
+export type CreativeV3CompilePayload = {
+  brandId: string;
+  projectId?: string | null;
+  postTypeId?: string | null;
+  brief: string;
+  audience?: string | null;
+  festivalId?: string | null;
+  format?: string;
+  variantCount?: number;
+  variationStrategy?: string;
+  assetVariation?: boolean;
+  copyMode?: "auto" | "manual";
+  copyLanguage?: string;
+  copy?: {
+    headline?: string | null;
+    subheadline?: string | null;
+    cta?: string | null;
+  };
+  brandPresetId?: string | null;
+  visualTemplateId?: string | null;
+  visualTemplateIds?: string[];
+  selectedAssetIds?: string[];
+  includeLogo?: boolean;
+  logoAssetId?: string | null;
+  includeReraQr?: boolean;
+  contactItems?: Array<"phone" | "email" | "website" | "whatsapp">;
+  options?: Record<string, unknown>;
+};
+
+export type CreativeV3CompileResponse = {
+  request: {
+    brandId: string;
+    projectId: string | null;
+    postTypeId: string | null;
+    enginePayload: Record<string, unknown>;
+  };
+  result: {
+    status: "ready" | "needs_input" | "blocked" | "failed";
+    capability: string;
+    content_job_id?: string | null;
+    format: string;
+    variant_count: number;
+    variation_strategy: string;
+    variants: Array<{
+      variant_id: string;
+      variation_label: string;
+      variation_axis: string;
+      selected_template_id?: string | null;
+      creative_direction: Record<string, unknown>;
+      selected_assets: Array<Record<string, unknown>>;
+      asset_role_plan: Record<string, unknown>;
+      copy: Record<string, unknown>;
+      visible_text_allowed: string[];
+      prompt: string;
+      compiled_prompt: string;
+      negative_prompt: string;
+      text_policy: Record<string, unknown>;
+      layout_contract: Record<string, unknown>;
+      render_package: Record<string, unknown>;
+      validation: {
+        passed: boolean;
+        errors: string[];
+        warnings: string[];
+      };
+    }>;
+    validation: {
+      passed: boolean;
+      errors: string[];
+      warnings: string[];
+    };
+    debug?: Record<string, unknown>;
+  };
+};
+
+export type CreativeV3RenderPayload = {
+  brandId: string;
+  projectId?: string | null;
+  variant: Record<string, unknown>;
+  count?: number;
+};
+
+export type CreativeV3RenderResponse = {
+  provider: "openai";
+  model: string;
+  requestId: string;
+  referenceAssetIds: string[];
+  referenceStoragePaths: string[];
+  images: Array<{
+    url: string;
+    content_type?: string | null;
+    file_name?: string | null;
+  }>;
+};
+
+export type CreativeV3GenerateAsyncResponse = {
+  jobId: string;
+  status: string;
+};
+
+export type CreativeV3GenerateAsyncStatus = {
+  status: "pending" | "processing" | "completed" | "failed" | string;
+  input?: CreativeV3CompilePayload;
+  result?: {
+    compile: CreativeV3CompileResponse;
+    renders: Array<{
+      variantId: string;
+      render: CreativeV3RenderResponse;
+      outputIds?: string[];
+    }>;
+  };
+  error?: {
+    message?: string;
+  } | unknown;
+};
+
+export type CreativeV3BrandPreset = {
+  preset_id: string;
+  db_id: string;
+  name: string;
+  description?: string | null;
+  preset_json: Record<string, unknown>;
+  project_id?: string | null;
+  active?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CreativeV3VisualTemplate = {
+  template_id: string;
+  db_id: string;
+  name: string;
+  description?: string | null;
+  content_job_id?: string | null;
+  formats: string[];
+  lever_signature: Record<string, unknown>;
+  template_json: Record<string, unknown>;
+};
+
+export type CreativeV3BrandPresetInput = {
+  brandId: string;
+  projectId?: string | null;
+  presetKey?: string;
+  name: string;
+  description?: string | null;
+  presetJson: Record<string, unknown>;
+  active?: boolean;
+};
+
 export type ExternalPostUploadPayload = {
   file: File;
   workspaceId?: string | undefined;
@@ -204,6 +352,14 @@ function getCacheTtlMs(path: string) {
   }
 
   if (path.startsWith("/api/workspace/compliance-settings")) {
+    return 10_000;
+  }
+
+  if (path.startsWith("/api/creative-v3/brand-presets")) {
+    return 10_000;
+  }
+
+  if (path.startsWith("/api/creative-v3/visual-templates")) {
     return 10_000;
   }
 
@@ -1392,6 +1548,89 @@ export function compileCreativeV2(token: string, payload: CompileCreativeV2Paylo
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
+  });
+}
+
+export function compileCreativeV3(token: string, payload: CreativeV3CompilePayload) {
+  return request<CreativeV3CompileResponse>("/api/creative-v3/compile", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function renderCreativeV3(token: string, payload: CreativeV3RenderPayload) {
+  return request<CreativeV3RenderResponse>("/api/creative-v3/render", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function generateCreativeV3Async(token: string, payload: CreativeV3CompilePayload) {
+  return request<CreativeV3GenerateAsyncResponse>("/api/creative-v3/generate-async", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getCreativeV3AsyncStatus(token: string, jobId: string) {
+  return request<CreativeV3GenerateAsyncStatus>(`/api/creative-v3/generate-async/${jobId}`, token);
+}
+
+export function getCreativeV3BrandPresets(
+  token: string,
+  filters: { brandId: string; projectId?: string | null; includeInactive?: boolean }
+) {
+  return request<CreativeV3BrandPreset[]>(
+    withQuery("/api/creative-v3/brand-presets", {
+      brandId: filters.brandId,
+      projectId: filters.projectId ?? undefined,
+      includeInactive: filters.includeInactive ? "1" : undefined
+    }),
+    token
+  );
+}
+
+export function getCreativeV3VisualTemplates(
+  token: string,
+  filters: { brandId: string; projectId?: string | null; postTypeId?: string | null; format?: string | null }
+) {
+  return request<CreativeV3VisualTemplate[]>(
+    withQuery("/api/creative-v3/visual-templates", {
+      brandId: filters.brandId,
+      projectId: filters.projectId ?? undefined,
+      postTypeId: filters.postTypeId ?? undefined,
+      format: filters.format ?? undefined
+    }),
+    token
+  );
+}
+
+export function createCreativeV3BrandPreset(token: string, payload: CreativeV3BrandPresetInput) {
+  return request<CreativeV3BrandPreset>("/api/creative-v3/brand-presets", token, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateCreativeV3BrandPreset(
+  token: string,
+  presetId: string,
+  payload: Partial<CreativeV3BrandPresetInput> & { brandId: string }
+) {
+  return request<CreativeV3BrandPreset>(`/api/creative-v3/brand-presets/${presetId}`, token, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteCreativeV3BrandPreset(token: string, brandId: string, presetId: string) {
+  return request<void>(withQuery(`/api/creative-v3/brand-presets/${presetId}`, { brandId }), token, {
+    method: "DELETE"
   });
 }
 

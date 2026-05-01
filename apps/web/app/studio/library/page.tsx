@@ -279,10 +279,7 @@ export default function LibraryPage() {
     () => assets.filter((asset) => asset.kind === "product"),
     [assets]
   );
-  const inspirationAssets = useMemo(
-    () => assets.filter((asset) => asset.kind === "inspiration"),
-    [assets]
-  );
+
   const reraQrAssets = useMemo(
     () => assets.filter((asset) => asset.kind === "rera_qr"),
     [assets]
@@ -337,19 +334,9 @@ export default function LibraryPage() {
         tagLabel: "Project image",
         assets: productAssets
       },
-      {
-        key: "inspiration",
-        title: "Inspiration",
-        description: "Loose mood and style references that can broaden exploration without acting as the main truth anchor.",
-        emptyTitle: "No inspiration assets yet",
-        emptyBody: "Upload optional inspiration material if the brand uses a broader visual canon.",
-        emptyActionLabel: "Upload inspiration",
-        uploadKind: "inspiration" as AssetKind,
-        tagLabel: "Inspiration",
-        assets: inspirationAssets
-      }
+
     ],
-    [inspirationAssets, logoAssets, productAssets, referenceAssets, reraQrAssets]
+    [logoAssets, productAssets, referenceAssets, reraQrAssets]
   );
 
   async function handleUpload(event: React.FormEvent) {
@@ -547,32 +534,43 @@ export default function LibraryPage() {
         ) : null}
 
         {!loading && tab === "assets" ? (
-          <section className="library-section-stack" style={{ paddingTop: "8px" }}>
-            <div style={{ marginBottom: "24px", paddingBottom: "12px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h2 style={{ fontSize: "14px", fontWeight: 600, margin: 0, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--ink)" }}>
-                {activeBrand ? `${activeBrand.name} media` : "Media library"}
-              </h2>
-              {visibleMediaAssetCount > 0 ? <span className="panel-count">{visibleMediaAssetCount} items</span> : null}
-            </div>
-
-            {!activeBrand ? (
-              <div className="empty-state compact">
-                <strong>No active brand</strong>
-                <p>Pick an active brand before managing media.</p>
-              </div>
-            ) : (
-              <div className="library-section-stack" style={{ gap: "40px" }}>
+          <div className="library-media-layout">
+            <aside className="library-media-sidebar">
+              <nav className="library-media-nav">
                 {mediaSections.map((section) => (
-                  <section key={section.key}>
-                    <div style={{ marginBottom: "20px", paddingBottom: "12px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "20px" }}>
-                      <div>
-                        <h3 style={{ fontSize: "14px", fontWeight: 600, margin: 0, color: "var(--ink)" }}>{section.title}</h3>
-                        <p style={{ margin: "8px 0 0", color: "var(--muted)", fontSize: "14px" }}>
-                          {section.description}
-                        </p>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                        {section.assets.length > 0 ? <span className="panel-count">{section.assets.length} items</span> : null}
+                  <button
+                    key={section.key}
+                    className="library-media-nav-item"
+                    onClick={() => {
+                      const element = document.getElementById(`section-${section.key}`);
+                      element?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                    type="button"
+                  >
+                    <span>{section.title}</span>
+                    <span className="nav-item-count">{section.assets.length}</span>
+                  </button>
+                ))}
+              </nav>
+            </aside>
+
+            <section className="library-media-content">
+
+
+              {!activeBrand ? (
+                <div className="empty-state compact">
+                  <strong>No active brand</strong>
+                  <p>Pick an active brand before managing media.</p>
+                </div>
+              ) : (
+                <div className="library-sections-stack">
+                  {mediaSections.map((section) => (
+                    <section id={`section-${section.key}`} key={section.key} className="library-media-section">
+                      <header className="library-section-header">
+                        <div className="section-header-titles">
+                          <h3>{section.title}</h3>
+                          <p>{section.description}</p>
+                        </div>
                         {section.emptyActionLabel ? (
                           <button
                             className="button button-ghost"
@@ -582,141 +580,98 @@ export default function LibraryPage() {
                             }}
                             type="button"
                           >
-                            {section.emptyActionLabel}
+                            Upload
                           </button>
                         ) : null}
-                      </div>
-                    </div>
-                    {section.assets.length > 0 ? (
-                      <div className="gallery-grid library-gallery-grid library-media-grid">
-                        {section.assets.map((asset) => {
-                          const reraRegistration = reraRegistrationByQrAssetId.get(asset.id) ?? null;
-                          return (
-                          <article className="review-card" key={asset.id} style={{ padding: "12px" }}>
-                            <div className="creative-preview-frame" style={{ minHeight: "200px", padding: "8px" }}>
-                              {asset.thumbnailUrl ?? asset.previewUrl ? (
-                                <ImagePreviewTrigger
-                                  alt={asset.label}
-                                  badges={[section.tagLabel]}
-                                  details={[
-                                    { label: "Kind", value: asset.kind },
-                                    { label: "Label", value: asset.label },
-                                    ...(asset.projectId
-                                      ? [{ label: "Project", value: projectNameById.get(asset.projectId) ?? "Project-linked" }]
-                                      : []),
-                                    ...(reraRegistration?.registrationNumber
-                                      ? [{ label: "RERA number", value: reraRegistration.registrationNumber }]
-                                      : [])
-                                  ]}
-                                  sections={[
-                                    {
-                                      title: "Library context",
-                                      items: [
-                                        { label: "Section", value: section.title },
-                                        { label: "Description", value: section.description }
-                                      ]
-                                    }
-                                  ]}
-                                  src={asset.originalUrl ?? asset.previewUrl}
-                                  subtitle={section.description}
-                                  title={asset.label}
-                                >
-                                  <img alt={asset.label} src={asset.thumbnailUrl ?? asset.previewUrl} />
-                                </ImagePreviewTrigger>
-                              ) : (
-                                <div className="thumb-fallback" />
-                              )}
-                            </div>
-                            <div className="library-asset-meta">
-                              <strong>{asset.label}</strong>
-                              {asset.projectId ? (
-                                <p style={{ margin: "6px 0 0", color: "var(--muted)", fontSize: "12px" }}>
-                                  {projectNameById.get(asset.projectId) ?? "Project-linked"}
-                                </p>
-                              ) : null}
-                              {reraRegistration ? (
-                                <div className="library-rera-registration-card">
-                                  <span>{reraRegistration.isDefault ? "Default RERA" : "RERA registration"}</span>
-                                  <strong>{reraRegistration.registrationNumber ?? "QR only"}</strong>
-                                  {!reraRegistration.isDefault ? (
+                      </header>
+
+                      {section.assets.length > 0 ? (
+                        <div className="library-asset-grid">
+                          {section.assets.map((asset) => {
+                            const reraRegistration = reraRegistrationByQrAssetId.get(asset.id) ?? null;
+                            return (
+                              <article className="library-asset-card" key={asset.id}>
+                                <div className="asset-card-visual">
+                                  {asset.thumbnailUrl ?? asset.previewUrl ? (
+                                    <ImagePreviewTrigger
+                                      alt={asset.label}
+                                      badges={[section.tagLabel]}
+                                      src={asset.originalUrl ?? asset.previewUrl}
+                                      title={asset.label}
+                                    >
+                                      <img alt={asset.label} src={asset.thumbnailUrl ?? asset.previewUrl} />
+                                    </ImagePreviewTrigger>
+                                  ) : (
+                                    <div className="thumb-fallback" />
+                                  )}
+                                  
+                                  <div className="asset-card-actions">
+                                    {(section.key === "logos" || section.key === "rera-qr") && (
+                                      <button
+                                        className="asset-action-btn"
+                                        onClick={() => {
+                                          setReplacingAssetId(asset.id);
+                                          setAssetKind(section.uploadKind);
+                                          setLabel(asset.label);
+                                          setSelectedProjectId(asset.projectId ?? "");
+                                          setIsDrawerOpen(true);
+                                        }}
+                                        title="Replace"
+                                        type="button"
+                                      >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+                                      </button>
+                                    )}
                                     <button
-                                      className="create-inline-action"
-                                      onClick={() => void handleSetDefaultReraRegistration(reraRegistration.id)}
+                                      className="asset-action-btn is-danger"
+                                      onClick={async () => {
+                                        if (!sessionToken || !activeBrandId) return;
+                                        if (!confirm("Remove this asset?")) return;
+                                        await deleteBrandAsset(sessionToken, activeBrandId, asset.id);
+                                        const [assetRecords, registrations] = await Promise.all([
+                                          getBrandAssets(sessionToken, activeBrandId),
+                                          getProjectReraRegistrations(sessionToken, activeBrandId)
+                                        ]);
+                                        setAssets(assetRecords);
+                                        setReraRegistrations(registrations);
+                                      }}
+                                      title="Remove"
                                       type="button"
                                     >
-                                      Make default
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
                                     </button>
-                                  ) : null}
+                                  </div>
                                 </div>
-                              ) : null}
-                              <div className="review-tag-row">
-                                <span className="review-tag">{section.tagLabel}</span>
-                              </div>
-                              {(section.key === "logos" || section.key === "rera-qr") && (
-                                <div className="library-asset-actions" style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
-                                  <button
-                                    className="button button-ghost"
-                                    style={{ fontSize: "12px", padding: "4px 8px" }}
-                                    onClick={() => {
-                                      setReplacingAssetId(asset.id);
-                                      setAssetKind(section.uploadKind);
-                                      setLabel(asset.label);
-                                      setSelectedProjectId(asset.projectId ?? "");
-                                      setIsDrawerOpen(true);
-                                    }}
-                                    type="button"
-                                  >
-                                    Replace
-                                  </button>
-                                  <button
-                                    className="button button-ghost"
-                                    style={{ fontSize: "12px", padding: "4px 8px", color: "var(--destructive)" }}
-                                    onClick={async () => {
-                                      if (!sessionToken || !activeBrandId) return;
-                                      if (!confirm("Remove this asset?")) return;
-                                      await deleteBrandAsset(sessionToken, activeBrandId, asset.id);
-                                      const [assetRecords, registrations] = await Promise.all([
-                                        getBrandAssets(sessionToken, activeBrandId),
-                                        getProjectReraRegistrations(sessionToken, activeBrandId)
-                                      ]);
-                                      setAssets(assetRecords);
-                                      setReraRegistrations(registrations);
-                                    }}
-                                    type="button"
-                                  >
-                                    Remove
-                                  </button>
+                                <div className="asset-card-footer">
+                                  <strong>{asset.label}</strong>
+                                  {asset.projectId && (
+                                    <span>{projectNameById.get(asset.projectId) ?? "Project-linked"}</span>
+                                  )}
+                                  {reraRegistration && (
+                                    <div className="asset-rera-pill" title={reraRegistration.isDefault ? "Default RERA registration" : "RERA registration"}>
+                                      <span>{reraRegistration.registrationNumber ?? "QR"}</span>
+                                      {!reraRegistration.isDefault && (
+                                        <button onClick={() => void handleSetDefaultReraRegistration(reraRegistration.id)} type="button">Set Default</button>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          </article>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="empty-state compact">
-                        <strong>{section.emptyTitle}</strong>
-                        <p>{section.emptyBody}</p>
-                        {section.emptyActionLabel ? (
-                          <button
-                            className="button button-ghost"
-                            onClick={() => {
-                              setAssetKind(section.uploadKind);
-                              setSelectedProjectId("");
-                              setIsDrawerOpen(true);
-                            }}
-                            type="button"
-                          >
-                            {section.emptyActionLabel}
-                          </button>
-                        ) : null}
-                      </div>
-                    )}
-                  </section>
-                ))}
-              </div>
-            )}
-          </section>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="empty-state compact">
+                          <strong>{section.emptyTitle}</strong>
+                          <p>{section.emptyBody}</p>
+                        </div>
+                      )}
+                    </section>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
         ) : null}
 
       </section>
@@ -755,7 +710,6 @@ export default function LibraryPage() {
                       <option value="logo">Logo</option>
                       <option value="rera_qr">RERA QR</option>
                       <option value="product">Project image</option>
-                      <option value="inspiration">Inspiration</option>
                     </select>
                   </label>
 

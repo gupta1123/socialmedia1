@@ -9,16 +9,16 @@ import { StudioProvider, useStudio } from "./studio-context";
 import { TopbarActionsProvider, useTopbarActions } from "./topbar-actions-context";
 
 const primaryNavigation = [
-  // {
-  //   href: "/studio",
-  //   label: "Home",
-  //   icon: (
-  //     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-  //       <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-  //       <polyline points="9 22 9 12 15 12 15 22"/>
-  //     </svg>
-  //   )
-  // },
+  {
+    href: "/studio",
+    label: "Home",
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+        <polyline points="9 22 9 12 15 12 15 22"/>
+      </svg>
+    )
+  },
   // {
   //   href: "/studio/plan",
   //   label: "Plan",
@@ -32,16 +32,30 @@ const primaryNavigation = [
   //     </svg>
   //   )
   // },
+  // {
+  //   href: "/studio/create?mode=ad-hoc",
+  //   label: "Create post",
+  //   matchPath: "/studio/create",
+  //   icon: (
+  //     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  //       <path d="M12 5v14" />
+  //       <path d="M5 12h14" />
+  //       <path d="M18.5 5.5 20 4" />
+  //       <path d="M4 20l1.5-1.5" />
+  //     </svg>
+  //   )
+  // },
   {
-    href: "/studio/create?mode=ad-hoc",
+    href: "/studio/create-v3",
     label: "Create",
-    matchPath: "/studio/create",
+    matchPath: "/studio/create-v3",
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 5v14" />
-        <path d="M5 12h14" />
-        <path d="M18.5 5.5 20 4" />
-        <path d="M4 20l1.5-1.5" />
+        <path d="M4 5h16" />
+        <path d="M4 12h10" />
+        <path d="M4 19h7" />
+        <path d="M17 14v6" />
+        <path d="M14 17h6" />
       </svg>
     )
   },
@@ -279,6 +293,19 @@ const workspaceAdminSidebarNavigation = [
         )
       },
       {
+        href: "/studio/workspace-admin/brand-presets",
+        label: "Brand Presets",
+        matchPath: "/studio/workspace-admin/brand-presets",
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 6h16" />
+            <path d="M4 12h10" />
+            <path d="M4 18h7" />
+            <path d="m17 14 3 3-3 3" />
+          </svg>
+        )
+      },
+      {
         href: "/studio/workspace-admin/posting-windows",
         label: "Posting Windows",
         matchPath: "/studio/workspace-admin/posting-windows",
@@ -318,6 +345,10 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   "/studio/create": {
     title: "Create",
     subtitle: "Start from a post task or open an empty brief to create post options.",
+  },
+  "/studio/create-v3": {
+    title: "Create images",
+    subtitle: "Generate polished real-estate post options from a project brief, brand assets, and selected references.",
   },
   "/studio/ai-edit": {
     title: "Editor",
@@ -366,6 +397,10 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   "/studio/workspace-admin/compliance": {
     title: "Compliance",
     subtitle: "Configure default RERA compliance block settings for this workspace.",
+  },
+  "/studio/workspace-admin/brand-presets": {
+    title: "Brand Presets",
+    subtitle: "Manage reusable logo, compliance, contact, typography, and palette rules for generation.",
   },
   "/studio/workspace-admin/posting-windows": {
     title: "Posting Windows",
@@ -438,7 +473,11 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   const [sidebarPrefsReady, setSidebarPrefsReady] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const topbarMenuRef = useRef<HTMLDivElement>(null);
-  const isCreateRoute = pathname === "/studio/create" || pathname.startsWith("/studio/create/");
+  const isCreateRoute =
+    pathname === "/studio/create" ||
+    pathname.startsWith("/studio/create/") ||
+    pathname === "/studio/create-v3" ||
+    pathname.startsWith("/studio/create-v3/");
   const isEditorRoute = pathname === "/studio/ai-edit" || pathname.startsWith("/studio/ai-edit/");
   const isOutputRoute = pathname === "/studio/outputs" || pathname.startsWith("/studio/outputs/");
   const isCalendarRoute = pathname === "/studio/calendar" || pathname.startsWith("/studio/calendar/");
@@ -462,16 +501,14 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
         items: group.items.filter((item) => item.href !== "/studio/workspace-admin/team"),
       }));
     }
-    if (isPlatformAdmin && isWorkspaceAdmin) {
-      return [...primaryNavigation, workspaceAdminNavigationItem, superAdminNavigationItem];
-    }
+    const appItems = [...primaryNavigation];
     if (isWorkspaceAdmin) {
-      return [...primaryNavigation, workspaceAdminNavigationItem];
+      appItems.push(workspaceAdminNavigationItem);
     }
     if (isPlatformAdmin) {
-      return [...primaryNavigation, superAdminNavigationItem];
+      appItems.push(superAdminNavigationItem);
     }
-    return primaryNavigation;
+    return groupAppNavigation(appItems);
   }, [showAdminSidebar, showWorkspaceAdminSidebar, isPlatformAdmin, isWorkspaceAdmin]);
   const shellCollapsed = isCreateRoute ? !createSidebarExpanded : isEditorRoute ? !editorSidebarExpanded : collapsed;
   const pageMeta = resolvePageMeta(pathname);
@@ -538,7 +575,7 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
 
   if (loading || !bootstrap) {
     return (
-      <div className={shellCollapsed ? "workspace-shell sidebar-collapsed" : "workspace-shell"}>
+      <div className={`workspace-shell ${shellCollapsed ? "sidebar-collapsed" : ""} ${isCreateRoute ? "is-create-page" : ""}`}>
         <aside className="workspace-sidebar studio-shell-loading-sidebar">
           <div className="sidebar-brand">
             {!shellCollapsed ? <span className="sidebar-wordmark">Briefly Social</span> : null}
@@ -631,16 +668,23 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   const sidebarWordmark = showAdminSidebar ? "Admin Console" : "Briefly Social";
 
   return (
-    <div className={shellCollapsed ? "workspace-shell sidebar-collapsed" : "workspace-shell"}>
+    <div className={`workspace-shell ${shellCollapsed ? "sidebar-collapsed" : ""} ${isCreateRoute ? "is-create-page" : ""}`}>
       <aside className="workspace-sidebar">
         {/* Logo / Wordmark */}
         <div className="sidebar-brand">
           {!shellCollapsed ? (
             <div className="sidebar-brand-copy">
-              <span className="sidebar-eyebrow">{sidebarEyebrow}</span>
-              <span className="sidebar-wordmark">{sidebarWordmark}</span>
+              <span className="sidebar-logo-row">
+                <span className="sidebar-logo-mark" aria-hidden="true">b.</span>
+                <span className="sidebar-title-stack">
+                  <span className="sidebar-eyebrow">{sidebarEyebrow}</span>
+                  <span className="sidebar-wordmark">{sidebarWordmark}</span>
+                </span>
+              </span>
             </div>
-          ) : null}
+          ) : (
+            <span className="sidebar-logo-mark" aria-hidden="true">b.</span>
+          )}
           <button
             className="sidebar-toggle"
             aria-label={shellCollapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -772,61 +816,63 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
 
       {/* Main content */}
       <main className="workspace-main">
-        <header className="workspace-topbar">
-          <div className="topbar-page-meta">
-            <div className="topbar-breadcrumb">
-              {topbarMeta?.backHref ? (
-                <>
-                  <Link
-                    className="breadcrumb-item breadcrumb-back"
-                    href={topbarMeta.backHref}
-                    prefetch={false}
-                  >
-                    {topbarMeta.backLabel ?? "Back"}
-                  </Link>
-                  <span className="breadcrumb-separator">/</span>
-                </>
-              ) : null}
-              <h1 className="topbar-title">{topbarTitle}</h1>
-              {topbarMeta?.badges ? <div className="topbar-badges">{topbarMeta.badges}</div> : null}
-            </div>
-            {topbarSubtitle ? <p className="topbar-subtitle">{topbarSubtitle}</p> : null}
-          </div>
-
-          <div className="topbar-right">
-            {topbarControls ? <div className="topbar-controls">{topbarControls}</div> : null}
-            {topbarActions ? (
-              <div className="topbar-actions" ref={topbarMenuRef}>
-                <button
-                  aria-expanded={showTopbarMenu}
-                  aria-label="Open page actions"
-                  className={`topbar-action-trigger ${showTopbarMenu ? "is-open" : ""}`}
-                  onClick={() => setShowTopbarMenu((value) => !value)}
-                  type="button"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="1" />
-                    <circle cx="19" cy="12" r="1" />
-                    <circle cx="5" cy="12" r="1" />
-                  </svg>
-                </button>
-                {showTopbarMenu ? (
-                  <div
-                    className="topbar-menu-panel"
-                    onClick={(event) => {
-                      const target = event.target as HTMLElement;
-                      if (target.closest("a, button")) {
-                        setShowTopbarMenu(false);
-                      }
-                    }}
-                  >
-                    {topbarActions}
-                  </div>
+        {pathname !== "/studio" ? (
+          <header className="workspace-topbar">
+            <div className="topbar-page-meta">
+              <div className="topbar-breadcrumb">
+                {topbarMeta?.backHref ? (
+                  <>
+                    <Link
+                      className="breadcrumb-item breadcrumb-back"
+                      href={topbarMeta.backHref}
+                      prefetch={false}
+                    >
+                      {topbarMeta.backLabel ?? "Back"}
+                    </Link>
+                    <span className="breadcrumb-separator">/</span>
+                  </>
                 ) : null}
+                <h1 className="topbar-title">{topbarTitle}</h1>
+                {topbarMeta?.badges ? <div className="topbar-badges">{topbarMeta.badges}</div> : null}
               </div>
-            ) : null}
-          </div>
-        </header>
+              {topbarSubtitle ? <p className="topbar-subtitle">{topbarSubtitle}</p> : null}
+            </div>
+
+            <div className="topbar-right">
+              {topbarControls ? <div className="topbar-controls">{topbarControls}</div> : null}
+              {topbarActions && pathname !== "/studio" && pathname !== "/studio/gallery" ? (
+                <div className="topbar-actions" ref={topbarMenuRef}>
+                  <button
+                    aria-expanded={showTopbarMenu}
+                    aria-label="Open page actions"
+                    className={`topbar-action-trigger ${showTopbarMenu ? "is-open" : ""}`}
+                    onClick={() => setShowTopbarMenu((value) => !value)}
+                    type="button"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="1" />
+                      <circle cx="19" cy="12" r="1" />
+                      <circle cx="5" cy="12" r="1" />
+                    </svg>
+                  </button>
+                  {showTopbarMenu ? (
+                    <div
+                      className="topbar-menu-panel"
+                      onClick={(event) => {
+                        const target = event.target as HTMLElement;
+                        if (target.closest("a, button")) {
+                          setShowTopbarMenu(false);
+                        }
+                      }}
+                    >
+                      {topbarActions}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </header>
+        ) : null}
 
         <div className={`workspace-content ${isCreateRoute ? "is-create" : ""}${isOutputRoute ? " is-output-detail" : ""}`}>
           {children}
@@ -940,6 +986,10 @@ function resolvePageMeta(pathname: string) {
     return PAGE_META["/studio/workspace-admin/compliance"] ?? { title: "Compliance", subtitle: "" };
   }
 
+  if (pathname.startsWith("/studio/workspace-admin/brand-presets")) {
+    return PAGE_META["/studio/workspace-admin/brand-presets"] ?? { title: "Brand Presets", subtitle: "" };
+  }
+
   if (pathname.startsWith("/studio/workspace-admin/posting-windows")) {
     return PAGE_META["/studio/workspace-admin/posting-windows"] ?? { title: "Posting Windows", subtitle: "" };
   }
@@ -979,8 +1029,34 @@ function resolvePageMeta(pathname: string) {
   return PAGE_META[pathname] ?? { title: "Studio", subtitle: "" };
 }
 
+function groupAppNavigation(items: any[]) {
+  const home = items.filter((item) => item.href === "/studio");
+  const creativeHrefs = new Set(["/studio/create?mode=ad-hoc", "/studio/create-v3", "/studio/ai-edit"]);
+  const workHrefs = new Set(["/studio/review", "/studio/gallery", "/studio/library"]);
+  const adminHrefs = new Set(["/studio/workspace-admin", "/studio/admin"]);
+
+  const creative = items.filter((item) => creativeHrefs.has(item.href));
+  const work = items.filter((item) => workHrefs.has(item.href));
+  const admin = items.filter((item) => adminHrefs.has(item.href));
+  const other = items.filter(
+    (item) => item.href !== "/studio" && !creativeHrefs.has(item.href) && !workHrefs.has(item.href) && !adminHrefs.has(item.href)
+  );
+
+  return [
+    ...home,
+    creative.length ? { category: "Create", items: creative } : null,
+    work.length || other.length ? { category: "Workspace", items: [...work, ...other] } : null,
+    admin.length ? { category: "Admin", items: admin } : null,
+  ].filter(Boolean);
+}
+
 function resolveBootstrapMode(pathname: string) {
-  if (pathname === "/studio/create" || pathname.startsWith("/studio/create/")) {
+  if (
+    pathname === "/studio/create" ||
+    pathname.startsWith("/studio/create/") ||
+    pathname === "/studio/create-v3" ||
+    pathname.startsWith("/studio/create-v3/")
+  ) {
     return "create" as const;
   }
 

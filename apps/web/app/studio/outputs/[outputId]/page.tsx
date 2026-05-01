@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  BrandAssetRecord,
   CreativeJobRecord,
   CreativeOutputRecord,
   DeliverableDetail,
@@ -13,10 +14,12 @@ import type {
   WorkspaceMemberRecord
 } from "@image-lab/contracts";
 import {
+  getBrandAssets,
   getCreativeJob,
   getCreativeOutput,
   getCreativeOutputPreviewUrl,
   getCreativeOutputs,
+  getCreativeV3AsyncStatus,
   getDeliverable,
   getPostTypes,
   getProjects,
@@ -26,7 +29,7 @@ import { deriveCreativeFormatFromDeliverable } from "../../../../lib/deliverable
 import { formatRelativeTime } from "../../../../lib/formatters";
 import { getPlacementSpec } from "../../../../lib/placement-specs";
 import { useStudio } from "../../studio-context";
-import { useRegisterTopbarActions, useRegisterTopbarMeta } from "../../topbar-actions-context";
+import { useRegisterTopbarControls, useRegisterTopbarMeta } from "../../topbar-actions-context";
 import { OutputDetailSkeleton, Skeleton } from "../../skeleton";
 
 type NeighborOutput = CreativeOutputRecord & {
@@ -50,8 +53,9 @@ export default function OutputDetailPage() {
   } = useStudio();
   const routeOutputId = typeof params.outputId === "string" ? params.outputId : "";
   const from = searchParams.get("from");
+  const generationSessionId = searchParams.get("sessionId");
   const stripIdsParam = searchParams.get("stripIds") ?? "";
-  const sourceStripIds = useMemo(
+  const routeStripIds = useMemo(
     () =>
       stripIdsParam
         .split(",")
@@ -59,6 +63,7 @@ export default function OutputDetailPage() {
         .filter(Boolean),
     [stripIdsParam]
   );
+  const isCreateGenerationSource = from === "create-v3";
 
   const [selectedOutputId, setSelectedOutputId] = useState(routeOutputId);
   const [output, setOutput] = useState<CreativeOutputRecord | null>(null);
@@ -67,6 +72,7 @@ export default function OutputDetailPage() {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [postTypes, setPostTypes] = useState<PostTypeRecord[]>([]);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRecord[]>([]);
+  const [usedAssets, setUsedAssets] = useState<BrandAssetRecord[]>([]);
   const [neighbors, setNeighbors] = useState<NeighborOutput[]>([]);
   const [loading, setLoading] = useState(true);
   const [switchingOutput, setSwitchingOutput] = useState(false);
@@ -74,40 +80,51 @@ export default function OutputDetailPage() {
   const [downloading, setDownloading] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(1);
   const [isBriefExpanded, setIsBriefExpanded] = useState(false);
+  const [imageNaturalSize, setImageNaturalSize] = useState<{ width: number; height: number } | null>(null);
+  const [sessionStripIds, setSessionStripIds] = useState<string[] | null>(null);
 
   const outputCacheRef = useRef(new Map<string, CreativeOutputRecord>());
   const jobCacheRef = useRef(new Map<string, CreativeJobRecord | null>());
   const deliverableCacheRef = useRef(new Map<string, DeliverableDetail | null>());
   const projectCacheRef = useRef(new Map<string, ProjectRecord[]>());
+  const brandAssetsCacheRef = useRef(new Map<string, BrandAssetRecord[]>());
   const postTypesLoadedRef = useRef(false);
   const membersLoadedRef = useRef(false);
   const neighborsBrandRef = useRef<string | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const sourceStripIds = useMemo(
+    () => (routeStripIds.length > 0 ? routeStripIds : sessionStripIds ?? []),
+    [routeStripIds, sessionStripIds]
+  );
+  const waitingForCreateSessionStrip =
+    isCreateGenerationSource && Boolean(generationSessionId) && routeStripIds.length === 0 && sessionStripIds === null;
 
-  const backHref = from === "review" ? "/studio/review" : "/studio/gallery";
+  const backHref =
+    from === "review"
+      ? "/studio/review"
+      : isCreateGenerationSource && generationSessionId
+        ? `/studio/create-v3?sessionId=${encodeURIComponent(generationSessionId)}`
+        : "/studio/gallery";
   const showReviewActions = from === "review";
   const activeImageUrl = output?.originalUrl ?? output?.previewUrl ?? output?.thumbnailUrl ?? null;
   const activeIndex = useMemo(() => neighbors.findIndex((item) => item.id === selectedOutputId), [neighbors, selectedOutputId]);
   const previousOutput = activeIndex > 0 ? neighbors[activeIndex - 1] ?? null : null;
   const nextOutput = activeIndex >= 0 && activeIndex < neighbors.length - 1 ? neighbors[activeIndex + 1] ?? null : null;
 
-  const topbarActions = useMemo(
+  const topbarControls = useMemo(
     () => (
-      <div style={{ display: "flex", gap: "10px" }}>
-        <Link className="button button-ghost" href={backHref}>
-          Back
-        </Link>
-        {output ? (
-          <Link className="button button-primary" href={`/studio/ai-edit?outputId=${output.id}`}>
-            Open in Editor
-          </Link>
-        ) : null}
-      </div>
+      <Link aria-label="Close output details" className="output-topbar-close-button" href={backHref}>
+        <span>Close</span>
+        <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 6 6 18" />
+          <path d="m6 6 12 12" />
+        </svg>
+      </Link>
     ),
-    [backHref, output]
+    [backHref]
   );
 
-  useRegisterTopbarActions(topbarActions);
+  useRegisterTopbarControls(topbarControls);
 
   useEffect(() => {
     if (routeOutputId) {
@@ -116,8 +133,38 @@ export default function OutputDetailPage() {
   }, [routeOutputId]);
 
   useEffect(() => {
+    if (!isCreateGenerationSource || !generationSessionId || routeStripIds.length > 0 || !sessionToken) {
+      setSessionStripIds(null);
+      return;
+    }
+
+    let cancelled = false;
+    setSessionStripIds(null);
+    getCreativeV3AsyncStatus(sessionToken, generationSessionId)
+      .then((status) => {
+        if (cancelled) return;
+        const ids = Array.from(new Set((status.result?.renders ?? []).flatMap((item) => item.outputIds ?? [])));
+        setSessionStripIds(ids);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSessionStripIds([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [generationSessionId, isCreateGenerationSource, routeStripIds.length, sessionToken]);
+
+  useEffect(() => {
     setPreviewZoom(1);
+    setImageNaturalSize(null);
   }, [selectedOutputId]);
+
+  useEffect(() => {
+    setImageNaturalSize(null);
+  }, [activeImageUrl]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -201,6 +248,7 @@ export default function OutputDetailPage() {
 
         if (cancelled) return;
         setOutput(activeOutput);
+        setLoading(false);
 
         const jobPromise = jobCacheRef.current.has(activeOutput.jobId)
           ? Promise.resolve(jobCacheRef.current.get(activeOutput.jobId) ?? null)
@@ -262,14 +310,27 @@ export default function OutputDetailPage() {
                   deliverableCacheRef.current.set(activeOutput.deliverableId as string, null);
                   return null;
                 })
-          : Promise.resolve(null);
+	          : Promise.resolve(null);
 
-        const [jobRecord, projectRecords, postTypeRecords, memberRecords, deliverableRecord] = await Promise.all([
+        const brandAssetsPromise = brandAssetsCacheRef.current.has(activeOutput.brandId)
+          ? Promise.resolve(brandAssetsCacheRef.current.get(activeOutput.brandId) ?? [])
+          : getBrandAssets(token, activeOutput.brandId)
+              .then((records) => {
+                brandAssetsCacheRef.current.set(activeOutput.brandId, records);
+                return records;
+              })
+              .catch(() => {
+                brandAssetsCacheRef.current.set(activeOutput.brandId, []);
+                return [];
+              });
+
+        const [jobRecord, projectRecords, postTypeRecords, memberRecords, deliverableRecord, brandAssetRecords] = await Promise.all([
           jobPromise,
           projectPromise,
           postTypePromise,
           memberPromise,
-          deliverablePromise
+          deliverablePromise,
+          brandAssetsPromise
         ]);
 
         if (cancelled) return;
@@ -278,6 +339,7 @@ export default function OutputDetailPage() {
         setPostTypes(postTypeRecords);
         setWorkspaceMembers(memberRecords);
         setDeliverableDetail(deliverableRecord);
+        setUsedAssets(resolveUsedAssetsForOutput(activeOutput, brandAssetRecords));
 
         if (sourceStripIds.length > 0) {
           const existingById = new Map(neighbors.map((item) => [item.id, item]));
@@ -327,6 +389,13 @@ export default function OutputDetailPage() {
               setNeighbors(resolved);
             }
           });
+        } else if (isCreateGenerationSource) {
+          setNeighbors([
+            {
+              ...activeOutput,
+              resolvedPreviewUrl: activeOutput.thumbnailUrl ?? activeOutput.previewUrl ?? activeOutput.originalUrl ?? null
+            }
+          ]);
         } else if (neighborsBrandRef.current !== activeOutput.brandId || neighbors.length === 0) {
           const neighborFilters: Parameters<typeof getCreativeOutputs>[1] = {
             brandId: activeOutput.brandId,
@@ -337,6 +406,7 @@ export default function OutputDetailPage() {
             neighborFilters.reviewState = "pending_review";
           }
 
+          neighborFilters.imageMode = "thumbnail";
           const neighborRecords = await getCreativeOutputs(token, neighborFilters).catch(() => []);
 
           if (cancelled) return;
@@ -345,24 +415,15 @@ export default function OutputDetailPage() {
             ? neighborRecords
             : [activeOutput, ...neighborRecords].slice(0, NEIGHBOR_LIMIT);
 
-          setNeighbors(withActive);
-          void Promise.all(
-            withActive.map(async (item) => {
-              if (item.id === activeOutput.id) {
-                return {
-                  ...item,
-                  resolvedPreviewUrl: activeOutput.thumbnailUrl ?? activeOutput.previewUrl ?? activeOutput.originalUrl ?? null
-                };
-              }
-
-              const preview = await getCreativeOutputPreviewUrl(token, item.id).catch(() => ({ previewUrl: null }));
-              return { ...item, resolvedPreviewUrl: preview.previewUrl };
-            })
-          ).then((resolved) => {
-            if (!cancelled) {
-              setNeighbors(resolved);
-            }
-          });
+          setNeighbors(
+            withActive.map((item) => ({
+              ...item,
+              resolvedPreviewUrl:
+                item.id === activeOutput.id
+                  ? activeOutput.thumbnailUrl ?? activeOutput.previewUrl ?? activeOutput.originalUrl ?? null
+                  : item.thumbnailUrl ?? item.previewUrl ?? null
+            }))
+          );
         } else {
           setNeighbors((current) =>
             current.map((item) =>
@@ -382,7 +443,6 @@ export default function OutputDetailPage() {
         }
       } finally {
         if (!cancelled) {
-          setLoading(false);
           setSwitchingOutput(false);
         }
       }
@@ -393,7 +453,7 @@ export default function OutputDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [from, selectedOutputId, sessionToken, sourceStripIds]);
+  }, [from, isCreateGenerationSource, selectedOutputId, sessionToken, sourceStripIds, waitingForCreateSessionStrip]);
 
   const project = output?.projectId ? projects.find((item) => item.id === output.projectId) ?? null : null;
   const postType = output?.postTypeId ? postTypes.find((item) => item.id === output.postTypeId) ?? null : null;
@@ -404,21 +464,24 @@ export default function OutputDetailPage() {
     : job?.briefContext?.format ?? output?.previewContext?.format ?? null;
   const channel = deliverable?.placementCode ?? job?.briefContext?.channel ?? output?.previewContext?.channel ?? null;
   const aspectRatio = job?.briefContext?.aspectRatio ?? output?.previewContext?.aspectRatio ?? null;
+  const actualAspectRatio = imageNaturalSize ? formatImageAspectRatio(imageNaturalSize.width, imageNaturalSize.height) : null;
+  const actualPixelSize = imageNaturalSize ? `${imageNaturalSize.width} × ${imageNaturalSize.height} px` : null;
+  const actualFormatLabel = imageNaturalSize ? inferImageFormatLabel(imageNaturalSize.width, imageNaturalSize.height) : null;
   const briefText = output?.previewContext?.brief?.prompt ?? deliverable?.briefText ?? null;
   const placement = channel && creativeFormat ? getPlacementSpec(channel, creativeFormat) : null;
   const settingsChips = [
     postType?.name ? { label: postType.name } : null,
     placement?.channelLabel ? { label: placement.channelLabel } : channel ? { label: formatLabel(channel) } : null,
-    aspectRatio ?? placement?.aspectRatio ? { label: aspectRatio ?? placement?.aspectRatio ?? "" } : null,
-    placement?.recommendedSize ? { label: placement.recommendedSize } : null,
-    placement?.formatLabel ? { label: placement.formatLabel } : creativeFormat ? { label: formatLabel(creativeFormat) } : null
+    actualAspectRatio ?? aspectRatio ?? placement?.aspectRatio ? { label: actualAspectRatio ?? aspectRatio ?? placement?.aspectRatio ?? "" } : null,
+    actualPixelSize ?? placement?.recommendedSize ? { label: actualPixelSize ?? placement?.recommendedSize ?? "" } : null,
+    actualFormatLabel ?? placement?.formatLabel ? { label: actualFormatLabel ?? placement?.formatLabel ?? "" } : creativeFormat ? { label: formatLabel(creativeFormat) } : null
   ].filter((item): item is { label: string } => Boolean(item?.label));
 
   const topbarMeta = useMemo(
     () => ({
       title: (
         <span className="output-topbar-breadcrumb">
-          <Link href="/studio/gallery">Gallery</Link>
+          <Link href={backHref}>{isCreateGenerationSource ? "Create images" : from === "review" ? "Review" : "Gallery"}</Link>
           <span>/</span>
           <span>{project?.name ?? "Generated image"}</span>
           {output ? (
@@ -497,8 +560,13 @@ export default function OutputDetailPage() {
     if (from) {
       nextParams.set("from", from);
     }
+    if (generationSessionId) {
+      nextParams.set("sessionId", generationSessionId);
+    }
     if (stripIdsParam) {
       nextParams.set("stripIds", stripIdsParam);
+    } else if (isCreateGenerationSource && sourceStripIds.length > 0) {
+      nextParams.set("stripIds", sourceStripIds.join(","));
     }
     const query = nextParams.toString();
     const nextUrl = `/studio/outputs/${target.id}${query ? `?${query}` : ""}`;
@@ -521,7 +589,7 @@ export default function OutputDetailPage() {
           <h3>Unable to open this image</h3>
           <p>{error ?? "This output could not be found."}</p>
           <Link className="button button-primary" href={backHref}>
-            Back to {from === "review" ? "Review" : "Gallery"}
+            Back to {isCreateGenerationSource ? "Create images" : from === "review" ? "Review" : "Gallery"}
           </Link>
         </article>
       </div>
@@ -556,6 +624,12 @@ export default function OutputDetailPage() {
                 alt={`Generated output ${output.outputIndex + 1}`}
                 className="output-detail-artwork"
                 decoding="async"
+                onLoad={(event) => {
+                  const { naturalWidth, naturalHeight } = event.currentTarget;
+                  if (naturalWidth > 0 && naturalHeight > 0) {
+                    setImageNaturalSize({ width: naturalWidth, height: naturalHeight });
+                  }
+                }}
                 src={activeImageUrl}
                 style={{ transform: `scale(${previewZoom})` }}
               />
@@ -622,9 +696,6 @@ export default function OutputDetailPage() {
               ) : null}
             </p>
           </div>
-          <Link aria-label="Close output details" className="output-detail-close" href={backHref}>
-            ×
-          </Link>
         </div>
 
         <div className="output-detail-panel">
@@ -675,50 +746,85 @@ export default function OutputDetailPage() {
             </section>
           ) : null}
 
+          {usedAssets.length > 0 ? (
+            <section className="output-detail-section output-detail-assets-section">
+              <h2>Assets used</h2>
+              <div className="output-detail-used-assets">
+                {usedAssets.map((asset) => {
+                  const assetImageUrl = asset.mimeType.startsWith("image/") ? asset.thumbnailUrl ?? asset.previewUrl ?? asset.originalUrl ?? null : null;
+                  return (
+                    <article className={`output-detail-used-asset output-detail-used-asset-${asset.kind}`} key={asset.id}>
+                      <div className="output-detail-used-asset-thumb">
+                        {assetImageUrl ? <img alt="" decoding="async" loading="lazy" src={assetImageUrl} /> : <span>{asset.label.slice(0, 2)}</span>}
+                      </div>
+                      <div className="output-detail-used-asset-copy">
+                        <strong>{formatAssetKind(asset.kind)}</strong>
+                        <span title={asset.label}>{asset.label}</span>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+
           <section className="output-detail-section">
             <h2>Creation info</h2>
             <dl className="output-detail-meta-list">
               <div>
                 <dt>Created by</dt>
-                <dd>{createdBy}</dd>
+                <dd>
+                  <span className="output-detail-avatar-chip">
+                    <span>{creatorInitial(createdBy)}</span>
+                    <strong>{createdBy}</strong>
+                  </span>
+                </dd>
               </div>
               <div>
                 <dt>Review status</dt>
-                <dd>{formatReviewState(output.reviewState)}</dd>
+                <dd>
+                  <span className={`review-status-pill pill-review-${output.reviewState}`}>
+                    {formatReviewState(output.reviewState)}
+                  </span>
+                </dd>
               </div>
             </dl>
           </section>
         </div>
 
         <div className="output-detail-actions">
-          <Link className="button button-primary" href={`/studio/ai-edit?outputId=${output.id}`}>
-            Open in Editor
+          <Link className="button button-primary output-detail-action-button" href={`/studio/ai-edit?outputId=${output.id}`}>
+            <IconEdit />
+            <span>Open in Editor</span>
           </Link>
           {showReviewActions ? (
             <>
               <button
-                className="button button-ghost"
+                className="button button-ghost output-detail-action-button"
                 disabled={isApprovePending}
                 onClick={() => void submitDecision("approved")}
                 type="button"
               >
-                {isApprovePending ? "Saving…" : "Approve"}
+                <IconCheck />
+                <span>{isApprovePending ? "Saving…" : "Approve"}</span>
               </button>
               <button
-                className="button button-ghost"
+                className="button button-ghost output-detail-action-button"
                 disabled={isRevisionPending}
                 onClick={() => void submitDecision("close", "Needs changes.")}
                 type="button"
               >
-                {isRevisionPending ? "Saving…" : "Needs changes"}
+                <IconMessage />
+                <span>{isRevisionPending ? "Saving…" : "Needs changes"}</span>
               </button>
               <button
-                className="button button-ghost reject-button"
+                className="button button-ghost reject-button output-detail-action-button"
                 disabled={isRejectPending}
                 onClick={() => void submitDecision("off-brand")}
                 type="button"
               >
-                {isRejectPending ? "Saving…" : "Reject"}
+                <IconX />
+                <span>{isRejectPending ? "Saving…" : "Reject"}</span>
               </button>
             </>
           ) : null}
@@ -741,6 +847,10 @@ function formatReviewState(value: CreativeOutputRecord["reviewState"]) {
   return value.replaceAll("_", " ");
 }
 
+function creatorInitial(name: string) {
+  return name.trim().charAt(0).toUpperCase() || "?";
+}
+
 function formatLabel(value: string) {
   return value
     .split(/[_\s-]+/)
@@ -749,8 +859,141 @@ function formatLabel(value: string) {
     .join(" ");
 }
 
+function formatAssetKind(kind: BrandAssetRecord["kind"]) {
+  if (kind === "logo") return "Logo";
+  if (kind === "rera_qr") return "RERA";
+  if (kind === "reference") return "Reference";
+  return formatLabel(kind);
+}
+
+function resolveUsedAssetsForOutput(output: CreativeOutputRecord, assets: BrandAssetRecord[]) {
+  const assetIds = getOutputAssetIds(output);
+  const storagePaths = getOutputStoragePaths(output);
+  if (assetIds.length === 0 && storagePaths.length === 0) {
+    return [];
+  }
+
+  const rank = new Map(assetIds.map((id, index) => [id, index]));
+  const pathRank = new Map(storagePaths.map((path, index) => [path, assetIds.length + index]));
+  return assets
+    .filter((asset) => assetIds.includes(asset.id) || storagePaths.includes(asset.storagePath))
+    .sort((left, right) => {
+      const leftRank = rank.get(left.id) ?? pathRank.get(left.storagePath) ?? 999;
+      const rightRank = rank.get(right.id) ?? pathRank.get(right.storagePath) ?? 999;
+      return leftRank - rightRank;
+    });
+}
+
+function getOutputAssetIds(output: CreativeOutputRecord) {
+  const metadata = asRecord(output.metadataJson) ?? {};
+  const variant = asRecord(metadata.variant);
+  const renderPackage = asRecord(metadata.render_package) ?? asRecord(variant?.render_package);
+  const ids = [
+    ...asStringArray(metadata.reference_asset_ids),
+    ...asStringArray(renderPackage?.project_asset_ids),
+    ...asStringArray(renderPackage?.reference_image_ids),
+    asString(renderPackage?.logo_asset_id),
+    asString(renderPackage?.rera_qr_asset_id)
+  ].filter((value): value is string => Boolean(value));
+
+  return Array.from(new Set(ids));
+}
+
+function getOutputStoragePaths(output: CreativeOutputRecord) {
+  const metadata = asRecord(output.metadataJson) ?? {};
+  const variant = asRecord(metadata.variant);
+  const render = asRecord(metadata.render);
+  const paths = [
+    ...asStringArray(metadata.reference_storage_paths),
+    ...asStringArray(render?.referenceStoragePaths),
+    ...asStringArray(variant?.reference_storage_paths)
+  ];
+  return Array.from(new Set(paths));
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function asStringArray(value: unknown) {
+  return Array.isArray(value) ? value.map(asString).filter((item): item is string => Boolean(item)) : [];
+}
+
 function clampPreviewZoom(value: number) {
   return Math.min(MAX_PREVIEW_ZOOM, Math.max(MIN_PREVIEW_ZOOM, Number(value.toFixed(2))));
+}
+
+function formatImageAspectRatio(width: number, height: number) {
+  const divisor = greatestCommonDivisor(width, height);
+  return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`;
+}
+
+function inferImageFormatLabel(width: number, height: number) {
+  const ratio = width / height;
+  if (Math.abs(ratio - 1) < 0.04) {
+    return "Square";
+  }
+  if (ratio < 0.7) {
+    return "Vertical";
+  }
+  if (ratio < 1) {
+    return "Portrait";
+  }
+  return "Landscape";
+}
+
+function greatestCommonDivisor(left: number, right: number): number {
+  let a = Math.abs(left);
+  let b = Math.abs(right);
+  while (b > 0) {
+    const next = a % b;
+    a = b;
+    b = next;
+  }
+  return a || 1;
+}
+
+function IconEdit() {
+  return (
+    <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+function IconCheck() {
+  return (
+    <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+function IconMessage() {
+  return (
+    <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+      <path d="M8 9h8" />
+      <path d="M8 13h5" />
+    </svg>
+  );
+}
+
+function IconX() {
+  return (
+    <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </svg>
+  );
 }
 
 async function convertImageBlobToJpeg(blob: Blob) {

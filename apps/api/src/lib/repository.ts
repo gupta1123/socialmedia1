@@ -64,6 +64,12 @@ type AssetRow = {
   thumbnail_height: number | null;
   thumbnail_bytes: number | null;
   metadata_json: Record<string, unknown> | null;
+  asset_description: string | null;
+  truth_status: string | null;
+  scene_type: string | null;
+  visual_use: string | null;
+  safe_claims: string[];
+  do_not_claim: string[];
 };
 
 type ProjectReraRegistrationRow = {
@@ -142,6 +148,7 @@ type OutputRow = {
   thumbnail_bytes: number | null;
   provider_url: string | null;
   output_index: number;
+  metadata_json?: Record<string, unknown> | null;
   parent_output_id: string | null;
   root_output_id: string | null;
   edited_from_output_id: string | null;
@@ -380,7 +387,7 @@ export async function getBrandProfileVersion(profileVersionId: string) {
 export async function listBrandAssets(brandId: string): Promise<BrandAssetRecord[]> {
   const { data, error } = await supabaseAdmin
     .from("brand_assets")
-    .select("id, workspace_id, brand_id, project_id, kind, label, file_name, mime_type, storage_path, thumbnail_storage_path, thumbnail_width, thumbnail_height, thumbnail_bytes, metadata_json")
+    .select("id, workspace_id, brand_id, project_id, kind, label, file_name, mime_type, storage_path, thumbnail_storage_path, thumbnail_width, thumbnail_height, thumbnail_bytes, metadata_json, asset_description, truth_status, scene_type, visual_use, safe_claims, do_not_claim")
     .eq("brand_id", brandId)
     .order("created_at", { ascending: false })
     .returns<AssetRow[]>();
@@ -400,7 +407,13 @@ export async function listBrandAssets(brandId: string): Promise<BrandAssetRecord
     mimeType: asset.mime_type,
     storagePath: asset.storage_path,
     thumbnailStoragePath: asset.thumbnail_storage_path,
-    metadataJson: asset.metadata_json ?? {}
+    metadataJson: asset.metadata_json ?? {},
+    assetDescription: asset.asset_description,
+    truthStatus: asset.truth_status,
+    sceneType: asset.scene_type,
+    visualUse: asset.visual_use,
+    safeClaims: asset.safe_claims ?? [],
+    doNotClaim: asset.do_not_claim ?? []
   }));
 }
 
@@ -453,7 +466,7 @@ export async function getBrandAssetCounts(brandId: string) {
 export async function listWorkspaceAssets(workspaceId: string, brandId?: string): Promise<BrandAssetRecord[]> {
   let query = supabaseAdmin
     .from("brand_assets")
-    .select("id, workspace_id, brand_id, project_id, kind, label, file_name, mime_type, storage_path, thumbnail_storage_path, thumbnail_width, thumbnail_height, thumbnail_bytes, metadata_json")
+    .select("id, workspace_id, brand_id, project_id, kind, label, file_name, mime_type, storage_path, thumbnail_storage_path, thumbnail_width, thumbnail_height, thumbnail_bytes, metadata_json, asset_description, truth_status, scene_type, visual_use, safe_claims, do_not_claim")
     .eq("workspace_id", workspaceId);
 
   if (brandId) {
@@ -477,7 +490,13 @@ export async function listWorkspaceAssets(workspaceId: string, brandId?: string)
     mimeType: asset.mime_type,
     storagePath: asset.storage_path,
     thumbnailStoragePath: asset.thumbnail_storage_path,
-    metadataJson: asset.metadata_json ?? {}
+    metadataJson: asset.metadata_json ?? {},
+    assetDescription: asset.asset_description,
+    truthStatus: asset.truth_status,
+    sceneType: asset.scene_type,
+    visualUse: asset.visual_use,
+    safeClaims: asset.safe_claims ?? [],
+    doNotClaim: asset.do_not_claim ?? []
   }));
 }
 
@@ -754,7 +773,7 @@ export async function listWorkspaceOutputs(workspaceId: string, brandId?: string
     .from("creative_outputs")
     .select(
       "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, provider_url, output_index, review_state, latest_feedback_verdict, reviewed_at, created_by"
-      + ", thumbnail_storage_path, thumbnail_width, thumbnail_height, thumbnail_bytes, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version"
+      + ", thumbnail_storage_path, thumbnail_width, thumbnail_height, thumbnail_bytes, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, metadata_json"
     )
     .eq("workspace_id", workspaceId);
 
@@ -796,6 +815,7 @@ export async function listWorkspaceOutputs(workspaceId: string, brandId?: string
     latestVerdict: output.latest_feedback_verdict,
     reviewedAt: output.reviewed_at,
     createdBy: output.created_by,
+    metadataJson: output.metadata_json ?? {},
     previewContext: null
   }));
 }

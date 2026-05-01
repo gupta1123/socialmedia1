@@ -936,6 +936,12 @@ export const BrandAssetSchema = z.object({
   storagePath: z.string(),
   thumbnailStoragePath: z.string().nullable().default(null),
   metadataJson: JsonRecordSchema.default({}),
+  assetDescription: z.string().nullable().optional(),
+  truthStatus: z.string().nullable().optional(),
+  sceneType: z.string().nullable().optional(),
+  visualUse: z.string().nullable().optional(),
+  safeClaims: z.array(z.string()).optional(),
+  doNotClaim: z.array(z.string()).optional(),
   previewUrl: z.string().url().optional(),
   thumbnailUrl: z.string().url().optional(),
   originalUrl: z.string().url().optional()
@@ -1373,6 +1379,7 @@ export const CreativeOutputSchema = z.object({
   previewUrl: z.string().url().optional(),
   thumbnailUrl: z.string().url().optional(),
   originalUrl: z.string().url().optional(),
+  metadataJson: JsonRecordSchema.default({}),
   previewContext: z
     .object({
       brief: CreativeBriefSchema.partial().nullable().default(null),

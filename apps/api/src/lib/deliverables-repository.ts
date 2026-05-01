@@ -1495,6 +1495,7 @@ function mapReviewOutputRow(row: ReviewPreviewOutputRow | null) {
     reviewedAt: row.reviewed_at,
     createdBy: row.created_by,
     createdAt: row.created_at,
+    metadataJson: {},
     previewContext: null
   };
 }

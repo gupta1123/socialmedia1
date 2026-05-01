@@ -39,6 +39,12 @@ const COPY_LANGUAGE_LABELS: Record<string, string> = {
   bn: "Bengali"
 };
 
+type CreativeV3PromptLike = {
+  status?: string;
+  variants?: Array<Record<string, unknown>>;
+  debug?: Record<string, unknown>;
+};
+
 export async function localizePromptPackageCopy<T extends PromptLike>(
   compiled: T,
   input: PromptLocalizationInput
@@ -87,6 +93,59 @@ export async function localizePromptPackageCopy<T extends PromptLike>(
   });
 }
 
+export async function localizeCreativeV3PromptCopy<T extends CreativeV3PromptLike>(
+  compiled: T,
+  input: {
+    targetLanguageCode?: string | null;
+    copyMode?: string | null;
+    brandName: string;
+    projectName?: string | null;
+  }
+): Promise<T> {
+  const targetLanguageCode = input.targetLanguageCode ?? "en";
+  if (input.copyMode !== "auto" || targetLanguageCode === "en") {
+    return withCreativeV3PromptLocalizationTrace(compiled, {
+      applied: false,
+      reason: input.copyMode !== "auto" ? "manual-copy" : "english",
+      targetLanguage: targetLanguageCode
+    });
+  }
+
+  if (!env.OPENROUTER_API_KEY) {
+    return withCreativeV3PromptLocalizationTrace(compiled, {
+      applied: false,
+      reason: "missing-openrouter-api-key",
+      targetLanguage: targetLanguageCode
+    });
+  }
+
+  const promptItems = collectCreativeV3PromptItems(compiled);
+  if (promptItems.length === 0) {
+    return withCreativeV3PromptLocalizationTrace(compiled, {
+      applied: false,
+      reason: "no-prompts",
+      targetLanguage: targetLanguageCode
+    });
+  }
+
+  const targetLanguage = COPY_LANGUAGE_LABELS[targetLanguageCode] ?? targetLanguageCode;
+  const revisedPrompts = await translatePromptBatch({
+    targetLanguage,
+    promptItems,
+    brandName: input.brandName,
+    projectName: input.projectName ?? null
+  });
+
+  const localized = applyCreativeV3PromptTranslations(compiled, revisedPrompts);
+  return withCreativeV3PromptLocalizationTrace(localized, {
+    applied: true,
+    targetLanguage: targetLanguageCode,
+    targetLanguageName: targetLanguage,
+    model: env.OPENROUTER_PROMPT_COMPOSER_MODEL,
+    promptCount: promptItems.length
+  });
+}
+
 function collectPromptItems(compiled: PromptLike): PromptItem[] {
   const items: PromptItem[] = [];
   addPromptItem(items, "root.seedPrompt", compiled.seedPrompt);
@@ -95,6 +154,29 @@ function collectPromptItems(compiled: PromptLike): PromptItem[] {
   for (const [index, variation] of (compiled.variations ?? []).entries()) {
     addPromptItem(items, `variations.${index}.seedPrompt`, variation.seedPrompt);
     addPromptItem(items, `variations.${index}.finalPrompt`, variation.finalPrompt);
+  }
+
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const identity = `${item.key}\n${item.prompt}`;
+    if (seen.has(identity)) {
+      return false;
+    }
+    seen.add(identity);
+    return true;
+  });
+}
+
+function collectCreativeV3PromptItems(compiled: CreativeV3PromptLike): PromptItem[] {
+  const items: PromptItem[] = [];
+  for (const [index, variant] of (compiled.variants ?? []).entries()) {
+    addPromptItem(items, `variants.${index}.prompt`, variant.prompt);
+    addPromptItem(items, `variants.${index}.compiled_prompt`, variant.compiled_prompt);
+    const renderPackage = isRecord(variant.render_package) ? variant.render_package : null;
+    if (renderPackage) {
+      addPromptItem(items, `variants.${index}.render_package.prompt`, renderPackage.prompt);
+      addPromptItem(items, `variants.${index}.render_package.compiled_prompt`, renderPackage.compiled_prompt);
+    }
   }
 
   const seen = new Set<string>();
@@ -229,11 +311,50 @@ function applyPromptTranslations<T extends PromptLike>(compiled: T, translations
   };
 }
 
+function applyCreativeV3PromptTranslations<T extends CreativeV3PromptLike>(compiled: T, translations: Map<string, string>): T {
+  const variants = (compiled.variants ?? []).map((variant, index) => {
+    const renderPackage = isRecord(variant.render_package) ? variant.render_package : null;
+    return {
+      ...variant,
+      ...(translations.has(`variants.${index}.prompt`) ? { prompt: translations.get(`variants.${index}.prompt`) } : {}),
+      ...(translations.has(`variants.${index}.compiled_prompt`) ? { compiled_prompt: translations.get(`variants.${index}.compiled_prompt`) } : {}),
+      ...(renderPackage
+        ? {
+            render_package: {
+              ...renderPackage,
+              ...(translations.has(`variants.${index}.render_package.prompt`)
+                ? { prompt: translations.get(`variants.${index}.render_package.prompt`) }
+                : {}),
+              ...(translations.has(`variants.${index}.render_package.compiled_prompt`)
+                ? { compiled_prompt: translations.get(`variants.${index}.render_package.compiled_prompt`) }
+                : {})
+            }
+          }
+        : {})
+    };
+  });
+
+  return {
+    ...compiled,
+    variants
+  };
+}
+
 function withPromptLocalizationTrace<T extends PromptLike>(compiled: T, trace: Record<string, unknown>): T {
   return {
     ...compiled,
     compilerTrace: {
       ...(compiled.compilerTrace ?? {}),
+      promptLocalization: trace
+    }
+  };
+}
+
+function withCreativeV3PromptLocalizationTrace<T extends CreativeV3PromptLike>(compiled: T, trace: Record<string, unknown>): T {
+  return {
+    ...compiled,
+    debug: {
+      ...(compiled.debug ?? {}),
       promptLocalization: trace
     }
   };

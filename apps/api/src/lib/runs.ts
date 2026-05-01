@@ -86,6 +86,7 @@ type OutputRow = {
   thumbnail_storage_path: string | null;
   provider_url: string | null;
   output_index: number;
+  metadata_json?: Record<string, unknown> | null;
   parent_output_id: string | null;
   root_output_id: string | null;
   edited_from_output_id: string | null;
@@ -607,6 +608,7 @@ function mapOutputRow(row: OutputRow, outputIndex = row.output_index): CreativeO
     latestVerdict: row.latest_feedback_verdict,
     reviewedAt: row.reviewed_at,
     createdBy: row.created_by,
+    metadataJson: row.metadata_json ?? {},
     previewContext: null
   };
 }
