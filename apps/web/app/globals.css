@@ -13072,6 +13072,43 @@ textarea {
   object-fit: cover;
 }
 
+.ref-grid-item-description-card {
+  width: 100%;
+  height: 100%;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 58%),
+    var(--paper-soft);
+  color: var(--ink);
+}
+
+.ref-grid-item-description-card span {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ref-grid-item-description-card p {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--ink-soft);
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .ref-grid-item.is-selected .ref-grid-item-thumb {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
@@ -13096,10 +13133,14 @@ textarea {
   width: 100%;
   height: 100%;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
   background: color-mix(in srgb, var(--accent) 5%, var(--paper-soft));
   color: var(--accent);
+}
+
+.template-card-visual p {
+  color: var(--ink-soft);
 }
 
 .ref-grid-item.is-template .ref-grid-item-thumb {
@@ -14220,10 +14261,74 @@ textarea {
   padding: 12px;
 }
 
-.create-v3-result-card.is-loading div {
+.create-v3-generation-loader {
   aspect-ratio: 4 / 5;
   border-radius: 18px;
-  background: linear-gradient(158deg, #f2eee4 0%, #e6ded0 100%);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.05)),
+    #efece5;
+  isolation: isolate;
+}
+
+.create-v3-generation-loader::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.28), transparent 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+
+.create-v3-loader-blob {
+  position: absolute;
+  z-index: 1;
+  width: 78%;
+  height: 78%;
+  border-radius: 999px;
+  filter: blur(28px);
+  opacity: 0.88;
+  will-change: transform, opacity;
+}
+
+.create-v3-loader-blob.b1 {
+  top: -18%;
+  left: 9%;
+  background: #d8d2c4;
+  animation: create-v3-loader-float-1 8s ease-in-out infinite alternate;
+}
+
+.create-v3-loader-blob.b2 {
+  right: -18%;
+  bottom: -10%;
+  background: #bcc5bd;
+  animation: create-v3-loader-float-2 9s ease-in-out infinite alternate;
+}
+
+.create-v3-loader-blob.b3 {
+  top: 30%;
+  left: -28%;
+  background: #d1c5c5;
+  animation: create-v3-loader-float-3 7s ease-in-out infinite alternate;
+}
+
+@keyframes create-v3-loader-float-1 {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(42%, 70%, 0) scale(1.08); }
+}
+
+@keyframes create-v3-loader-float-2 {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(-78%, -42%, 0) scale(1.18); }
+}
+
+@keyframes create-v3-loader-float-3 {
+  from { transform: translate3d(0, 0, 0) scale(0.84); }
+  to { transform: translate3d(72%, 20%, 0) scale(1.28); }
 }
 
 .create-v3-result-card.is-loading strong {
@@ -20257,6 +20362,31 @@ textarea {
 .dark .create-v3-result-placeholder {
   background: #202022;
   color: #f4f4f5;
+}
+
+.dark .create-v3-generation-loader {
+  border-color: rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01)),
+    #171719;
+}
+
+.dark .create-v3-generation-loader::after {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.07), transparent 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0));
+}
+
+.dark .create-v3-loader-blob.b1 {
+  background: #2b2519;
+}
+
+.dark .create-v3-loader-blob.b2 {
+  background: #1a241c;
+}
+
+.dark .create-v3-loader-blob.b3 {
+  background: #2a1c1d;
 }
 
 .dark .create-v3-reference-modal {

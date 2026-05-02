@@ -773,7 +773,11 @@ export default function CreateV3Page() {
           <div className="create-v3-generation-grid">
             {Array.from({ length: pendingVariantCount }).map((_, index) => (
               <article className="create-v3-result-card is-loading" key={index}>
-                <div />
+                <div className="create-v3-generation-loader" aria-hidden="true">
+                  <span className="create-v3-loader-blob b1" />
+                  <span className="create-v3-loader-blob b2" />
+                  <span className="create-v3-loader-blob b3" />
+                </div>
                 <strong>{generationStatus || `Option ${index + 1}`}</strong>
               </article>
             ))}
@@ -889,7 +893,9 @@ export default function CreateV3Page() {
               <div className="create-v3-reference-modal-content">
                 <div className="create-v3-reference-modal-grid">
                   {refModalKind === "templates" ? (
-                    filteredTemplates.length > 0 ? filteredTemplates.map((template) => (
+                    filteredTemplates.length > 0 ? filteredTemplates.map((template) => {
+                      const templateSummary = summarizeVisualTemplate(template);
+                      return (
                       <button
                         className={`ref-grid-item is-template ${visualTemplateId === template.template_id ? "is-selected" : ""}`}
                         key={template.template_id}
@@ -897,39 +903,49 @@ export default function CreateV3Page() {
                           setVisualTemplateId(template.template_id);
                           setShowReferencePicker(false);
                         }}
-                        title={summarizeVisualTemplate(template)}
+                        title={`${template.name}\n${templateSummary}`}
                         type="button"
                       >
                         <div className="ref-grid-item-thumb">
-                          <div className="template-card-visual">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
-                              <rect x="3" y="3" width="18" height="18" rx="2" />
-                              <path d="M3 9h18" />
-                              <path d="M9 21V9" />
-                            </svg>
+                          <div className="ref-grid-item-description-card template-card-visual">
+                            <span>{templatePickerKicker(template)}</span>
+                            <p>{templateSummary}</p>
                           </div>
                         </div>
                         <strong>{template.name}</strong>
                       </button>
-                    )) : (
+                      );
+                    }) : (
                       <div className="ref-modal-empty">
                         <p>No templates available for this post type.</p>
                       </div>
                     )
                   ) : (
                     filteredReferenceAssets.length > 0 ? filteredReferenceAssets.map((asset) => (
+                      (() => {
+                        const fallbackDescription = assetPickerDescription(asset);
+                        return (
                       <button
                         className={`ref-grid-item ${selectedAssetIds.includes(asset.id) ? "is-selected" : ""}`}
                         key={asset.id}
                         onClick={() => toggleAsset(asset.id)}
-                        title={asset.label}
+                        title={`${asset.label}\n${fallbackDescription}`}
                         type="button"
                       >
                         <div className="ref-grid-item-thumb">
-                          {asset.thumbnailUrl || asset.previewUrl ? <img src={asset.thumbnailUrl ?? asset.previewUrl} alt="" /> : <span>{asset.label.slice(0, 2)}</span>}
+                          {asset.thumbnailUrl || asset.previewUrl ? (
+                            <img src={asset.thumbnailUrl ?? asset.previewUrl} alt="" />
+                          ) : (
+                            <div className="ref-grid-item-description-card">
+                              <span>{assetPickerKicker(asset)}</span>
+                              <p>{fallbackDescription}</p>
+                            </div>
+                          )}
                         </div>
                         <strong>{asset.label}</strong>
                       </button>
+                        );
+                      })()
                     )) : (
                       <div className="ref-modal-empty">
                         <p>No matching references found.</p>
@@ -949,6 +965,54 @@ export default function CreateV3Page() {
 
 function isRenderableImage(asset: BrandAssetRecord) {
   return /\.(png|jpe?g|webp)$/i.test(asset.storagePath);
+}
+
+function assetPickerDescription(asset: BrandAssetRecord) {
+  const metadata = asset.metadataJson && typeof asset.metadataJson === "object" ? asset.metadataJson as Record<string, unknown> : {};
+  const explicit = [
+    asset.assetDescription,
+    metadata.assetDescription,
+    metadata.description,
+    metadata.notes
+  ].find((value) => typeof value === "string" && value.trim().length > 0);
+  if (typeof explicit === "string") return clampPickerText(explicit.trim(), 135);
+
+  const tags = Array.isArray(metadata.tags)
+    ? metadata.tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0).slice(0, 4)
+    : [];
+  const summaryParts = [
+    asset.sceneType,
+    asset.visualUse,
+    stringMetadata(metadata, "subjectType"),
+    stringMetadata(metadata, "viewType"),
+    stringMetadata(metadata, "amenityName"),
+    stringMetadata(metadata, "qualityTier"),
+    tags.length ? tags.join(", ") : null
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  return clampPickerText(summaryParts.length ? summaryParts.join(" · ") : asset.label || asset.fileName || "Reference asset", 135);
+}
+
+function assetPickerKicker(asset: BrandAssetRecord) {
+  const metadata = asset.metadataJson && typeof asset.metadataJson === "object" ? asset.metadataJson as Record<string, unknown> : {};
+  return clampPickerText(
+    asset.sceneType ||
+      stringMetadata(metadata, "subjectType") ||
+      stringMetadata(metadata, "assetClass") ||
+      asset.kind ||
+      "Reference",
+    28
+  );
+}
+
+function stringMetadata(metadata: Record<string, unknown>, key: string) {
+  const value = metadata[key];
+  return typeof value === "string" ? value : null;
+}
+
+function clampPickerText(value: string, maxLength: number) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1).trim()}…` : normalized;
 }
 
 function matchesReferenceCategory(asset: BrandAssetRecord, category: RefModalKind) {
@@ -1207,6 +1271,12 @@ function summarizeVisualTemplate(template: CreativeV3VisualTemplate | null) {
     typeof levers.layout_geometry === "string" ? formatPresetPosition(levers.layout_geometry) : null
   ].filter(Boolean);
   return parts.join(" · ") || "Template style";
+}
+
+function templatePickerKicker(template: CreativeV3VisualTemplate) {
+  const formatLabel = template.formats?.[0] ? formatPresetPosition(template.formats[0]) : "Template";
+  const jobLabel = template.content_job_id ? formatPresetPosition(template.content_job_id) : "Layout";
+  return clampPickerText(`${jobLabel} · ${formatLabel}`, 32);
 }
 
 function formatPresetPosition(value: unknown) {
