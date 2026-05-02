@@ -788,6 +788,14 @@ export default function OutputDetailPage() {
                   </span>
                 </dd>
               </div>
+              {output.metadataJson && getPresetInfoFromMetadata(output.metadataJson) ? (
+                <div>
+                  <dt>Preset</dt>
+                  <dd>
+                    <span className="output-detail-preset-chip">{getPresetInfoFromMetadata(output.metadataJson)!}</span>
+                  </dd>
+                </div>
+              ) : null}
             </dl>
           </section>
         </div>
@@ -947,6 +955,19 @@ function inferImageFormatLabel(width: number, height: number) {
     return "Portrait";
   }
   return "Landscape";
+}
+
+function getPresetInfoFromMetadata(metadata: Record<string, unknown> | null): string | null {
+  if (!metadata) return null;
+  const variant = asRecord(metadata.variant);
+  const renderPackage = asRecord(metadata.render_package) ?? asRecord(variant?.render_package);
+  if (!renderPackage) return null;
+  const layoutContract = asRecord(renderPackage.layout_contract);
+  const presetName = (layoutContract?.preset_name ?? renderPackage?.preset_name ?? variant?.preset_name ?? null) as string | null;
+  const presetKey = (layoutContract?.preset_key ?? renderPackage?.preset_key ?? variant?.preset_key ?? null) as string | null;
+  if (presetName) return presetName;
+  if (presetKey) return presetKey.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+  return null;
 }
 
 function greatestCommonDivisor(left: number, right: number): number {

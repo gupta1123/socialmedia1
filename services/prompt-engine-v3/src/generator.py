@@ -340,6 +340,8 @@ def build_variant_output(
         text_policy={"copy_mode": request.copy_mode, "editable_layers": True, "preview_text_visible": True},
         layout_contract={
             "mode": "single_post",
+            "preset_key": preset.get("preset_id") if isinstance(preset, dict) else None,
+            "preset_name": preset.get("name") if isinstance(preset, dict) else None,
             "logo_layer": {
                 **logo_rules_extra,
                 "required": include_logo,
