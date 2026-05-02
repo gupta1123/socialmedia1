@@ -743,6 +743,7 @@ async function renderCreativeV3Variant(params: {
     hasProjectReference: Array.isArray(renderPackage.project_asset_ids) && renderPackage.project_asset_ids.length > 0,
     hasLogoReference: typeof renderPackage.logo_asset_id === "string" && renderPackage.logo_asset_id.length > 0,
     hasReraReference: Boolean(reraCompositeStoragePath),
+    logoRules: isPlainRecord(renderPackage.logo_rules) ? renderPackage.logo_rules : null,
   });
 
   const result = await generateOpenAiImages({
@@ -768,6 +769,7 @@ function buildCreativeV3RendererPrompt(params: {
   hasProjectReference: boolean;
   hasLogoReference: boolean;
   hasReraReference: boolean;
+  logoRules?: Record<string, unknown> | null;
 }) {
   const roleNotes = [
     "Create a finished designed social-media poster, not a simple text overlay on the reference image.",
@@ -779,7 +781,7 @@ function buildCreativeV3RendererPrompt(params: {
     );
   }
   if (params.hasLogoReference) {
-    roleNotes.push("Use the logo reference only as one clean brand mark layer; do not redraw, duplicate, or place it on the building facade.");
+    roleNotes.push(compileLogoRenderInstruction(params.logoRules));
   }
   if (params.hasReraReference) {
     roleNotes.push(
@@ -787,6 +789,69 @@ function buildCreativeV3RendererPrompt(params: {
     );
   }
   return `${roleNotes.join("\n")}\n\n${params.prompt}`;
+}
+
+function compileLogoRenderInstruction(logoRules?: Record<string, unknown> | null) {
+  const position = typeof logoRules?.position === "string" ? logoRules.position : "top_left";
+  const heightRatio = readNumericRule(logoRules, "height_ratio");
+  const marginLeftRatio = readNumericRule(logoRules, "margin_left_ratio");
+  const marginTopRatio = readNumericRule(logoRules, "margin_top_ratio");
+  const marginRightRatio = readNumericRule(logoRules, "margin_right_ratio");
+  const marginBottomRatio = readNumericRule(logoRules, "margin_bottom_ratio");
+  const positionText = formatLogoPosition(position);
+  const sizeText = heightRatio
+    ? `Logo visual height should be about ${formatRatioPercent(heightRatio)} of the canvas height.`
+    : "Keep the logo compact, premium, and clearly smaller than the headline.";
+  const marginText = formatLogoMargins(position, {
+    left: marginLeftRatio,
+    top: marginTopRatio,
+    right: marginRightRatio,
+    bottom: marginBottomRatio
+  });
+
+  return [
+    "Use the supplied logo reference exactly once as a flat brand mark layer.",
+    `Logo position: ${positionText}.`,
+    sizeText,
+    marginText,
+    "Place the logo exactly as provided: do not redraw, modify, stylize, recolor, warp, simplify, crop, replace, or reinterpret it.",
+    "Keep the logo sharp, fully visible, separate from the building image, and never on the building facade or as physical signage."
+  ].filter(Boolean).join(" ");
+}
+
+function readNumericRule(rules: Record<string, unknown> | null | undefined, key: string) {
+  const value = rules?.[key];
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function formatLogoPosition(position: string) {
+  return position
+    .replaceAll("_", "-")
+    .replace("bottom-signature", "bottom signature area");
+}
+
+function formatRatioPercent(value: number) {
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatLogoMargins(
+  position: string,
+  margins: { left: number | null; top: number | null; right: number | null; bottom: number | null }
+) {
+  if (position === "top_left") {
+    return `Keep about ${formatRatioPercent(margins.left ?? 0.05)} left margin and ${formatRatioPercent(margins.top ?? 0.04)} top margin from the canvas edge.`;
+  }
+  if (position === "top_right") {
+    return `Keep about ${formatRatioPercent(margins.right ?? 0.05)} right margin and ${formatRatioPercent(margins.top ?? 0.04)} top margin from the canvas edge.`;
+  }
+  if (position === "bottom_signature") {
+    return `Keep about ${formatRatioPercent(margins.left ?? 0.05)} side margin and ${formatRatioPercent(margins.bottom ?? 0.04)} bottom margin from the canvas edge.`;
+  }
+  return "Keep comfortable spacing from all canvas edges.";
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 async function persistCreativeV3Outputs(params: {

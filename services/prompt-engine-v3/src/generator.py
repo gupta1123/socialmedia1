@@ -21,6 +21,7 @@ from .presets import (
     preset_contact_items,
     preset_contact_position,
     preset_logo_position,
+    preset_logo_rules,
     preset_rera_position,
     preset_requires_logo,
     preset_requires_rera_qr,
@@ -261,6 +262,7 @@ def build_variant_output(
     contact_items = sorted(set(requested_contact_items(request) + preset_contact))
     contact_values = contact_values_from_context(context, contact_items)
     logo_position = preset_logo_position(preset)
+    logo_rules_extra = preset_logo_rules(preset)
     rera_position = preset_rera_position(preset)
     contact_position = preset_contact_position(preset)
     copy = build_copy_contract(request, context, content_job_id, session_facts, raw_copy)
@@ -303,6 +305,7 @@ def build_variant_output(
         request.rera_qr_asset_id,
         session_facts,
         logo_position=logo_position,
+        logo_rules_extra=logo_rules_extra,
         rera_position=rera_position,
         contact_rules=contact_rules,
     )
@@ -337,7 +340,14 @@ def build_variant_output(
         text_policy={"copy_mode": request.copy_mode, "editable_layers": True, "preview_text_visible": True},
         layout_contract={
             "mode": "single_post",
-            "logo_layer": {"required": include_logo, "asset_id": request.logo_asset_id if include_logo else None, "max_instances": 1, "source": "exact_asset_only", "position": logo_position},
+            "logo_layer": {
+                **logo_rules_extra,
+                "required": include_logo,
+                "asset_id": request.logo_asset_id if include_logo else None,
+                "max_instances": 1,
+                "source": "exact_asset_only",
+                "position": logo_position,
+            },
             "rera_qr_layer": {
                 "required": include_rera,
                 "asset_id": request.rera_qr_asset_id if include_rera else None,

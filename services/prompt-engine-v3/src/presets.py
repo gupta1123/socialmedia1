@@ -35,6 +35,11 @@ def preset_logo_position(preset: Dict[str, Any]) -> str:
     return str(logo.get("position") or "top_left") if isinstance(logo, dict) else "top_left"
 
 
+def preset_logo_rules(preset: Dict[str, Any]) -> Dict[str, Any]:
+    logo = preset_json(preset).get("logo") or preset_json(preset).get("logo_layer")
+    return dict(logo) if isinstance(logo, dict) else {}
+
+
 def preset_rera_position(preset: Dict[str, Any]) -> str:
     rera = preset_json(preset).get("rera_qr") or preset_json(preset).get("rera_qr_layer")
     return str(rera.get("position") or "top_right") if isinstance(rera, dict) else "top_right"

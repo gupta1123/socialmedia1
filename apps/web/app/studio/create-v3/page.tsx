@@ -239,9 +239,9 @@ export default function CreateV3Page() {
     
     if (refModalKind !== "all") {
       if (refModalKind === "generated") {
-        items = items.filter((a) => a.metadataJson?.source === "generated");
+        items = items.filter((a) => stringMetadata(assetMetadataRecord(a), "source") === "generated");
       } else {
-        items = items.filter((a) => matchesReferenceCategory(a, refModalKind) && a.metadataJson?.source !== "generated");
+        items = items.filter((a) => matchesReferenceCategory(a, refModalKind) && stringMetadata(assetMetadataRecord(a), "source") !== "generated");
       }
     }
     
@@ -283,6 +283,16 @@ export default function CreateV3Page() {
   );
   const canCompile = Boolean(activeBrandId && brief.trim().length >= 10 && !loading && (!isFestiveGreeting || festivalId));
   const selectedLogoAsset = logoAssets.find((asset) => asset.id === logoAssetId) ?? logoAssets[0] ?? null;
+
+  useEffect(() => {
+    if (!urlGenerationSessionId && generationSessionId) {
+      setGenerationSessionId(null);
+      setResult(null);
+      setSelectedVariantId(null);
+      setRendersByVariantId({});
+      setOutputIdsByVariantId({});
+    }
+  }, [urlGenerationSessionId, generationSessionId]);
 
   useEffect(() => {
     if (!urlGenerationSessionId || !sessionToken) return;
@@ -968,7 +978,7 @@ function isRenderableImage(asset: BrandAssetRecord) {
 }
 
 function assetPickerDescription(asset: BrandAssetRecord) {
-  const metadata = asset.metadataJson && typeof asset.metadataJson === "object" ? asset.metadataJson as Record<string, unknown> : {};
+  const metadata = assetMetadataRecord(asset);
   const explicit = [
     asset.assetDescription,
     metadata.assetDescription,
@@ -994,7 +1004,7 @@ function assetPickerDescription(asset: BrandAssetRecord) {
 }
 
 function assetPickerKicker(asset: BrandAssetRecord) {
-  const metadata = asset.metadataJson && typeof asset.metadataJson === "object" ? asset.metadataJson as Record<string, unknown> : {};
+  const metadata = assetMetadataRecord(asset);
   return clampPickerText(
     asset.sceneType ||
       stringMetadata(metadata, "subjectType") ||
@@ -1017,23 +1027,64 @@ function clampPickerText(value: string, maxLength: number) {
 
 function matchesReferenceCategory(asset: BrandAssetRecord, category: RefModalKind) {
   if (category === "all" || category === "templates") return true;
-  const haystack = searchableText(asset);
+  const metadata = assetMetadataRecord(asset);
+  const structuredTokens = new Set(
+    [
+      asset.sceneType,
+      asset.visualUse,
+      stringMetadata(metadata, "subjectType"),
+      stringMetadata(metadata, "assetClass"),
+      stringMetadata(metadata, "viewType"),
+      stringMetadata(metadata, "usageIntent")
+    ]
+      .map(normalizeReferenceToken)
+      .filter((value): value is string => Boolean(value))
+  );
+  const hasStructuredClassification = structuredTokens.size > 0;
+
   if (category === "exteriors") {
-    return /\b(exterior|facade|façade|tower|building|podium|entrance|gate|aerial|masterplan|skyline)\b/.test(haystack);
+    if (hasStructuredClassification) {
+      return ["project_exterior", "exterior", "facade", "elevation", "aerial", "site", "masterplan"].some((token) => structuredTokens.has(token));
+    }
+    return /\b(exterior|facade|façade|tower|building|podium|entrance|gate|aerial|masterplan|skyline)\b/.test(searchableText(asset));
   }
   if (category === "interiors") {
-    return /\b(interior|sample flat|flat|living|bedroom|kitchen|lobby|show apartment)\b/.test(haystack);
+    if (hasStructuredClassification) {
+      return ["interior", "sample_flat", "sample flat"].some((token) => structuredTokens.has(token));
+    }
+    return /\b(interior|sample flat|flat|living|bedroom|kitchen|lobby|show apartment|bathroom|washroom)\b/.test(searchableText(asset));
   }
   if (category === "amenities") {
-    return /\b(amenity|pool|swimming|gym|yoga|court|basketball|cricket|kids|play|clubhouse|deck|lawn|garden|fitness)\b/.test(haystack);
+    if (hasStructuredClassification) {
+      return ["amenity", "amenity_anchor"].some((token) => structuredTokens.has(token));
+    }
+    return /\b(amenity|pool|swimming|gym|yoga|court|basketball|cricket|clubhouse|deck|lawn|garden|fitness|play area)\b/.test(searchableText(asset));
   }
   if (category === "location") {
-    return /\b(location|map|landmark|connectivity|nearby|transport|road|railway|mall|hospital|school|metro)\b/.test(haystack);
+    if (hasStructuredClassification) {
+      return ["location", "location_map", "map", "connectivity"].some((token) => structuredTokens.has(token));
+    }
+    return /\b(location|map|landmark|connectivity|nearby|transport|road|railway|mall|hospital|school|metro)\b/.test(searchableText(asset));
   }
   if (category === "generated") {
-    return asset.metadataJson?.source === "generated";
+    return stringMetadata(metadata, "source") === "generated";
   }
   return true;
+}
+
+function assetMetadataRecord(asset: BrandAssetRecord) {
+  return asset.metadataJson && typeof asset.metadataJson === "object" && !Array.isArray(asset.metadataJson)
+    ? asset.metadataJson as Record<string, unknown>
+    : {};
+}
+
+function normalizeReferenceToken(value: string | null | undefined) {
+  if (!value) return null;
+  return value
+    .toLowerCase()
+    .replace(/façade/g, "facade")
+    .replace(/[\s-]+/g, "_")
+    .trim();
 }
 
 function searchableText(value: unknown): string {

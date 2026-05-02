@@ -44,9 +44,24 @@ def build_render_package(
     rera_qr_asset_id: Optional[str],
     session_facts: List[SessionFactOverride],
     logo_position: str = "top_left",
+    logo_rules_extra: Optional[Dict[str, Any]] = None,
     rera_position: str = "top_right",
     contact_rules: Optional[Dict[str, Any]] = None,
 ) -> RenderPackage:
+    logo_rules = {
+        "required": include_logo,
+        "max_instances": 1,
+        "source": "exact_asset_only",
+        "position": logo_position,
+        "allowed_positions": ["top_left", "top_right", "bottom_signature"],
+    }
+    if isinstance(logo_rules_extra, dict):
+        logo_rules.update({key: value for key, value in logo_rules_extra.items() if value is not None})
+        logo_rules["required"] = include_logo
+        logo_rules["max_instances"] = 1
+        logo_rules["source"] = "exact_asset_only"
+        logo_rules["position"] = logo_position
+
     return RenderPackage(
         project_asset_ids=[asset.get("asset_id")] if asset.get("asset_id") else [],
         logo_asset_id=logo_asset_id if include_logo else None,
@@ -58,13 +73,7 @@ def build_render_package(
         compiled_prompt=compiled_prompt,
         negative_prompt=negative_prompt,
         exact_text_layers=copy,
-        logo_rules={
-            "required": include_logo,
-            "max_instances": 1,
-            "source": "exact_asset_only",
-            "position": logo_position,
-            "allowed_positions": ["top_left", "top_right", "bottom_signature"],
-        },
+        logo_rules=logo_rules,
         rera_qr_rules={
             "required": include_rera_qr,
             "max_instances": 1,
