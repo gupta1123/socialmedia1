@@ -53,6 +53,32 @@ class CompileRequest(BaseModel):
     variant_count: int = Field(default=1, ge=1, le=3)
     variation_strategy: str = "auto"
     asset_variation: bool = True
+    creative_mode: Literal[
+        "auto",
+        "image_led",
+        "copy_led",
+        "asset_led",
+        "template_led",
+        "proof_led",
+        "offer_led",
+        "lifestyle_led",
+        "brand_led",
+        "graphic_led",
+    ] = "auto"
+    text_strategy: Literal[
+        "auto",
+        "render_exact_text",
+        "reserve_editable_space",
+        "minimal_text",
+        "typography_dominant",
+        "no_text_visual_only",
+        "proof_badges",
+        "poster_copy_block",
+    ] = "auto"
+    novelty_level: float = Field(default=0.7, ge=0, le=1)
+    construction_visual_mode: Literal["auto", "actual_progress_reference", "visualized_progress_from_project_truth"] = "auto"
+    construction_progress_percent: int = Field(default=50, ge=25, le=90)
+    festival_visual_scope: Literal["auto", "brand_only", "project_supported", "building_led"] = "auto"
     copy_mode: Literal["auto", "manual"] = "auto"
     copy_contract: CopyContract = Field(default_factory=CopyContract, alias="copy")
     visual_template_id: Optional[str] = None
@@ -95,31 +121,55 @@ class AssetRoleEntry(BaseModel):
 class AssetRolePlan(BaseModel):
     project_assets: List[AssetRoleEntry] = Field(default_factory=list)
     logo_asset: Optional[AssetRoleEntry] = None
+    secondary_logo_asset: Optional[AssetRoleEntry] = None
     rera_qr_asset: Optional[AssetRoleEntry] = None
     reference_images: List[AssetRoleEntry] = Field(default_factory=list)
     fallback_visuals: List[AssetRoleEntry] = Field(default_factory=list)
 
 
+class ProviderReference(BaseModel):
+    asset_id: Optional[str] = None
+    role: str = "reference"
+    sent_to_model: bool = True
+    composited_after: bool = False
+    storage_path: Optional[str] = None
+
+
 class RenderPackage(BaseModel):
     project_asset_ids: List[str] = Field(default_factory=list)
     logo_asset_id: Optional[str] = None
+    secondary_logo_asset_id: Optional[str] = None
     rera_qr_asset_id: Optional[str] = None
     reference_image_ids: List[str] = Field(default_factory=list)
     image_model_mode: str = "asset_reference_generation"
     format: str = "4:5"
     prompt: str = ""
+    draft_prompt: str = ""
+    provider_prompt: str = ""
     compiled_prompt: str = ""
+    provider_references: List[ProviderReference] = Field(default_factory=list)
     negative_prompt: str = ""
     exact_text_layers: Dict[str, Any] = Field(default_factory=dict)
     logo_rules: Dict[str, Any] = Field(default_factory=dict)
+    secondary_logo_rules: Dict[str, Any] = Field(default_factory=dict)
     rera_qr_rules: Dict[str, Any] = Field(default_factory=dict)
     contact_rules: Dict[str, Any] = Field(default_factory=dict)
+    location_rules: Dict[str, Any] = Field(default_factory=dict)
     truth_rules: Dict[str, Any] = Field(default_factory=dict)
     session_fact_overrides: List[SessionFactOverride] = Field(default_factory=list)
+    asset_visual_summary: Dict[str, Any] = Field(default_factory=dict)
+    asset_selection: Dict[str, Any] = Field(default_factory=dict)
+    template_contract: Dict[str, Any] = Field(default_factory=dict)
+    forbidden_ai_generation: List[str] = Field(default_factory=list)
+    renderer_policy: Optional[str] = None
 
 
 class FactAudit(BaseModel):
-    project_db_facts_used: List[str] = Field(default_factory=list)
+    available_project_facts: List[str] = Field(default_factory=list)
+    facts_used_in_prompt: List[str] = Field(default_factory=list)
+    facts_used_in_visible_copy: List[str] = Field(default_factory=list)
+    facts_used_as_constraints: List[str] = Field(default_factory=list)
+    project_db_facts_used: List[str] = Field(default_factory=list)  # backward-compatible alias for available_project_facts
     brief_declared_facts_used: List[SessionFactOverride] = Field(default_factory=list)
     llm_inferred_claims: List[str] = Field(default_factory=list)
     requires_client_review: bool = False
@@ -148,7 +198,7 @@ class VariantOutput(BaseModel):
 
 
 class CompileResponse(BaseModel):
-    status: Literal["ready", "needs_input", "blocked", "failed"]
+    status: Literal["ready", "ready_with_warnings", "needs_input", "blocked", "failed"]
     capability: str
     content_job_id: Optional[str] = None
     format: str

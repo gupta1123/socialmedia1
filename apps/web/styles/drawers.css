@@ -1,0 +1,226 @@
+/* Shared drawer overlay and drawer form primitives
+   Extracted from app/globals.css. Keep imports ordered in app/globals.css. */
+
+@media (max-width: 980px) {
+  .auth-shell {
+    grid-template-columns: 1fr;
+    min-height: 100vh;
+  }
+
+  .auth-showcase {
+    display: none;
+  }
+
+  .auth-login-panel {
+    min-height: 100vh;
+    padding: 80px 22px 32px;
+  }
+
+  .auth-status-line {
+    top: 22px;
+    right: 22px;
+  }
+
+  .auth-access-card {
+    max-width: 420px;
+    padding: 30px 24px;
+    box-shadow: 6px 6px 0 var(--ink);
+  }
+
+  .hero-grid,
+  .studio-grid,
+  .brand-form,
+  .color-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-wide,
+  .brand-form label:nth-last-child(2),
+  .brand-form label:last-of-type,
+  .brand-form textarea,
+  .brand-form button,
+  .prompt-preview {
+    grid-column: span 1;
+  }
+
+  .studio-header,
+  .panel-header {
+    flex-direction: column;
+  }
+
+  .work-gallery-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .review-option-gallery {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .studio-shell-loading-row,
+  .studio-create-loading-grid,
+  .studio-create-loading-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-create-loading-dock,
+  .studio-shell-subtitle-skeleton,
+  .studio-create-loading-heading {
+    width: 100%;
+  }
+}
+
+/* =========================================
+   Drawer Overlay Component
+   ========================================= */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+  z-index: 900;
+  display: flex;
+  justify-content: flex-end;
+  animation: fade-in 200ms ease;
+}
+
+.drawer-content {
+  width: 100%;
+  max-width: 440px;
+  background: var(--paper);
+  height: 100vh;
+  box-shadow: 0 0 0 1px var(--line), -20px 0 60px -10px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  animation: slide-in-right 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  border-left: none;
+}
+
+.drawer-header {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.drawer-header h2 {
+  font-size: var(--text-xl);
+  margin: 0;
+  font-weight: 650;
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+}
+
+.drawer-close {
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.drawer-close:hover {
+  background: var(--paper-strong);
+  color: var(--ink);
+}
+
+.drawer-body {
+  padding: 0 24px 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.drawer-form {
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - 92px);
+  /* Header height */
+}
+
+.drawer-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 12px;
+  background: var(--paper);
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+}
+
+.field-group-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  padding-top: 24px;
+}
+
+.field-group-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  margin-bottom: 12px;
+}
+
+.drawer-color-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.field-row-compact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
+}
+
+.color-swatch-sm {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.mono-field {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
+  font-size: 0.8rem !important;
+  border: none !important;
+  background: none !important;
+  padding: 2px 4px !important;
+  width: 100%;
+}
+
+.field-group:focus-within .field-group-label {
+  color: var(--olive);
+  opacity: 1;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* =========================================
+   Brief Form — Create page
+   ========================================= */

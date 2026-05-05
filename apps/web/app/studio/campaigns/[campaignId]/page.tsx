@@ -221,8 +221,8 @@ export default function CampaignDetailPage() {
     const subtitle = [linkedProjectNames.length > 0 ? linkedProjectNames.join(" · ") : null, windowSummary].filter(Boolean).join(" · ");
 
     return {
-      backHref: "/studio/campaigns",
-      backLabel: "Back to campaigns",
+      backHref: "/studio/brand-kit",
+      backLabel: "Back to Brand Kits",
       title: campaign.name,
       subtitle: subtitle || "Campaign detail",
       badges: (

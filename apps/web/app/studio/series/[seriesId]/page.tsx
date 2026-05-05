@@ -149,8 +149,8 @@ export default function SeriesDetailPage() {
     }
 
     return {
-      backHref: "/studio/plan",
-      backLabel: "Back to plan",
+      backHref: "/studio/brand-kit",
+      backLabel: "Back to Brand Kits",
       title: series.name,
       subtitle: formatDisplayDateRange(series.startAt, series.endAt) || "Series detail",
       badges: (

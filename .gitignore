@@ -9,6 +9,9 @@ coverage
 __pycache__
 *.tsbuildinfo
 .DS_Store
+.pytest_cache
+.ruff_cache
+.vscode/
 supabase/.branches
 supabase/.temp
 apps/api/.env
@@ -18,3 +21,7 @@ current_data*.sql
 Untitled39.ipynb
 *.zip
 .local/
+archive/root-cleanup-*/
+services/socialpython/data/
+services/socialpython/server_output.log
+apps/web/app/studio/ai-edit/page.refactored.tsx

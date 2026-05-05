@@ -154,8 +154,12 @@ export type CreativeV3CompilePayload = {
   includeLogo?: boolean;
   logoAssetId?: string | null;
   includeReraQr?: boolean;
+  reraQrAssetId?: string | null;
   contactItems?: Array<"phone" | "email" | "website" | "whatsapp">;
-  options?: Record<string, unknown>;
+  options?: {
+    textTreatment?: "render_text" | "reserve_space";
+    [key: string]: unknown;
+  };
 };
 
 export type CreativeV3CompileResponse = {
@@ -166,7 +170,7 @@ export type CreativeV3CompileResponse = {
     enginePayload: Record<string, unknown>;
   };
   result: {
-    status: "ready" | "needs_input" | "blocked" | "failed";
+    status: "ready" | "ready_with_warnings" | "needs_input" | "blocked" | "failed";
     capability: string;
     content_job_id?: string | null;
     format: string;
@@ -214,7 +218,9 @@ export type CreativeV3RenderResponse = {
   provider: "openai";
   model: string;
   requestId: string;
+  providerPrompt?: string;
   referenceAssetIds: string[];
+  layerAssetIds?: string[];
   referenceStoragePaths: string[];
   images: Array<{
     url: string;
@@ -265,6 +271,8 @@ export type CreativeV3VisualTemplate = {
   formats: string[];
   lever_signature: Record<string, unknown>;
   template_json: Record<string, unknown>;
+  preview_storage_path?: string | null;
+  previewUrl?: string | null;
 };
 
 export type CreativeV3BrandPresetInput = {
@@ -896,11 +904,14 @@ export function composeImageEditPrompt(
   });
 }
 
+export type ImageEditPreset = "v1_low" | "v1_high" | "v2_low" | "v2_medium" | "v2_high";
+
 export function applyImageEdit(
   token: string,
   payload: {
     brandId: string;
     prompt: string;
+    editPreset?: ImageEditPreset;
     width?: number;
     height?: number;
     image: File | Blob;
@@ -910,6 +921,9 @@ export function applyImageEdit(
   const body = new FormData();
   body.append("brandId", payload.brandId);
   body.append("prompt", payload.prompt);
+  if (payload.editPreset) {
+    body.append("editPreset", payload.editPreset);
+  }
 
   if (typeof payload.width === "number") {
     body.append("width", String(payload.width));
@@ -932,6 +946,7 @@ export function startImageEditJob(
   payload: {
     brandId: string;
     prompt: string;
+    editPreset?: ImageEditPreset;
     width?: number;
     height?: number;
     image: File | Blob;
@@ -941,6 +956,9 @@ export function startImageEditJob(
   const body = new FormData();
   body.append("brandId", payload.brandId);
   body.append("prompt", payload.prompt);
+  if (payload.editPreset) {
+    body.append("editPreset", payload.editPreset);
+  }
 
   if (typeof payload.width === "number") {
     body.append("width", String(payload.width));
@@ -973,6 +991,10 @@ export function saveEditedCreativeOutput(
     sourceOutputId?: string | null;
     image: File | Blob;
     imageFileName?: string;
+    sourceImage?: File | Blob | null;
+    sourceImageFileName?: string;
+    layerImages?: Array<{ layerId: string; file: File | Blob; fileName?: string }>;
+    editorState?: Record<string, unknown> | null;
   }
 ) {
   const body = new FormData();
@@ -984,6 +1006,18 @@ export function saveEditedCreativeOutput(
   }
 
   body.append("image", payload.image, payload.imageFileName ?? "editor-save.png");
+
+  if (payload.sourceImage) {
+    body.append("sourceImage", payload.sourceImage, payload.sourceImageFileName ?? "editor-source.png");
+  }
+
+  payload.layerImages?.forEach((layerImage) => {
+    body.append(`layerImage:${layerImage.layerId}`, layerImage.file, layerImage.fileName ?? `${layerImage.layerId}.png`);
+  });
+
+  if (payload.editorState) {
+    body.append("editorState", JSON.stringify(payload.editorState));
+  }
 
   return request<EditorSaveOutputResponse>("/api/creative/editor-save", token, {
     method: "POST",
@@ -1701,6 +1735,7 @@ export function getCreativeOutputs(
   token: string,
   filters?: {
     brandId?: string;
+    rootOutputId?: string;
     ids?: string[];
     imageMode?: "full" | "thumbnail" | "metadata";
     reviewState?: CreativeOutputRecord["reviewState"];
@@ -1711,6 +1746,7 @@ export function getCreativeOutputs(
   return request<CreativeOutputRecord[]>(
     withQuery("/api/creative/outputs", {
       brandId: filters?.brandId,
+      rootOutputId: filters?.rootOutputId,
       ids: filters?.ids?.length ? filters.ids.join(",") : undefined,
       imageMode: filters?.imageMode,
       reviewState: filters?.reviewState,

@@ -634,7 +634,7 @@ export default function TemplatesPage() {
                   ) : (
                     <div className="empty-inline-state">
                       <strong>No references yet</strong>
-                      <p>Upload references in Library if this template should carry supporting visuals.</p>
+                      <p>Upload references in Brand Kit media if this template should carry supporting visuals.</p>
                     </div>
                   )}
                 </div>

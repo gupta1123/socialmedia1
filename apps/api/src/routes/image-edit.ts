@@ -16,19 +16,24 @@ import {
   settleWorkspaceCreditReservation
 } from "../lib/credits.js";
 import { assertWorkspaceRole, getActiveBrandProfile, getBrand, getPrimaryWorkspace } from "../lib/repository.js";
-import { createSignedImageUrls, downloadStorageBlob, uploadBufferToStorage } from "../lib/storage.js";
+import { createSignedImageUrls, createSignedUrl, downloadStorageBlob, uploadBufferToStorage } from "../lib/storage.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { createThumbnailFromBufferOrNull } from "../lib/thumbnails.js";
 import { ensurePostVersionForOutput } from "../lib/deliverable-flow.js";
 import { buildStoragePath, deriveAspectRatio, randomId, slugify } from "../lib/utils.js";
+import { buildProtectedImageEditPrompt } from "../lib/image-edit-prompt-protection.js";
 import sharp from "sharp";
 
 const ImageEditFieldsSchema = z.object({
   brandId: z.string().uuid(),
   prompt: z.string().trim().min(3).max(2000),
+  editPreset: z.enum(["v1_low", "v1_high", "v2_low", "v2_medium", "v2_high"]).optional(),
   width: z.coerce.number().int().positive().max(10000).optional(),
   height: z.coerce.number().int().positive().max(10000).optional()
 });
+
+type ImageEditPreset = NonNullable<z.infer<typeof ImageEditFieldsSchema>["editPreset"]>;
+type OpenAiImageQuality = "low" | "medium" | "high";
 
 const AsyncImageEditJobInputSchema = z.object({
   type: z.literal("image-edit"),
@@ -40,8 +45,10 @@ const AsyncImageEditJobInputSchema = z.object({
   sourceFileName: z.string().min(1),
   actorUserId: z.string().nullable(),
   reservationId: z.string().nullable(),
+  editPreset: z.enum(["v1_low", "v1_high", "v2_low", "v2_medium", "v2_high"]).optional(),
   provider: z.string(),
   model: z.string(),
+  quality: z.enum(["low", "medium", "high"]).optional(),
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional()
 });
@@ -132,6 +139,57 @@ function canReplaceSourceOutput(reviewState: EditorSourceOutputRow["review_state
   return reviewState === "pending_review" || reviewState === "needs_revision";
 }
 
+function resolveDefaultImageEditPreset(): ImageEditPreset {
+  if (env.IMAGE_GENERATION_PROVIDER === "fal") {
+    return "v1_high";
+  }
+
+  if (env.IMAGE_GENERATION_PROVIDER === "openai") {
+    if (env.OPENAI_IMAGE_QUALITY === "low") return "v2_low";
+    if (env.OPENAI_IMAGE_QUALITY === "medium") return "v2_medium";
+    return "v2_high";
+  }
+
+  return "v1_high";
+}
+
+function resolveImageEditPreset(editPreset?: ImageEditPreset) {
+  const preset = editPreset ?? resolveDefaultImageEditPreset();
+
+  if (preset === "v1_low") {
+    return {
+      editPreset: preset,
+      provider: "fal" as const,
+      model: env.AI_EDIT_GOOGLE_LOW_MODEL
+    };
+  }
+
+  if (preset === "v1_high") {
+    return {
+      editPreset: preset,
+      provider: "fal" as const,
+      model: env.AI_EDIT_GOOGLE_HIGH_MODEL
+    };
+  }
+
+  const qualityByPreset: Record<Extract<ImageEditPreset, "v2_low" | "v2_medium" | "v2_high">, OpenAiImageQuality> = {
+    v2_low: "low",
+    v2_medium: "medium",
+    v2_high: "high"
+  };
+
+  return {
+    editPreset: preset,
+    provider: "openai" as const,
+    model: env.AI_EDIT_OPENAI_MODEL || env.OPENAI_FINAL_MODEL,
+    quality: qualityByPreset[preset]
+  };
+}
+
+function normalizeImageEditProvider(provider: string): "fal" | "openai" {
+  return provider === "openai" ? "openai" : "fal";
+}
+
 async function getImageDimensions(buffer: Buffer) {
   const metadata = await sharp(buffer, { animated: false }).metadata();
   const width = metadata.width ?? undefined;
@@ -153,15 +211,30 @@ async function applyConfiguredImageEdit(input: {
     contentType: string;
     fileName: string;
   };
+  provider: "fal" | "openai";
+  model: string;
+  quality?: OpenAiImageQuality;
   width?: number;
   height?: number;
 }) {
-  return env.IMAGE_GENERATION_PROVIDER === "openai"
+  const protectedPrompt = buildProtectedImageEditPrompt(input.prompt);
+
+  return input.provider === "openai"
     ? applyOpenAiDirectEdit({
-        ...input,
-        model: env.OPENAI_FINAL_MODEL
+        prompt: protectedPrompt,
+        image: input.image,
+        model: input.model,
+        ...(input.quality ? { quality: input.quality } : {}),
+        ...(typeof input.width === "number" ? { width: input.width } : {}),
+        ...(typeof input.height === "number" ? { height: input.height } : {})
       })
-    : applyFalDirectEdit(input);
+    : applyFalDirectEdit({
+        prompt: protectedPrompt,
+        image: input.image,
+        model: input.model,
+        ...(typeof input.width === "number" ? { width: input.width } : {}),
+        ...(typeof input.height === "number" ? { height: input.height } : {})
+      });
 }
 
 async function reserveImageEditCredits(params: {
@@ -269,6 +342,9 @@ async function processImageEditJobLocally(params: {
         contentType: jobInput.sourceContentType,
         fileName: jobInput.sourceFileName
       },
+      provider: normalizeImageEditProvider(jobInput.provider),
+      model: jobInput.model,
+      ...(jobInput.quality ? { quality: jobInput.quality } : {}),
       ...(typeof jobInput.width === "number" ? { width: jobInput.width } : {}),
       ...(typeof jobInput.height === "number" ? { height: jobInput.height } : {})
     });
@@ -448,13 +524,15 @@ async function composePromptWithGemini(changes: string[]): Promise<PromptCompose
         {
           role: "system",
           content:
-            "You are an expert image edit prompt writer. Combine the provided edit changes into one concise prompt for an image editor. Output only the final prompt text."
+            "You are an expert real-estate image edit prompt writer. Combine the provided edit changes into one concise prompt for an image editor. Preserve building truth, logos, brand marks, RERA/QR/compliance blocks, and existing readable text unless a requested change explicitly names that exact protected item. Do not broaden the edit into redesign, beautification, architecture changes, elevation changes, or brand changes. Output only the final prompt text."
         },
         {
           role: "user",
           content: [
             "Combine these requested image edits into one coherent prompt.",
             "Keep all requested changes.",
+            "Do not infer extra building, elevation, facade, construction, logo, brand, RERA, QR, compliance, or text changes.",
+            "If a requested edit is ambiguous, preserve those protected details exactly.",
             "Do not use numbering, bullets, or markdown.",
             "Do not mention model names or tool names.",
             "Be specific and directly actionable.",
@@ -491,7 +569,7 @@ function composePromptFallback(changes: string[]): PromptComposerResult {
     .map((value) => value.replace(/\s+/g, " "));
 
   const prompt = normalizeComposedPrompt(
-    `Apply all of the following edits in one coherent pass while preserving existing composition, lighting, and style unless explicitly changed: ${normalizedChanges.join(
+    `Apply all of the following edits in one coherent pass while preserving existing composition, lighting, style, building/elevation truth, logos, brand marks, RERA/QR/compliance blocks, and readable text unless a listed edit explicitly changes those exact items: ${normalizedChanges.join(
       "; "
     )}.`
   );
@@ -546,6 +624,98 @@ function safeParseJson(value: string) {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function parseEditorState(value: string | undefined): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = safeParseJson(value);
+  return isRecord(parsed) ? parsed : null;
+}
+
+function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function sanitizeEditorStateForStorage(
+  editorState: Record<string, unknown> | null,
+  sourceStoragePath: string | null,
+  layerStoragePaths: Map<string, string>
+): Record<string, unknown> | null {
+  if (!editorState) {
+    return null;
+  }
+
+  const next = cloneRecord(editorState);
+  const source = isRecord(next.source) ? next.source : {};
+
+  if (sourceStoragePath) {
+    source.storagePath = sourceStoragePath;
+  }
+  delete source.url;
+  next.source = source;
+
+  if (Array.isArray(next.layers)) {
+    next.layers = next.layers.map((layer) => {
+      if (!isRecord(layer)) {
+        return layer;
+      }
+
+      if (layer.type !== "image") {
+        return layer;
+      }
+
+      const layerId = typeof layer.id === "string" ? layer.id : null;
+      const storagePath = layerId ? layerStoragePaths.get(layerId) : null;
+      if (storagePath) {
+        layer.sourceStoragePath = storagePath;
+      }
+      delete layer.src;
+      return layer;
+    });
+  }
+
+  return next;
+}
+
+async function hydrateEditorStateForResponse(metadataJson: Record<string, unknown> | null | undefined) {
+  const metadata = cloneRecord(metadataJson ?? {});
+  const editorState = isRecord(metadata.editorState) ? metadata.editorState : null;
+
+  if (!editorState) {
+    return metadata;
+  }
+
+  const source = isRecord(editorState.source) ? editorState.source : null;
+  if (source && typeof source.storagePath === "string") {
+    const url = await createSignedUrl(source.storagePath).catch(() => null);
+    if (url) {
+      source.url = url;
+    }
+  }
+
+  if (Array.isArray(editorState.layers)) {
+    await Promise.all(
+      editorState.layers.map(async (layer) => {
+        if (!isRecord(layer) || layer.type !== "image" || typeof layer.sourceStoragePath !== "string") {
+          return;
+        }
+
+        const url = await createSignedUrl(layer.sourceStoragePath).catch(() => null);
+        if (url) {
+          layer.src = url;
+        }
+      })
+    );
+  }
+
+  return metadata;
+}
+
 function extractOpenRouterTextContent(payload: unknown): string | null {
   if (!payload || typeof payload !== "object" || !("choices" in payload) || !Array.isArray(payload.choices)) {
     return null;
@@ -591,9 +761,12 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
     let brandIdValue: string | undefined;
     let saveModeValue: string | undefined;
     let sourceOutputIdValue: string | undefined;
+    let editorStateValue: string | undefined;
     let imagePart: UploadedImagePart | null = null;
+    let sourceImagePart: UploadedImagePart | null = null;
+    const layerImageParts = new Map<string, UploadedImagePart>();
 
-    for await (const part of request.parts({ limits: multipartLimits(1) })) {
+    for await (const part of request.parts({ limits: { ...multipartLimits(32), parts: 80, fields: 20 } })) {
       if (part.type === "file") {
         const uploadedPart: UploadedImagePart = {
           filename: part.filename,
@@ -604,6 +777,15 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
         if (part.fieldname === "image") {
           imagePart = uploadedPart;
         }
+        if (part.fieldname === "sourceImage") {
+          sourceImagePart = uploadedPart;
+        }
+        if (part.fieldname.startsWith("layerImage:")) {
+          const layerId = part.fieldname.slice("layerImage:".length);
+          if (layerId) {
+            layerImageParts.set(layerId, uploadedPart);
+          }
+        }
 
         continue;
       }
@@ -611,6 +793,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
       if (part.fieldname === "brandId") brandIdValue = readFieldValue(part.value);
       if (part.fieldname === "saveMode") saveModeValue = readFieldValue(part.value);
       if (part.fieldname === "sourceOutputId") sourceOutputIdValue = readFieldValue(part.value);
+      if (part.fieldname === "editorState") editorStateValue = readFieldValue(part.value);
     }
 
     if (!imagePart) {
@@ -620,6 +803,16 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
     if (!imagePart.mimetype.startsWith("image/")) {
       return reply.badRequest("Saved upload must be an image");
     }
+    if (sourceImagePart && !sourceImagePart.mimetype.startsWith("image/")) {
+      return reply.badRequest("Editor source upload must be an image");
+    }
+    for (const part of layerImageParts.values()) {
+      if (!part.mimetype.startsWith("image/")) {
+        return reply.badRequest("Editor layer uploads must be images");
+      }
+    }
+
+    const parsedEditorState = parseEditorState(editorStateValue);
 
     const parsedFields = EditorSaveFieldsSchema.safeParse({
       brandId: brandIdValue,
@@ -686,6 +879,40 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
             fileName: imagePart.filename || `${slugify(outputId)}.png`
           });
 
+    let editorSourceStoragePath: string | null = null;
+    if (sourceImagePart && parsedEditorState) {
+      editorSourceStoragePath = buildStoragePath({
+        workspaceId: workspace.id,
+        brandId: brand.id,
+        section: "outputs",
+        id: outputId,
+        fileName: `editor-source-${sourceImagePart.filename || `${slugify(outputId)}.png`}`
+      });
+      await uploadBufferToStorage(editorSourceStoragePath, sourceImagePart.buffer, sourceImagePart.mimetype, true);
+    } else if (parsedEditorState && isRecord(parsedEditorState.source) && typeof parsedEditorState.source.storagePath === "string") {
+      editorSourceStoragePath = parsedEditorState.source.storagePath;
+    }
+
+    const editorLayerStoragePaths = new Map<string, string>();
+    for (const [layerId, layerPart] of layerImageParts.entries()) {
+      const layerStoragePath = buildStoragePath({
+        workspaceId: workspace.id,
+        brandId: brand.id,
+        section: "outputs",
+        id: outputId,
+        fileName: `editor-layer-${slugify(layerId)}-${layerPart.filename || "image.png"}`
+      });
+      await uploadBufferToStorage(layerStoragePath, layerPart.buffer, layerPart.mimetype, true);
+      editorLayerStoragePaths.set(layerId, layerStoragePath);
+    }
+
+    const editorStateForStorage = sanitizeEditorStateForStorage(parsedEditorState, editorSourceStoragePath, editorLayerStoragePaths);
+    const editorMetadataJson = {
+      source: "editor-save",
+      saveMode: resolvedMode,
+      ...(editorStateForStorage ? { editorState: editorStateForStorage } : {})
+    };
+
     await uploadBufferToStorage(storagePath, imagePart.buffer, imagePart.mimetype, true);
     const thumbnail = await createThumbnailFromBufferOrNull(storagePath, imagePart.buffer, {
       source: "image_edit_save",
@@ -729,10 +956,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
           reviewed_at: null,
           created_by: viewer.userId,
           edited_from_output_id: sourceOutput.edited_from_output_id,
-          metadata_json: {
-            source: "editor-save",
-            saveMode: "replace"
-          }
+          metadata_json: editorMetadataJson
         })
         .eq("id", sourceOutput.id);
 
@@ -807,10 +1031,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
         review_state: "pending_review",
         latest_feedback_verdict: null,
         reviewed_at: null,
-        metadata_json: {
-          source: "editor-save",
-          saveMode: resolvedMode
-        },
+        metadata_json: editorMetadataJson,
         created_by: viewer.userId
       });
 
@@ -829,7 +1050,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
     const { data: savedOutput, error: savedOutputError } = await supabaseAdmin
       .from("creative_outputs")
       .select(
-        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by"
+        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by, metadata_json"
       )
       .eq("id", outputId)
       .maybeSingle();
@@ -843,6 +1064,9 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
     }
 
     const signedUrls = await createSignedImageUrls(savedOutput.storage_path, savedOutput.thumbnail_storage_path);
+    const metadataJson = await hydrateEditorStateForResponse(
+      (savedOutput as { metadata_json?: Record<string, unknown> | null }).metadata_json ?? null
+    );
 
     return EditorSaveOutputResponseSchema.parse({
       output: CreativeOutputSchema.parse({
@@ -870,6 +1094,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
         latestVerdict: savedOutput.latest_feedback_verdict,
         reviewedAt: savedOutput.reviewed_at,
         createdBy: savedOutput.created_by,
+        metadataJson,
         previewUrl: signedUrls.originalUrl,
         thumbnailUrl: signedUrls.thumbnailUrl,
         originalUrl: signedUrls.originalUrl
@@ -910,6 +1135,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
 
     let brandIdValue: string | undefined;
     let promptValue: string | undefined;
+    let editPresetValue: string | undefined;
     let widthValue: string | undefined;
     let heightValue: string | undefined;
     let imagePart: UploadedImagePart | null = null;
@@ -929,6 +1155,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
 
       if (part.fieldname === "brandId") brandIdValue = readFieldValue(part.value);
       if (part.fieldname === "prompt") promptValue = readFieldValue(part.value);
+      if (part.fieldname === "editPreset") editPresetValue = readFieldValue(part.value);
       if (part.fieldname === "width") widthValue = readFieldValue(part.value);
       if (part.fieldname === "height") heightValue = readFieldValue(part.value);
     }
@@ -944,6 +1171,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
     const parsedFields = ImageEditFieldsSchema.safeParse({
       brandId: brandIdValue,
       prompt: promptValue,
+      editPreset: editPresetValue,
       width: widthValue,
       height: heightValue
     });
@@ -957,6 +1185,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
 
     const endpoint = "/api/creative/image-edit-async";
     let reservationId: string | null = null;
+    const resolvedPreset = resolveImageEditPreset(parsedFields.data.editPreset);
 
     try {
       reservationId = await reserveImageEditCredits({
@@ -998,8 +1227,10 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
         sourceFileName: imagePart.filename || "source.png",
         actorUserId: viewer.userId ?? null,
         reservationId,
-        provider: env.IMAGE_GENERATION_PROVIDER,
-        model: env.IMAGE_GENERATION_PROVIDER === "openai" ? env.OPENAI_FINAL_MODEL : env.AI_EDIT_DIRECT_MODEL,
+        editPreset: resolvedPreset.editPreset,
+        provider: resolvedPreset.provider,
+        model: resolvedPreset.model,
+        ...(resolvedPreset.quality ? { quality: resolvedPreset.quality } : {}),
         ...(typeof parsedFields.data.width === "number" ? { width: parsedFields.data.width } : {}),
         ...(typeof parsedFields.data.height === "number" ? { height: parsedFields.data.height } : {})
       };
@@ -1093,6 +1324,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
 
     let brandIdValue: string | undefined;
     let promptValue: string | undefined;
+    let editPresetValue: string | undefined;
     let widthValue: string | undefined;
     let heightValue: string | undefined;
     let imagePart: UploadedImagePart | null = null;
@@ -1112,6 +1344,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
 
       if (part.fieldname === "brandId") brandIdValue = readFieldValue(part.value);
       if (part.fieldname === "prompt") promptValue = readFieldValue(part.value);
+      if (part.fieldname === "editPreset") editPresetValue = readFieldValue(part.value);
       if (part.fieldname === "width") widthValue = readFieldValue(part.value);
       if (part.fieldname === "height") heightValue = readFieldValue(part.value);
     }
@@ -1127,6 +1360,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
     const parsedFields = ImageEditFieldsSchema.safeParse({
       brandId: brandIdValue,
       prompt: promptValue,
+      editPreset: editPresetValue,
       width: widthValue,
       height: heightValue
     });
@@ -1169,23 +1403,23 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
     }
 
     try {
+      const resolvedPreset = resolveImageEditPreset(parsedFields.data.editPreset);
       const editInput = {
         prompt: parsedFields.data.prompt,
         image: {
           buffer: imagePart.buffer,
           contentType: imagePart.mimetype,
           fileName: imagePart.filename
-        },
+        }
+      };
+      const response = await applyConfiguredImageEdit({
+        ...editInput,
+        provider: resolvedPreset.provider,
+        model: resolvedPreset.model,
+        ...(resolvedPreset.quality ? { quality: resolvedPreset.quality } : {}),
         ...(typeof parsedFields.data.width === "number" ? { width: parsedFields.data.width } : {}),
         ...(typeof parsedFields.data.height === "number" ? { height: parsedFields.data.height } : {})
-      };
-      const response =
-        env.IMAGE_GENERATION_PROVIDER === "openai"
-          ? await applyOpenAiDirectEdit({
-              ...editInput,
-              model: env.OPENAI_FINAL_MODEL
-            })
-          : await applyFalDirectEdit(editInput);
+      });
 
       if (reservationId) {
         await settleWorkspaceCreditReservation({

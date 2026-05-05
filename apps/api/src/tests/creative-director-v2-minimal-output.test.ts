@@ -66,7 +66,7 @@ describe("compilePromptPackageV2 minimal worker output", () => {
   it("normalizes a compact V2 worker response into the compatibility prompt package", async () => {
     process.env.CREATIVE_DIRECTOR_V2_MODE = "agno";
     process.env.CREATIVE_DIRECTOR_V2_TRANSPORT = "server";
-    process.env.AGNO_AGENT_V2_SERVER_URL = "http://agno.local/api/compile-v2";
+    process.env.AGNO_AGENT_V2_SERVER_URL = "http://agno.local/api/compile-v2-sync";
     process.env.IMAGE_GENERATION_PROVIDER = "fal";
     process.env.FAL_FINAL_MODEL = "fal-ai/nano-banana-2/edit";
 
@@ -167,7 +167,7 @@ describe("compilePromptPackageV2 minimal worker output", () => {
   it("does not let inactive logo or font-family text leak from worker prompts", async () => {
     process.env.CREATIVE_DIRECTOR_V2_MODE = "agno";
     process.env.CREATIVE_DIRECTOR_V2_TRANSPORT = "server";
-    process.env.AGNO_AGENT_V2_SERVER_URL = "http://agno.local/api/compile-v2";
+    process.env.AGNO_AGENT_V2_SERVER_URL = "http://agno.local/api/compile-v2-sync";
 
     const fetchMock = vi.fn(async () =>
       new Response(
@@ -260,7 +260,7 @@ describe("compilePromptPackageV2 minimal worker output", () => {
   it("preserves the frontend-selected portrait format even if the compiler returns 1:1", async () => {
     process.env.CREATIVE_DIRECTOR_V2_MODE = "agno";
     process.env.CREATIVE_DIRECTOR_V2_TRANSPORT = "server";
-    process.env.AGNO_AGENT_V2_SERVER_URL = "http://agno.local/api/compile-v2";
+    process.env.AGNO_AGENT_V2_SERVER_URL = "http://agno.local/api/compile-v2-sync";
     process.env.IMAGE_GENERATION_PROVIDER = "openai";
     process.env.OPENAI_FINAL_MODEL = "gpt-image-2";
 

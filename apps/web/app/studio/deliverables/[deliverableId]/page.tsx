@@ -216,8 +216,8 @@ export default function DeliverableDetailPage() {
     }
 
     return {
-      backHref: "/studio/deliverables",
-      backLabel: "Back to post tasks",
+      backHref: "/studio/brand-kit",
+      backLabel: "Back to Brand Kits",
       title: detail.deliverable.title,
       subtitle: detail.deliverable.briefText ?? "Post-task detail",
       badges: (

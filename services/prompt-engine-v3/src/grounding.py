@@ -41,8 +41,16 @@ def deterministic_gate(request: CompileRequest, context: Dict[str, Any]) -> Vali
     missing_assets = [asset_id for asset_id in request.selected_asset_ids if asset_id not in asset_ids]
     if missing_assets:
         errors.append("Requested asset IDs were not found: %s" % ", ".join(missing_assets))
-    if request.include_logo and request.logo_asset_id and request.logo_asset_id not in asset_ids:
-        errors.append("Requested logo_asset_id was not found: %s" % request.logo_asset_id)
+    for asset in assets:
+        if not isinstance(asset, dict) or asset.get("asset_id") not in request.selected_asset_ids:
+            continue
+        if request.project_id and asset.get("project_id") and asset.get("project_id") != request.project_id:
+            errors.append("Requested asset ID belongs to another project: %s" % asset.get("asset_id"))
+    if (request.include_logo or request.logo_asset_id) and request.logo_asset_id and request.logo_asset_id not in asset_ids:
+        # Logo assets are flat production layers. The backend may pass a user-selected logo
+        # that is outside the current project scope but still belongs to the same brand; do
+        # not block prompt planning here. The renderer/backend will resolve the actual asset.
+        warnings.append("Requested logo_asset_id was not present in engine context; it will be used if the backend can resolve it: %s" % request.logo_asset_id)
     if request.include_rera_qr and request.rera_qr_asset_id and request.rera_qr_asset_id not in asset_ids:
         errors.append("Requested rera_qr_asset_id was not found: %s" % request.rera_qr_asset_id)
     template_ids = {str(template.get("template_id")) for template in context.get("visual_templates", []) if isinstance(template, dict)}

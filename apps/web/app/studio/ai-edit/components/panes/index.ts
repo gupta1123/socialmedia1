@@ -1,0 +1,9 @@
+export { UploadsPane } from "./UploadsPane";
+export { AiEditPane } from "./AiEditPane";
+export { AssetsPane } from "./AssetsPane";
+export { TextPane } from "./TextPane";
+export { LayersPane } from "./LayersPane";
+export { PositionPane } from "./PositionPane";
+export { EffectsPane } from "./EffectsPane";
+export { FontPane } from "./FontPane";
+export { ElementsPane } from "./ElementsPane";

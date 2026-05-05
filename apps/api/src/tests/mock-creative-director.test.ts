@@ -215,7 +215,7 @@ describe("compilePromptPackageMock", () => {
     expect(output.finalPrompt).toContain("detailed premium construction-progress image prompt");
     expect(output.finalPrompt).toContain("Treat the actual project construction image as the hero reference");
     expect(output.finalPrompt).toContain("Progress panel treatment:");
-    expect(output.finalPrompt).toContain("Do not repeat one fixed stock headline, date, or progress percentage on every run");
+    expect(output.finalPrompt).toContain("Do not default to one canned update headline, date, or percentage treatment on every run");
     expect(output.compilerTrace.postTypeGuidanceManifest).toMatchObject({
       code: "construction-update",
       usesProjectImage: true

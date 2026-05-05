@@ -8,7 +8,7 @@ What it serves:
 
 What it owns:
 - prompt compilation only
-- static skill pack under `services/socialpython/skills/prompt/v2`
+- service-owned static prompt skill pack
 - three-stage prompt pipeline: analyst -> crafter -> verifier
 
 What it does not own:

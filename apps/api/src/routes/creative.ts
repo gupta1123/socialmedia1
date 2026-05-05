@@ -38,7 +38,7 @@ import {
   getCampaignDeliverablePlan,
   getSeries
 } from "../lib/deliverables-repository.js";
-import { createSignedImageUrls, createSignedPreviewUrl } from "../lib/storage.js";
+import { createSignedImageUrls, createSignedPreviewUrl, createSignedUrl } from "../lib/storage.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { deriveAspectRatio, randomId } from "../lib/utils.js";
 import {
@@ -94,6 +94,7 @@ const GenerateOptionsRequestSchema = z.object({
 });
 const CreativeOutputsQuerySchema = z.object({
   brandId: z.string().uuid().optional(),
+  rootOutputId: z.string().uuid().optional(),
   ids: z
     .string()
     .optional()
@@ -111,6 +112,48 @@ const CreativeOutputsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(48),
   offset: z.coerce.number().int().min(0).default(0)
 });
+
+function isEditorRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function cloneMetadata(value: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value ?? {})) as Record<string, unknown>;
+}
+
+async function hydrateEditorStateForResponse(metadataJson: Record<string, unknown> | null | undefined) {
+  const metadata = cloneMetadata(metadataJson);
+  const editorState = isEditorRecord(metadata.editorState) ? metadata.editorState : null;
+
+  if (!editorState) {
+    return metadata;
+  }
+
+  const source = isEditorRecord(editorState.source) ? editorState.source : null;
+  if (source && typeof source.storagePath === "string") {
+    const url = await createSignedUrl(source.storagePath).catch(() => null);
+    if (url) {
+      source.url = url;
+    }
+  }
+
+  if (Array.isArray(editorState.layers)) {
+    await Promise.all(
+      editorState.layers.map(async (layer) => {
+        if (!isEditorRecord(layer) || layer.type !== "image" || typeof layer.sourceStoragePath !== "string") {
+          return;
+        }
+
+        const url = await createSignedUrl(layer.sourceStoragePath).catch(() => null);
+        if (url) {
+          layer.src = url;
+        }
+      })
+    );
+  }
+
+  return metadata;
+}
 
 async function prepareV2CompileContext(params: {
   parsedBrief: z.infer<typeof CreativeCompileV2RequestSchema>;
@@ -2368,7 +2411,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       return reply.badRequest(parsedQuery.error.issues[0]?.message ?? "Invalid outputs query");
     }
 
-    const { brandId, ids, reviewState, imageMode, limit, offset } = parsedQuery.data;
+    const { brandId, rootOutputId, ids, reviewState, imageMode, limit, offset } = parsedQuery.data;
 
     if (brandId) {
       const brand = await getBrand(brandId);
@@ -2394,6 +2437,10 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
 
     if (ids?.length) {
       query = query.in("id", ids);
+    }
+
+    if (rootOutputId) {
+      query = query.or(`id.eq.${rootOutputId},root_output_id.eq.${rootOutputId}`);
     }
 
     const shouldPage = !ids?.length;
@@ -2580,6 +2627,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
     await assertWorkspaceRole(viewer, output.workspace_id, ["owner", "admin", "editor", "viewer"], request.log);
 
     const signedUrls = await createSignedImageUrls(output.storage_path, output.thumbnail_storage_path);
+    const metadataJson = await hydrateEditorStateForResponse(output.metadata_json ?? {});
 
     return {
       id: output.id,
@@ -2606,7 +2654,7 @@ export async function registerCreativeRoutes(app: FastifyInstance) {
       latestVerdict: output.latest_feedback_verdict,
       reviewedAt: output.reviewed_at,
       createdBy: output.created_by,
-      metadataJson: output.metadata_json ?? {},
+      metadataJson,
       previewUrl: signedUrls.originalUrl,
       thumbnailUrl: signedUrls.thumbnailUrl,
       originalUrl: signedUrls.originalUrl

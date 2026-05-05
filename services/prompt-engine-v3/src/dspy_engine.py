@@ -4,10 +4,11 @@ import json
 import os
 import re
 import ast
+import tempfile
 from typing import Any, Dict, List, Optional
 
-os.environ.setdefault("DSPY_CACHEDIR", "/private/tmp/briefly-social-dspy-cache")
-os.environ.setdefault("LITELLM_CACHE_DIR", "/private/tmp/briefly-social-litellm-cache")
+os.environ.setdefault("DSPY_CACHEDIR", os.path.join(tempfile.gettempdir(), "briefly-social-dspy-cache"))
+os.environ.setdefault("LITELLM_CACHE_DIR", os.path.join(tempfile.gettempdir(), "briefly-social-litellm-cache"))
 
 import dspy
 
@@ -48,7 +49,7 @@ def configure_dspy_once() -> None:
             model,
             api_key=os.getenv("OPENROUTER_API_KEY"),
             temperature=float(os.getenv("PROMPT_ENGINE_V3_LLM_TEMPERATURE", "0.25")),
-            max_tokens=int(os.getenv("PROMPT_ENGINE_V3_LLM_MAX_TOKENS", "8192")),
+            max_tokens=int(os.getenv("PROMPT_ENGINE_V3_LLM_MAX_TOKENS", "12000")),
         )
     else:
         model = os.getenv("PROMPT_ENGINE_V3_LLM_MODEL", os.getenv("OPENAI_MODEL", "gpt-4.1-mini"))
@@ -56,7 +57,7 @@ def configure_dspy_once() -> None:
             model,
             api_key=os.getenv("OPENAI_API_KEY"),
             temperature=float(os.getenv("PROMPT_ENGINE_V3_LLM_TEMPERATURE", "0.25")),
-            max_tokens=int(os.getenv("PROMPT_ENGINE_V3_LLM_MAX_TOKENS", "8192")),
+            max_tokens=int(os.getenv("PROMPT_ENGINE_V3_LLM_MAX_TOKENS", "12000")),
         )
 
     dspy.configure(lm=lm, adapter=JsonObjectAdapter())
@@ -146,7 +147,9 @@ class GenerateVariantPlan(dspy.Signature):
         desc=(
             "JSON object with variants array. Each variant has variant_id, label, "
             "variation_axis, selected_template_id, creative_direction, copy_angle, "
-            "why_distinct. creative_direction values must come from lever_options_json. Do not invent facts."
+            "creative_big_idea, asset_treatment, layout_plan, graphic_devices, copy_strategy, "
+            "and why_distinct. Use lever_options_json as structured vocabulary for creative_direction, "
+            "but invent a fresh free-form visual concept and asset treatment. Do not invent facts."
         )
     )
 
@@ -163,8 +166,9 @@ class GenerateImagePrompt(dspy.Signature):
             "JSON object with prompt, negative_prompt, copy, visible_text_allowed, "
             "creative_direction, text_policy, layout_contract. Preserve asset truth. "
             "Render headline/subheadline/CTA visibly as clean poster typography for preview. "
-            "Keep logo/RERA/contact as exact supplied layer references. No facade signage."
-            "Use notebook-style creative levers from variant_spec_json and do not flatten them into a generic layout."
+            "Keep logo/RERA/contact as exact supplied layer references. No facade signage. "
+            "Use variant_spec_json's free-form concept, asset_treatment, layout_plan, and graphic_devices. "
+            "Do not flatten the output into a generic premium real-estate wrapper."
         )
     )
 
@@ -190,6 +194,23 @@ class RepairCreativeOutput(dspy.Signature):
     )
 
 
+class AuditAndRepairPrompt(dspy.Signature):
+    """Final prompt audit and semantic repair for one provider prompt.
+
+    Preserve the creative idea, but remove contradictions, unsafe facts, wrong post-type language,
+    and asset/template leakage. Return JSON only.
+    """
+
+    audit_payload_json = dspy.InputField()
+    audit_result_json = dspy.OutputField(
+        desc=(
+            "JSON object with status clean|repaired|needs_input|blocked, repaired_provider_prompt, "
+            "repaired_negative_prompt, issues_found array, changes_made array, remaining_risks array, "
+            "facts_used_in_prompt array, facts_used_in_visible_copy array. Do not invent facts."
+        )
+    )
+
+
 class DspyPromptProgram:
     def __init__(self) -> None:
         configure_dspy_once()
@@ -199,6 +220,7 @@ class DspyPromptProgram:
         self.generate_prompt = dspy.ChainOfThought(GenerateImagePrompt)
         self.validate_quality = dspy.ChainOfThought(ValidateCreativeQuality)
         self.repair_output = dspy.ChainOfThought(RepairCreativeOutput)
+        self.audit_prompt = dspy.ChainOfThought(AuditAndRepairPrompt)
 
     def resolve(self, request: CompileRequest, context: Dict[str, Any]) -> Dict[str, Any]:
         pred = self.resolve_intent(
@@ -208,11 +230,11 @@ class DspyPromptProgram:
         )
         return extract_json(getattr(pred, "intent_json", pred))
 
-    def select_hero_asset(self, request: CompileRequest, content_job_id: str, assets: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def select_hero_asset(self, request: CompileRequest, content_job_id: str, assets: List[Dict[str, Any]], asset_selection_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         pred = self.select_asset(
             request_json=json.dumps(_request_for_model(request), ensure_ascii=False),
             content_job_id=content_job_id,
-            asset_candidates_json=json.dumps(assets[:12], ensure_ascii=False),
+            asset_candidates_json=json.dumps(asset_selection_context or assets[:12], ensure_ascii=False),
         )
         return extract_json(getattr(pred, "selection_json", pred))
 
@@ -254,6 +276,12 @@ class DspyPromptProgram:
         )
         return extract_json(getattr(pred, "validation_json", pred))
 
+    def audit_and_repair_prompt(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        pred = self.audit_prompt(
+            audit_payload_json=json.dumps(payload, ensure_ascii=False),
+        )
+        return extract_json(getattr(pred, "audit_result_json", pred))
+
     def repair_variant_output(self, request: CompileRequest, output: Dict[str, Any], validation: Dict[str, Any]) -> Dict[str, Any]:
         pred = self.repair_output(
             request_json=json.dumps(_request_for_model(request), ensure_ascii=False),
@@ -288,6 +316,12 @@ def _request_for_model(request: CompileRequest) -> Dict[str, Any]:
         "rera_qr_asset_id": request.rera_qr_asset_id,
         "contact_items": request.contact_items,
         "options": request.options,
+        "creative_mode": getattr(request, "creative_mode", "auto"),
+        "text_strategy": getattr(request, "text_strategy", "auto"),
+        "novelty_level": getattr(request, "novelty_level", 0.7),
+        "construction_visual_mode": getattr(request, "construction_visual_mode", "auto"),
+        "construction_progress_percent": getattr(request, "construction_progress_percent", 50),
+        "festival_visual_scope": getattr(request, "festival_visual_scope", "auto"),
     }
 
 

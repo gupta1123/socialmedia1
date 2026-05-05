@@ -146,9 +146,12 @@ def _clean_copy(value: Any) -> str:
 
 
 def price_allowed_for_request(brief: str, content_job_id: str) -> bool:
-    if content_job_id == "pricing_ad":
-        return True
-    return bool(re.search(r"\b(price|pricing|offer|emi|starting\s+(?:at|from)|booking amount|cost)\b", brief or "", flags=re.I))
+    # Price rendering is allowed only when the current brief explicitly supplies a
+    # commercial number. Pricing-ad intent alone is not permission to use DB prices
+    # that may be marked verify-before-ad-use. The commercial guard in generator.py
+    # handles approved/override modes.
+    text = brief or ""
+    return bool(re.search(r"(?:₹|rs\.?|inr)\s?[0-9]|[0-9][0-9,.]*\s?(?:lakh|lac|cr|crore)\b", text, flags=re.I))
 
 
 def contains_price_claim(value: Any) -> bool:

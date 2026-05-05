@@ -1,560 +1,757 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, PointerEvent as ReactPointerEvent } from "react";
-import type { BootstrapResponse, CreativeOutputRecord } from "@image-lab/contracts";
+import Link from "next/link";
+import { useEffect, useRef, useState, useMemo, useCallback, type ChangeEvent, type PointerEvent as ReactPointerEvent, type Dispatch, type SetStateAction } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import type { BootstrapResponse, CreativeOutputRecord } from "@image-lab/contracts";
 import {
-  composeImageEditPrompt,
-  getBrandAssetImageUrls,
   getCreativeOutput,
   getCreativeOutputs,
-  getImageEditJobStatus,
   saveEditedCreativeOutput,
-  startImageEditJob
-} from "../../../lib/api";
+} from "./lib/api";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarActions, useRegisterTopbarControls, useRegisterTopbarMeta } from "../topbar-actions-context";
 
-type ToolMode = "select" | "draw";
-type EditorPane = "uploads" | "ai-edit" | "assets" | "templates" | "elements" | "text" | "layers" | "draw";
-type DrawMode = "select" | "pen" | "highlighter";
-type PromptMode = "normal" | "list";
+import { EditorProvider, useEditorContext } from "./EditorContext";
+import { EditorSidebar } from "./components/EditorSidebar";
+import { StageCanvas } from "./components/StageCanvas";
+import { TopFormattingBar } from "./components/TopFormattingBar";
+import { SaveDrawer } from "./components/SaveDrawer";
+import { UploadsPane, AiEditPane, AssetsPane, TextPane, LayersPane, PositionPane, EffectsPane, FontPane, ElementsPane } from "./components/panes";
 
-type EditableImage = {
-  file: File;
-  width: number;
-  height: number;
-};
+import {
+  EDITOR_PANES,
+  createLayerId,
+  isLayerVisible,
+  type CanvasLayer,
+  type CanvasDrawLayer,
+  type EditableImage,
+  type CanvasImageLayer,
+  type LayerDragState,
+  type ResizeHandleType,
+} from "./lib/editor-types";
+import { buildTextLayer, buildShapeLayer } from "./lib/editor-actions";
+import { buildComposedFileName, downloadFile, renderCompositionToFile, fileToDataUrl, loadImageDimensions, loadImageSourceDimensions, createEditableImage, sourceToFile } from "./lib/editor-files";
+import { getStageNormalizedPoint, shouldPushHistory } from "./lib/layer-utils";
+
+
 
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-type CanvasTextLayer = {
-  id: string;
-  type: "text";
-  text: string;
-  x: number;
-  y: number;
-  width: number;
-  rotation: number;
-  fontFamily: string;
-  fontSize: number;
-  fontWeight: "400" | "500" | "600" | "700";
-  color: string;
-  backgroundColor: string;
-  align: "left" | "center" | "right";
-  letterSpacing: number;
-  lineHeight: number;
-  shadow: boolean;
-  opacity: number;
-};
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
 
-type CanvasImageLayer = {
-  id: string;
-  type: "image";
-  name: string;
-  src: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation: number;
-  filter: "none" | "grayscale" | "sepia";
-  opacity: number;
-  reraBlock?: {
-    authorityLabel: string;
-    registrationNumber: string;
-    websiteUrl: string;
-    textColor: string;
-    qrSourceUrl?: string | null;
+function isEditableShortcutTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(target.closest("input, textarea, select, [contenteditable='true'], [contenteditable='']"));
+}
+
+function getStageBaseSize(image: { width: number; height: number }) {
+  const maxWidth = 980;
+  const maxHeight = 680;
+  const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
+  const width = Math.max(240, Math.round(image.width * scale));
+  return {
+    width,
+    height: width * (image.height / image.width)
   };
+}
+
+function buildEditorSaveSignature(image: EditableImage | null, layers: CanvasLayer[]) {
+  if (!image) {
+    return null;
+  }
+
+  return JSON.stringify({
+    image: {
+      name: image.file.name,
+      size: image.file.size,
+      lastModified: image.file.lastModified,
+      width: image.width,
+      height: image.height,
+    },
+    layers,
+  });
+}
+
+type EditorDocumentBuildResult = {
+  editorState: Record<string, unknown>;
+  layerImages: Array<{ layerId: string; file: File; fileName: string }>;
 };
 
-type CanvasShapeLayer = {
-  id: string;
-  type: "shape";
-  shape: "rect" | "circle" | "triangle" | "star" | "badge";
-  label: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation: number;
-  fill: string;
-  opacity: number;
-};
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
-type CanvasDrawLayer = {
-  id: string;
-  type: "draw";
-  label: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation: number;
-  points: Array<{ x: number; y: number }>;
-  color: string;
-  size: number;
-  opacity: number;
-};
+function stripSignedLayerSource(layer: CanvasLayer): Record<string, unknown> {
+  if (layer.type !== "image") {
+    return layer as unknown as Record<string, unknown>;
+  }
 
-type CanvasLayer = CanvasTextLayer | CanvasImageLayer | CanvasShapeLayer | CanvasDrawLayer;
+  const { src: _src, ...rest } = layer;
+  return rest as unknown as Record<string, unknown>;
+}
 
-type EditorSnapshot = {
-  originalImage: EditableImage | null;
-  currentImage: EditableImage | null;
-  canvasLayers: CanvasLayer[];
-  toolMode: ToolMode;
-};
+async function buildEditorDocument(image: EditableImage, layers: CanvasLayer[]): Promise<EditorDocumentBuildResult> {
+  const layerImages: Array<{ layerId: string; file: File; fileName: string }> = [];
+  const serializedLayers: Array<Record<string, unknown>> = [];
 
-type LayerDragState = {
-  id: string;
-  mode: "move" | "resize";
-  pushedHistory: boolean;
-  snapshot: EditorSnapshot;
-  startClientX: number;
-  startClientY: number;
-  startX: number;
-  startY: number;
-  startWidth: number;
-  startHeight: number;
-};
+  for (const layer of layers) {
+    const serialized = stripSignedLayerSource(layer);
 
-const TEXT_FONT_OPTIONS = [
-  { label: "Editorial Serif", value: "Georgia, 'Times New Roman', serif" },
-  { label: "Modern Sans", value: "'Helvetica Neue', Arial, sans-serif" },
-  { label: "Premium Serif", value: "'Cormorant Garamond', Georgia, serif" },
-  { label: "Display Serif", value: "'Playfair Display', Georgia, serif" },
-  { label: "Clean Geometric", value: "Montserrat, 'Helvetica Neue', Arial, sans-serif" }
-];
+    if (layer.type === "image" && (!layer.sourceStoragePath || layer.src.startsWith("data:"))) {
+      const file = await sourceToFile(layer.src, layer.name || `${layer.id}.png`, "image/png");
+      layerImages.push({
+        layerId: layer.id,
+        file,
+        fileName: file.name,
+      });
+    }
 
-const EDITOR_PANES: Array<{ id: EditorPane; label: string; icon: string }> = [
-  { id: "uploads", label: "Uploads", icon: "↑" },
-  { id: "ai-edit", label: "AI Edit", icon: "⌘" },
-  { id: "assets", label: "Assets", icon: "◫" },
-  // Hidden for now. Keep implementations below so these panes can be restored later.
-  // { id: "templates", label: "Templates", icon: "▦" },
-  // { id: "elements", label: "Elements", icon: "⊕" },
-  { id: "text", label: "Text", icon: "T" },
-  { id: "layers", label: "Layers", icon: "☰" }
-  // { id: "draw", label: "Draw", icon: "◇" }
-];
+    serializedLayers.push(serialized);
+  }
 
-const TEMPLATE_PRESETS: Array<{
-  id: "minimal" | "quote" | "sale" | "dark";
-  label: string;
-  className: string;
-  text: string;
-}> = [
-  { id: "minimal", label: "Minimal Bold", className: "is-minimal", text: "THE NEW\nSTANDARD" },
-  { id: "quote", label: "Editorial Quote", className: "is-quote", text: "\"Simplicity.\"" },
-  { id: "sale", label: "Flash Sale", className: "is-sale", text: "SALE" },
-  { id: "dark", label: "Dark Modern", className: "is-dark", text: "FUTURE\nTECH" }
-];
+  return {
+    editorState: {
+      version: 1,
+      source: {
+        fileName: image.file.name,
+        width: image.width,
+        height: image.height,
+      },
+      layers: serializedLayers,
+    },
+    layerImages,
+  };
+}
 
-const DRAW_COLORS = ["#111111", "#7c3aed", "#ef4444", "#10b981", "#f59e0b", "#000000"];
+function restoreLayerFromEditorDocument(value: unknown): CanvasLayer | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.type !== "string") {
+    return null;
+  }
 
-export default function StudioAiEditPage() {
-  const { sessionToken, activeBrand, activeBrandId, activeAssets, bootstrap } = useStudio();
+  if (value.type === "image") {
+    if (typeof value.src !== "string" || !value.src) {
+      return null;
+    }
+    return value as unknown as CanvasLayer;
+  }
+
+  if (value.type === "draw" && Array.isArray(value.points)) {
+    return {
+      ...value,
+      points: value.points.filter((point): point is { x: number; y: number } =>
+        isRecord(point) && typeof point.x === "number" && typeof point.y === "number"
+      ),
+    } as unknown as CanvasLayer;
+  }
+
+  if (value.type === "text" || value.type === "shape") {
+    return value as unknown as CanvasLayer;
+  }
+
+  return null;
+}
+
+async function loadEditorDocumentFromOutput(output: CreativeOutputRecord): Promise<{ image: EditableImage; layers: CanvasLayer[] } | null> {
+  const metadata = output.metadataJson;
+  const editorState = isRecord(metadata) && isRecord(metadata.editorState) ? metadata.editorState : null;
+  const source = editorState && isRecord(editorState.source) ? editorState.source : null;
+  const sourceUrl = source && typeof source.url === "string" ? source.url : null;
+
+  if (!editorState || !source || !sourceUrl) {
+    return null;
+  }
+
+  const fileName = typeof source.fileName === "string" && source.fileName.trim()
+    ? source.fileName
+    : `output-${output.outputIndex + 1}-source.png`;
+  const file = await sourceToFile(sourceUrl, fileName, "image/png");
+  const image = await createEditableImage(file);
+  const layers = Array.isArray(editorState.layers)
+    ? editorState.layers.map(restoreLayerFromEditorDocument).filter((layer): layer is CanvasLayer => Boolean(layer))
+    : [];
+
+  return { image, layers };
+}
+
+function getCreativeOutputRootKey(output: CreativeOutputRecord) {
+  return output.rootOutputId ?? output.id;
+}
+
+function pickLatestCreativeOutput(left: CreativeOutputRecord, right: CreativeOutputRecord) {
+  if (left.isLatestVersion !== right.isLatestVersion) {
+    return right.isLatestVersion ? right : left;
+  }
+
+  if (left.versionNumber !== right.versionNumber) {
+    return right.versionNumber > left.versionNumber ? right : left;
+  }
+
+  return left;
+}
+
+function latestCreativeOutputsByRoot(outputs: CreativeOutputRecord[]) {
+  const latestByRoot = new Map<string, CreativeOutputRecord>();
+
+  for (const output of outputs) {
+    const rootKey = getCreativeOutputRootKey(output);
+    const existing = latestByRoot.get(rootKey);
+    latestByRoot.set(rootKey, existing ? pickLatestCreativeOutput(existing, output) : output);
+  }
+
+  return Array.from(latestByRoot.values());
+}
+
+interface StudioAiEditPageContentProps {
+  sessionToken: string | null;
+  activeBrand: BootstrapResponse["brands"][number] | null;
+  activeBrandId: string | null;
+  activeAssets: BootstrapResponse["brandAssets"];
+  bootstrap: BootstrapResponse | null;
+}
+
+function StudioAiEditPageContent({
+  sessionToken,
+  activeBrand,
+  activeBrandId,
+  activeAssets,
+  bootstrap,
+}: StudioAiEditPageContentProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const outputId = searchParams.get("outputId");
-  const [toolMode, setToolMode] = useState<ToolMode>("select");
-  const [promptMode, setPromptMode] = useState<PromptMode>("normal");
-  const [prompt, setPrompt] = useState("");
-  const [listPromptItems, setListPromptItems] = useState<string[]>([""]);
-  const [isComposingPrompt, setIsComposingPrompt] = useState(false);
-  const [composedPrompt, setComposedPrompt] = useState<string>("");
-  const [composedPromptKey, setComposedPromptKey] = useState<string>("");
-  const [reraNumberText, setReraNumberText] = useState("");
+
+  const editor = useEditorContext();
+  const {
+    state,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+    createSnapshot,
+    pushToHistory,
+    beginTransaction,
+    commitTransaction,
+    clearHistory,
+    rebaseHistorySourceMetadata,
+    addLayer,
+    updateLayer,
+    deleteLayer,
+    setSelectedLayerId,
+    reorderLayer,
+    duplicateLayer,
+  } = editor;
+
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isApplying, setIsApplying] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
-  const [originalImage, setOriginalImage] = useState<EditableImage | null>(null);
-  const [currentImage, setCurrentImage] = useState<EditableImage | null>(null);
-  const [canvasLayers, setCanvasLayers] = useState<CanvasLayer[]>([]);
-  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
-  const [editorHistory, setEditorHistory] = useState<EditorSnapshot[]>([]);
-  const [editorFuture, setEditorFuture] = useState<EditorSnapshot[]>([]);
-  const [activeEditorPane, setActiveEditorPane] = useState<EditorPane>("uploads");
-  const [drawMode, setDrawMode] = useState<DrawMode>("select");
-  const [drawColor, setDrawColor] = useState(DRAW_COLORS[0] ?? "#111111");
-  const [drawSize, setDrawSize] = useState(5);
-  const [currentSourceOutputId, setCurrentSourceOutputId] = useState<string | null>(outputId);
-  const [currentSourceBrandId, setCurrentSourceBrandId] = useState<string | null>(activeBrandId ?? null);
-  const [currentSourceProjectId, setCurrentSourceProjectId] = useState<string | null>(null);
-  const [currentSourceReviewState, setCurrentSourceReviewState] = useState<"pending_review" | "approved" | "needs_revision" | "closed" | null>(null);
   const [isSaveDrawerOpen, setIsSaveDrawerOpen] = useState(false);
-  const [saveMode, setSaveMode] = useState<"new" | "version" | "replace">("new");
   const [isSavingOutput, setIsSavingOutput] = useState(false);
+  const [isAiEditBusy, setIsAiEditBusy] = useState(false);
   const [isGeneratedPostsModalOpen, setIsGeneratedPostsModalOpen] = useState(false);
-  const [stageZoom, setStageZoom] = useState(1);
+  const [lastSavedOutput, setLastSavedOutput] = useState<CreativeOutputRecord | null>(null);
+  const [lastSavedEditorSignature, setLastSavedEditorSignature] = useState<string | null>(null);
+  const [versionHistory, setVersionHistory] = useState<CreativeOutputRecord[]>([]);
+  const [isLoadingVersionHistory, setIsLoadingVersionHistory] = useState(false);
+  const [loadingOutputId, setLoadingOutputId] = useState<string | null>(null);
+  const [isCompareOpen, setIsCompareOpen] = useState(false);
+  const [compareBeforeId, setCompareBeforeId] = useState<string | null>(null);
+  const [compareAfterId, setCompareAfterId] = useState<string | null>(null);
+  const [compareSliderValue, setCompareSliderValue] = useState(50);
+  const [compareOutputCache, setCompareOutputCache] = useState<Record<string, CreativeOutputRecord>>({});
+  const [loadingCompareOutputIds, setLoadingCompareOutputIds] = useState<Record<string, boolean>>({});
+
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [editorRecentOutputs, setEditorRecentOutputs] = useState<CreativeOutputRecord[]>([]);
+  const [isLoadingRecentOutputs, setIsLoadingRecentOutputs] = useState(true);
+  const [layerDrag, setLayerDrag] = useState<LayerDragState | null>(null);
+  const [drawPath, setDrawPath] = useState<CanvasDrawLayer | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const layerImageInputRef = useRef<HTMLInputElement>(null);
   const stageShellRef = useRef<HTMLDivElement>(null);
   const stageFrameRef = useRef<HTMLDivElement>(null);
+  const loadedOutputIdRef = useRef<string | null>(null);
+  const lastStagePointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const layerDragRef = useRef<LayerDragState | null>(null);
   const drawPathRef = useRef<CanvasDrawLayer | null>(null);
-  const loadedOutputIdRef = useRef<string | null>(null);
 
-  const currentImageUrl = useObjectUrl(currentImage?.file ?? null);
-  const stageWidth = useMemo(() => {
-    if (!currentImage) return null;
-
-    const maxWidth = 980;
-    const maxHeight = 680;
-    const scale = Math.min(maxWidth / currentImage.width, maxHeight / currentImage.height, 1);
-    return Math.max(240, Math.round(currentImage.width * scale));
-  }, [currentImage]);
-  const stageBusyMessage = isApplying ? "Applying AI edit..." : null;
-  const canReset = Boolean(originalImage && currentImage && (originalImage.file !== currentImage.file || canvasLayers.length > 0));
-  const dimensionsLabel = currentImage ? `${currentImage.width} x ${currentImage.height}` : "No image loaded";
-  const selectedLayer = canvasLayers.find((layer) => layer.id === selectedLayerId) ?? null;
-  const logoAssets = useMemo(
-    () => activeAssets.filter((asset) => asset.kind === "logo"),
-    [activeAssets]
-  );
-  const reraQrAssetById = useMemo(
-    () => new Map(activeAssets.filter((asset) => asset.kind === "rera_qr").map((asset) => [asset.id, asset])),
-    [activeAssets]
-  );
   const workspaceComplianceSettings = bootstrap?.workspaceComplianceSettings ?? {
     workspaceId: bootstrap?.workspace?.id ?? "",
     reraAuthorityLabel: "MahaRERA",
     reraWebsiteUrl: "https://maharera.maharashtra.gov.in",
     reraTextColor: "#111111",
-    updatedAt: null
+    updatedAt: null,
   };
-  const [reraBlockTextColor, setReraBlockTextColor] = useState(() => normalizeHexColor(workspaceComplianceSettings.reraTextColor, "#111111"));
-  const reraComplianceOptions = useMemo(() => {
-    const registrations = bootstrap?.projectReraRegistrations ?? [];
-    const scoped = currentSourceProjectId
-      ? registrations.filter((registration) => registration.projectId === currentSourceProjectId)
-      : registrations;
-    const ordered = [...scoped].sort((left, right) => Number(right.isDefault) - Number(left.isDefault));
 
-    return ordered
-      .map((registration) => ({
-        registration,
-        qrAsset: registration.qrAssetId ? reraQrAssetById.get(registration.qrAssetId) ?? null : null
-      }))
-      .filter((option) => option.registration.registrationNumber || option.qrAsset);
-  }, [bootstrap?.projectReraRegistrations, currentSourceProjectId, reraQrAssetById]);
-  const selectedReraBlockLayer =
-    selectedLayer?.type === "image" && selectedLayer.reraBlock
-      ? selectedLayer
-      : null;
-
-  useEffect(() => {
-    setReraBlockTextColor(normalizeHexColor(workspaceComplianceSettings.reraTextColor, "#111111"));
-  }, [workspaceComplianceSettings.reraTextColor]);
-
-  useEffect(() => {
-    if (selectedReraBlockLayer?.reraBlock?.textColor) {
-      setReraBlockTextColor(normalizeHexColor(selectedReraBlockLayer.reraBlock.textColor, "#111111"));
-    }
-  }, [selectedReraBlockLayer?.id, selectedReraBlockLayer?.reraBlock?.textColor]);
-
-  useEffect(() => {
-    setStageZoom(1);
-  }, [currentImage?.file]);
-
-  useEffect(() => {
-    const shell = stageShellRef.current;
-    if (!shell) {
-      return;
-    }
-
-    const handleWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey && !event.metaKey) {
-        return;
-      }
-
-      event.preventDefault();
-      const delta = event.deltaY > 0 ? -0.08 : 0.08;
-      setStageZoom((current) => clamp(Number((current + delta).toFixed(2)), 0.4, 3));
-    };
-
-    shell.addEventListener("wheel", handleWheel, { passive: false });
-    return () => shell.removeEventListener("wheel", handleWheel);
-  }, [currentImage?.file]);
-
-  useEffect(() => {
-    if (!sessionToken || !activeBrandId) {
-      setEditorRecentOutputs([]);
-      return;
-    }
-
-    let cancelled = false;
-    const token = sessionToken;
-    const brandId = activeBrandId;
-
-    async function loadRecentOutputs() {
-      try {
-        const outputs = await getCreativeOutputs(token, {
-          brandId,
-          imageMode: "thumbnail",
-          limit: 24
-        });
-
-        if (!cancelled) {
-          setEditorRecentOutputs(outputs);
-        }
-      } catch {
-        if (!cancelled) {
-          setEditorRecentOutputs([]);
-        }
-      }
-    }
-
-    void loadRecentOutputs();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeBrandId, sessionToken]);
-
-  const generatedOutputAssets = useMemo(
-    () => editorRecentOutputs.filter((output) => (output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl) && output.id !== outputId),
-    [editorRecentOutputs, outputId]
+  const stageBusyMessage = editor.state.currentImage ? null : null;
+  const dimensionsLabel = state.currentImage ? `${state.currentImage.width} x ${state.currentImage.height}` : "No image loaded";
+  const currentEditorSignature = useMemo(
+    () => buildEditorSaveSignature(state.currentImage, state.canvasLayers),
+    [state.currentImage, state.canvasLayers]
   );
-  const recentGeneratedOutputAssets = useMemo(() => generatedOutputAssets.slice(0, 5), [generatedOutputAssets]);
-  const hasCanvasLayers = canvasLayers.length > 0;
-  const canUndo = useMemo(() => editorHistory.length > 0, [editorHistory]);
-  const canRedo = useMemo(() => editorFuture.length > 0, [editorFuture]);
-  const canReplaceCurrentSource = currentSourceReviewState === "pending_review" || currentSourceReviewState === "needs_revision";
-  const displayStageWidth = stageWidth ? Math.round(stageWidth * stageZoom) : null;
-  const stageScale = currentImage && displayStageWidth ? displayStageWidth / currentImage.width : 1;
-  const promptTrimmed = prompt.trim();
-  const normalizedListPromptItems = useMemo(
-    () => listPromptItems.map((item) => item.trim()).filter((item) => item.length > 0),
-    [listPromptItems]
+  const hasUnsavedChanges = Boolean(state.currentImage && currentEditorSignature !== lastSavedEditorSignature);
+  const savedVersions = useMemo(() => {
+    const outputs = versionHistory.length ? versionHistory : lastSavedOutput ? [lastSavedOutput] : [];
+    return [...outputs].sort((left, right) => right.versionNumber - left.versionNumber);
+  }, [lastSavedOutput, versionHistory]);
+  const compareBeforeOutput = compareBeforeId
+    ? compareOutputCache[compareBeforeId] ?? savedVersions.find((output) => output.id === compareBeforeId) ?? null
+    : null;
+  const compareAfterOutput = compareAfterId
+    ? compareOutputCache[compareAfterId] ?? savedVersions.find((output) => output.id === compareAfterId) ?? null
+    : null;
+  const isCompareLoading = Boolean(
+    (compareBeforeId && loadingCompareOutputIds[compareBeforeId]) ||
+    (compareAfterId && loadingCompareOutputIds[compareAfterId])
   );
-  const listPromptKey = useMemo(() => normalizedListPromptItems.join("\n"), [normalizedListPromptItems]);
-  const hasPromptInput = promptMode === "normal" ? promptTrimmed.length > 0 : normalizedListPromptItems.length > 0;
-  const hasFreshComposedPrompt = promptMode === "list" && composedPromptKey === listPromptKey && composedPrompt.trim().length > 0;
-  const canApplyDirectEdit = Boolean(currentImage && hasPromptInput) && !isApplying && !isComposingPrompt;
-  const primaryActionLabel = isComposingPrompt ? "Preparing edit..." : isApplying ? "Applying..." : "Apply AI edit";
+  const isHistoryLocked = isSavingOutput || isAiEditBusy || Boolean(loadingOutputId);
 
-  const topbarActions = useMemo(
-    () => (
-      <>
-        {currentImage ? (
-          <>
-            <button className="button button-ghost" onClick={() => fileInputRef.current?.click()} type="button">
-              Upload image
-            </button>
-            <button
-              className="button button-ghost"
-              disabled={!canUndo}
-              onClick={handleUndo}
-              type="button"
-            >
-              Undo
-            </button>
-            <button
-              className="button button-ghost"
-              disabled={!canRedo}
-              onClick={handleRedo}
-              type="button"
-            >
-              Redo
-            </button>
-            <button
-              className="button button-ghost"
-              disabled={isSavingOutput || isApplying}
-              onClick={openSaveDrawer}
-              type="button"
-            >
-              {isSavingOutput ? "Saving..." : "Save"}
-            </button>
-            <button className="button button-primary" onClick={() => void handleDownloadComposition()} type="button">
-              Download current
-            </button>
-          </>
-        ) : (
-          <button className="button button-primary" onClick={() => fileInputRef.current?.click()} type="button">
+  const topbarActions = useMemo(() => (
+    <>
+      {state.currentImage ? (
+        <>
+          <Link className="button button-ghost" href="/studio/gallery">
+            View Gallery
+          </Link>
+          <button className="button button-ghost" onClick={() => fileInputRef.current?.click()} type="button">
             Upload image
           </button>
-        )}
-      </>
-    ),
-    [currentImage, isSavingOutput, isApplying, isSharing, canUndo, canRedo]
-  );
+          <button className="button button-ghost" disabled={!canUndo || isHistoryLocked} onClick={undo} type="button">
+            Undo
+          </button>
+          <button className="button button-ghost" disabled={!canRedo || isHistoryLocked} onClick={redo} type="button">
+            Redo
+          </button>
+          <button className="button button-ghost" disabled={isSavingOutput || !hasUnsavedChanges} onClick={() => setIsSaveDrawerOpen(true)} type="button">
+            {isSavingOutput
+              ? "Saving..."
+              : !hasUnsavedChanges && lastSavedOutput
+                ? `Saved v${lastSavedOutput.versionNumber}`
+                : "Save changes"}
+          </button>
+          <button className="button button-primary" onClick={() => void handleDownloadComposition()} type="button">
+            Download current
+          </button>
+        </>
+      ) : (
+        <button className="button button-primary" onClick={() => fileInputRef.current?.click()} type="button">
+          Upload image
+        </button>
+      )}
+    </>
+  ), [state.currentImage, state.canvasLayers, isSavingOutput, hasUnsavedChanges, lastSavedOutput, canUndo, canRedo, isHistoryLocked, undo, redo]);
 
-  const topbarMeta = useMemo(
-    () => ({
-      badges: activeBrand ? <span className="pill pill-sm">{activeBrand.name}</span> : null
-    }),
-    [activeBrand]
-  );
+  const topbarMeta = useMemo(() => ({
+    title: state.currentImage ? state.currentImage.file.name : "Editor",
+    ...(state.currentImage ? { backLabel: "Editor", backHref: "/studio/ai-edit" } : {}),
+    badges: activeBrand ? <span className="pill pill-sm">{activeBrand.name}</span> : null,
+  }), [activeBrand, state.currentImage]);
 
-  const topbarControls = useMemo(
-    () => (
-      <>
+  const topbarControls = useMemo(() => (
+    <>
+      {state.currentImage ? (
+        <EditorTopbarSaveState
+          hasUnsavedChanges={hasUnsavedChanges}
+          isSaving={isSavingOutput}
+          lastSavedOutput={lastSavedOutput}
+          onSaveChanges={() => setIsSaveDrawerOpen(true)}
+        />
+      ) : null}
+      {state.currentImage ? (
         <button
-          aria-label="Undo"
-          className="topbar-icon-btn"
-          disabled={!canUndo}
-          onClick={handleUndo}
-          title="Undo"
+          aria-label="Compare saved versions"
+          className={`topbar-icon-btn ai-edit-compare-button ${isCompareOpen ? "is-active" : ""}`}
+          disabled={savedVersions.length < 2}
+          onClick={handleOpenCompare}
+          title={savedVersions.length < 2 ? "Save another version to compare" : "Compare versions"}
           type="button"
         >
           <svg fill="none" height="16" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 7v6h6" />
-            <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <path d="M12 5v14" />
+            <path d="M7 9h2" />
+            <path d="M15 15h2" />
           </svg>
         </button>
-        <button
-          aria-label="Redo"
-          className="topbar-icon-btn"
-          disabled={!canRedo}
-          onClick={handleRedo}
-          title="Redo"
-          type="button"
-        >
-          <svg fill="none" height="16" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 7v6h-6" />
-            <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />
-          </svg>
-        </button>
-      </>
-    ),
-    [canUndo, canRedo]
-  );
+      ) : null}
+      <button aria-label="Undo" className="topbar-icon-btn" disabled={!canUndo || isHistoryLocked} onClick={undo} title="Undo" type="button">
+        <svg fill="none" height="16" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 7v6h6" />
+          <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+        </svg>
+      </button>
+      <button aria-label="Redo" className="topbar-icon-btn" disabled={!canRedo || isHistoryLocked} onClick={redo} title="Redo" type="button">
+        <svg fill="none" height="16" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 7v6h-6" />
+          <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />
+        </svg>
+      </button>
+    </>
+  ), [canUndo, canRedo, hasUnsavedChanges, isCompareOpen, isSavingOutput, isHistoryLocked, lastSavedOutput, redo, savedVersions.length, state.currentImage, undo]);
 
   useRegisterTopbarActions(topbarActions);
   useRegisterTopbarControls(topbarControls);
   useRegisterTopbarMeta(topbarMeta);
 
+  // Load recent outputs
   useEffect(() => {
-    if (!sessionToken || !outputId) {
-      return;
-    }
-
-    if (!outputId) {
-      return;
-    }
-    const token: string = sessionToken;
-    const nextOutputId: string = outputId;
-
-    if (loadedOutputIdRef.current === nextOutputId) {
+    if (!sessionToken || !activeBrandId) {
+      setEditorRecentOutputs([]);
+      setIsLoadingRecentOutputs(false);
       return;
     }
 
     let cancelled = false;
+    setIsLoadingRecentOutputs(true);
+    getCreativeOutputs(sessionToken, { brandId: activeBrandId, imageMode: "thumbnail", limit: 120 })
+      .then((outputs) => {
+        if (!cancelled) {
+          setEditorRecentOutputs(latestCreativeOutputsByRoot(outputs));
+          setIsLoadingRecentOutputs(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEditorRecentOutputs([]);
+          setIsLoadingRecentOutputs(false);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [activeBrandId, sessionToken]);
+
+  useEffect(() => {
+    if (!lastSavedOutput || lastSavedOutput.brandId !== activeBrandId) {
+      return;
+    }
+
+    setEditorRecentOutputs((previous) => latestCreativeOutputsByRoot([lastSavedOutput, ...previous]));
+  }, [activeBrandId, lastSavedOutput]);
+
+  useEffect(() => {
+    if (!state.currentSourceOutputId) {
+      setLastSavedOutput(null);
+      setLastSavedEditorSignature(null);
+      setVersionHistory([]);
+      return;
+    }
+
+    if (!sessionToken) return;
+    if (lastSavedOutput?.id === state.currentSourceOutputId) return;
+
+    let cancelled = false;
+    getCreativeOutput(sessionToken, state.currentSourceOutputId)
+      .then((output) => {
+        if (cancelled) return;
+        setLastSavedOutput(output);
+        setLastSavedEditorSignature(currentEditorSignature);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLastSavedOutput(null);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [currentEditorSignature, lastSavedOutput?.id, sessionToken, state.currentSourceOutputId]);
+
+  useEffect(() => {
+    if (!sessionToken || !lastSavedOutput) {
+      setVersionHistory([]);
+      setIsLoadingVersionHistory(false);
+      return;
+    }
+
+    const rootOutputId = lastSavedOutput.rootOutputId ?? lastSavedOutput.id;
+    let cancelled = false;
+    setIsLoadingVersionHistory(true);
+    getCreativeOutputs(sessionToken, {
+      brandId: lastSavedOutput.brandId,
+      rootOutputId,
+      imageMode: "thumbnail",
+      limit: 50,
+    })
+      .then((outputs) => {
+        if (cancelled) return;
+        setVersionHistory([...outputs].sort((left, right) => right.versionNumber - left.versionNumber));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setVersionHistory(lastSavedOutput ? [lastSavedOutput] : []);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingVersionHistory(false);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [lastSavedOutput, sessionToken]);
+
+  useEffect(() => {
+    if (!lastSavedOutput) return;
+
+    setCompareOutputCache((previous) => ({
+      ...previous,
+      [lastSavedOutput.id]: {
+        ...(previous[lastSavedOutput.id] ?? {}),
+        ...lastSavedOutput,
+      },
+    }));
+  }, [lastSavedOutput]);
+
+  const ensureCompareOutput = useCallback(async (compareOutputId: string) => {
+    if (!sessionToken) return;
+    if (compareOutputCache[compareOutputId]?.originalUrl || loadingCompareOutputIds[compareOutputId]) {
+      return;
+    }
+
+    setLoadingCompareOutputIds((previous) => ({ ...previous, [compareOutputId]: true }));
+    try {
+      const output = await getCreativeOutput(sessionToken, compareOutputId);
+      setCompareOutputCache((previous) => ({
+        ...previous,
+        [compareOutputId]: output,
+      }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to load this version for comparison.");
+    } finally {
+      setLoadingCompareOutputIds((previous) => {
+        const next = { ...previous };
+        delete next[compareOutputId];
+        return next;
+      });
+    }
+  }, [compareOutputCache, loadingCompareOutputIds, sessionToken]);
+
+  useEffect(() => {
+    if (!isCompareOpen) return;
+
+    if (compareBeforeId) {
+      void ensureCompareOutput(compareBeforeId);
+    }
+    if (compareAfterId) {
+      void ensureCompareOutput(compareAfterId);
+    }
+  }, [compareAfterId, compareBeforeId, ensureCompareOutput, isCompareOpen]);
+
+  // Load output from URL
+  useEffect(() => {
+    if (!sessionToken || !outputId) return;
+    if (loadedOutputIdRef.current === outputId) return;
+
+    let cancelled = false;
+    const token = sessionToken;
+    const nextOutputId = outputId;
 
     async function loadOutputIntoEditor() {
       setError(null);
+      setLoadingOutputId(nextOutputId);
       setStatus("Loading generated image into the editor...");
-
       try {
         const output = await getCreativeOutput(token, nextOutputId);
-        const sourceUrl = output.originalUrl ?? output.previewUrl;
-        if (!sourceUrl) {
-          throw new Error("This output does not have an editable preview image.");
+        const editableDocument = await loadEditorDocumentFromOutput(output);
+        let image: EditableImage;
+        let layers: CanvasLayer[];
+
+        if (editableDocument) {
+          image = editableDocument.image;
+          layers = editableDocument.layers;
+        } else {
+          const sourceUrl = output.originalUrl ?? output.previewUrl;
+          if (!sourceUrl) throw new Error("This output does not have an editable preview image.");
+
+          const file = await sourceToFile(sourceUrl, `output-${output.outputIndex + 1}.png`, "image/png");
+          image = await createEditableImage(file);
+          layers = [];
         }
 
-        const file = await sourceToFile(
-          sourceUrl,
-          `output-${output.outputIndex + 1}.png`,
-          "image/png"
-        );
-        const image = await createEditableImage(file);
-
-        if (cancelled) {
-          return;
-        }
+        if (cancelled) return;
 
         loadedOutputIdRef.current = nextOutputId;
-        setOriginalImage(image);
-        setCurrentImage(image);
-        setCurrentSourceOutputId(output.id);
-        setCurrentSourceBrandId(output.brandId);
-        setCurrentSourceProjectId(output.projectId);
-        setCurrentSourceReviewState(output.reviewState);
-        setCanvasLayers([]);
-        setSelectedLayerId(null);
-        setEditorHistory([]);
-        setEditorFuture([]);
-        setToolMode("select");
-        setActiveEditorPane("ai-edit");
-        setStatus("Generated image loaded. You can now edit it.");
+        editor.setOriginalImage(image);
+        editor.setCurrentImage(image);
+        editor.setCurrentSourceOutputId(output.id);
+        editor.setCurrentSourceBrandId(output.brandId);
+        editor.setCurrentSourceProjectId(output.projectId);
+        editor.setCurrentSourceReviewState(output.reviewState);
+        editor.setCanvasLayers(layers);
+        editor.setSelectedLayerId(null);
+        editor.setToolMode("select");
+        editor.setActiveEditorPane(layers.length > 0 ? "layers" : "ai-edit");
+        clearHistory();
+        setLastSavedOutput(output);
+        setLastSavedEditorSignature(buildEditorSaveSignature(image, layers));
+        setStatus(editableDocument ? "Editable design restored. Layers are available." : "Generated image loaded. You can now edit it.");
       } catch (cause) {
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : "Unable to load this generated image.");
+          setStatus(null);
         }
-
-        setError(cause instanceof Error ? cause.message : "Unable to load this generated image.");
-        setStatus(null);
+      } finally {
+        if (!cancelled) {
+          setLoadingOutputId((value) => value === nextOutputId ? null : value);
+        }
       }
     }
 
     void loadOutputIntoEditor();
+    return () => { cancelled = true; };
+  }, [clearHistory, outputId, sessionToken]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [outputId, sessionToken]);
-
+  // Keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (isEditableShortcutTarget(event.target)) {
+        return;
+      }
+
       const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
       const modifier = isMac ? event.metaKey : event.ctrlKey;
+      const key = event.key.toLowerCase();
 
-      if (modifier && event.key === "z" && !event.shiftKey) {
+      if (modifier && key === "z" && !event.shiftKey) {
         event.preventDefault();
-        if (canUndo) handleUndo();
+        if (event.repeat) return;
+        if (canUndo && !isHistoryLocked) undo();
         return;
       }
-
-      if (modifier && event.key === "z" && event.shiftKey) {
+      if (modifier && ((key === "z" && event.shiftKey) || key === "y")) {
         event.preventDefault();
-        if (canRedo) handleRedo();
+        if (event.repeat) return;
+        if (canRedo && !isHistoryLocked) redo();
         return;
       }
-
       if (event.key === "Delete" || event.key === "Backspace") {
-        if (selectedLayerId && document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA") {
+        if (state.selectedLayerId && !isHistoryLocked) {
           event.preventDefault();
-          handleDeleteSelectedLayer();
+          pushToHistory();
+          deleteLayer(state.selectedLayerId);
+          setStatus("Layer removed.");
         }
       }
     }
-
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [canUndo, canRedo, selectedLayerId]);
+  }, [canUndo, canRedo, isHistoryLocked, state.selectedLayerId, undo, redo, pushToHistory, deleteLayer]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !e.repeat && document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA") {
+        e.preventDefault();
+        setIsSpacePressed(true);
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        e.preventDefault();
+        setIsSpacePressed(false);
+        setIsPanning(false);
+      }
+    };
+    const clearPanState = () => {
+      setIsSpacePressed(false);
+      setIsPanning(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", clearPanState);
+    document.addEventListener("visibilitychange", clearPanState);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", clearPanState);
+      document.removeEventListener("visibilitychange", clearPanState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!state.currentImage) return;
+    fitStageToView(false);
+  }, [state.currentImage?.file]);
+
+  // Zoom via wheel — zoom toward cursor position
+  useEffect(() => {
+    const handleWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const shell = stageShellRef.current;
+      if (!shell || !shell.contains(event.target as Node)) return;
+
+      rememberStagePointer(event.clientX, event.clientY);
+      const delta = event.deltaY > 0 ? -0.05 : 0.05;
+      setStageZoomAroundPoint(Number((state.stageZoom + delta).toFixed(2)), {
+        clientX: event.clientX,
+        clientY: event.clientY
+      });
+    };
+    document.addEventListener("wheel", handleWheel, { passive: false });
+    return () => document.removeEventListener("wheel", handleWheel);
+  }, [state.stageZoom]);
+
+  useEffect(() => {
+    if (!status && !error) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      if (error) {
+        setError(null);
+        return;
+      }
+
+      setStatus(null);
+    }, error ? 6000 : 2600);
+
+    return () => window.clearTimeout(timeout);
+  }, [status, error]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges || isSavingOutput) {
+      return;
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasUnsavedChanges, isSavingOutput]);
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
     event.target.value = "";
-
-    if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
+    if (!file || !file.type.startsWith("image/")) {
       setError("Upload a valid image file.");
       return;
     }
-
     try {
       const image = await createEditableImage(file);
-      pushToEditorHistory();
-      setOriginalImage(image);
-      setCurrentImage(image);
-      setCurrentSourceOutputId(null);
-      setCurrentSourceBrandId(activeBrandId ?? null);
-      setCurrentSourceProjectId(null);
-      setCurrentSourceReviewState(null);
-      setToolMode("select");
-      setCanvasLayers([]);
-      setSelectedLayerId(null);
+      pushToHistory();
+      editor.setOriginalImage(image);
+      editor.setCurrentImage(image);
+      editor.setCurrentSourceOutputId(null);
+      editor.setCurrentSourceBrandId(activeBrandId ?? null);
+      editor.setCurrentSourceProjectId(null);
+      editor.setCurrentSourceReviewState(null);
+      editor.setCanvasLayers([]);
+      editor.setSelectedLayerId(null);
+      setLastSavedOutput(null);
+      setLastSavedEditorSignature(null);
+      setVersionHistory([]);
       setStatus("Source image loaded. Describe the edit and apply it directly.");
       setError(null);
     } catch (cause) {
@@ -562,198 +759,18 @@ export default function StudioAiEditPage() {
     }
   }
 
-  function handleResetImage() {
-    if (!originalImage) return;
-
-    pushToEditorHistory();
-    setCurrentImage(originalImage);
-    setToolMode("select");
-    setCanvasLayers([]);
-    setSelectedLayerId(null);
-    setStatus("Reset to original image. Describe the next edit and apply it directly.");
-    setError(null);
-  }
-
-  function handleListPromptItemChange(index: number, value: string) {
-    setListPromptItems((previous) => previous.map((entry, itemIndex) => (itemIndex === index ? value : entry)));
-  }
-
-  function handleAddListPromptItem() {
-    setListPromptItems((previous) => [...previous, ""]);
-  }
-
-  function handleRemoveListPromptItem(index: number) {
-    setListPromptItems((previous) => {
-      if (previous.length <= 1) {
-        return [""];
-      }
-
-      return previous.filter((_, itemIndex) => itemIndex !== index);
-    });
-  }
-
-  async function resolveActivePrompt() {
-    if (promptMode === "normal") {
-      if (!promptTrimmed) {
-        setError("Describe the edit before applying AI changes.");
-        return null;
-      }
-
-      return promptTrimmed;
-    }
-
-    if (normalizedListPromptItems.length === 0) {
-      setError("Add at least one edit item in list mode.");
-      return null;
-    }
-
-    if (!sessionToken) {
-      setError("Your session is missing. Refresh the page and try again.");
-      return null;
-    }
-
-    if (!activeBrandId) {
-      setError("Select an active brand before composing list-mode edits.");
-      return null;
-    }
-
-    if (hasFreshComposedPrompt) {
-      return composedPrompt.trim();
-    }
-
-    setIsComposingPrompt(true);
-    setError(null);
-      setStatus("Preparing your list changes for AI edit...");
-
-    try {
-      const composed = await composeImageEditPrompt(sessionToken, {
-        brandId: activeBrandId,
-        changes: normalizedListPromptItems
-      });
-      const nextPrompt = composed.prompt.trim();
-
-      setComposedPrompt(nextPrompt);
-      setComposedPromptKey(listPromptKey);
-      return nextPrompt;
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to compose list-mode prompt.");
-      setStatus(null);
-      return null;
-    } finally {
-      setIsComposingPrompt(false);
-    }
-  }
-
-  function handleAddTextLayer(preset: "heading" | "subheading" | "body" = "heading") {
-    if (!currentImage) {
-      setError("Upload a source image before adding text.");
-      return;
-    }
-
-    const presetConfig = {
-      heading: {
-        text: "Add heading",
-        fontSize: Math.max(44, Math.round(currentImage.width * 0.075)),
-        fontWeight: "700" as const,
-        width: 0.58
-      },
-      subheading: {
-        text: "Add subheading",
-        fontSize: Math.max(28, Math.round(currentImage.width * 0.043)),
-        fontWeight: "600" as const,
-        width: 0.5
-      },
-      body: {
-        text: "Add body text",
-        fontSize: Math.max(18, Math.round(currentImage.width * 0.026)),
-        fontWeight: "400" as const,
-        width: 0.44
-      }
-    }[preset];
-
-    const nextLayer: CanvasTextLayer = {
-      id: createLayerId("text"),
-      type: "text",
-      text: presetConfig.text,
-      x: 0.1,
-      y: 0.12,
-      width: presetConfig.width,
-      rotation: 0,
-      fontFamily: TEXT_FONT_OPTIONS[0]?.value ?? "Georgia, serif",
-      fontSize: presetConfig.fontSize,
-      fontWeight: presetConfig.fontWeight,
-      color: "#ffffff",
-      backgroundColor: "#00000000",
-      align: "left",
-      letterSpacing: -1,
-      lineHeight: 1.12,
-      shadow: true,
-      opacity: 1
-    };
-
-    pushToEditorHistory();
-    setCanvasLayers((layers) => [...layers, nextLayer]);
-    setSelectedLayerId(nextLayer.id);
-    setToolMode("select");
-    setStatus("Text layer added.");
-    setError(null);
-  }
-
-  function handleAddShapeLayer(shape: CanvasShapeLayer["shape"]) {
-    if (!currentImage) {
-      setError("Upload a source image before adding elements.");
-      return;
-    }
-
-    const labels: Record<CanvasShapeLayer["shape"], string> = {
-      rect: "Rectangle",
-      circle: "Circle",
-      triangle: "Triangle",
-      star: "Star badge",
-      badge: "New badge"
-    };
-    const nextLayer: CanvasShapeLayer = {
-      id: createLayerId(shape),
-      type: "shape",
-      shape,
-      label: labels[shape],
-      x: 0.1,
-      y: 0.1,
-      width: shape === "badge" ? 0.18 : 0.2,
-      height: shape === "badge" ? 0.08 : 0.2,
-      rotation: 0,
-      fill: shape === "star" ? "#f59e0b" : shape === "badge" ? "#10b981" : "#111827",
-      opacity: 0.9
-    };
-
-    pushToEditorHistory();
-    setCanvasLayers((layers) => [...layers, nextLayer]);
-    setSelectedLayerId(nextLayer.id);
-    setToolMode("select");
-    setStatus(`${labels[shape]} added.`);
-    setError(null);
-  }
-
   async function handleLayerImageChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
     event.target.value = "";
-
-    if (!file) return;
-    if (!currentImage) {
-      setError("Upload a source image before adding an element.");
-      return;
-    }
-
-    if (!file.type.startsWith("image/")) {
+    if (!file || !file.type.startsWith("image/") || !state.currentImage) {
       setError("Upload a valid image element.");
       return;
     }
-
     try {
       const [src, dimensions] = await Promise.all([fileToDataUrl(file), loadImageDimensions(file)]);
       const width = 0.22;
-      const height = Math.min(0.35, width * (dimensions.height / dimensions.width) * (currentImage.width / currentImage.height));
-      const nextLayer: CanvasImageLayer = {
+      const height = Math.min(0.35, width * (dimensions.height / dimensions.width) * (state.currentImage.width / state.currentImage.height));
+      const layer: CanvasImageLayer = {
         id: createLayerId("image"),
         type: "image",
         name: file.name,
@@ -764,13 +781,10 @@ export default function StudioAiEditPage() {
         height: Math.max(0.04, height),
         rotation: 0,
         filter: "none",
-        opacity: 1
+        opacity: 1,
       };
-
-      pushToEditorHistory();
-      setCanvasLayers((layers) => [...layers, nextLayer]);
-      setSelectedLayerId(nextLayer.id);
-      setToolMode("select");
+      pushToHistory();
+      addLayer(layer);
       setStatus("Image layer added.");
       setError(null);
     } catch (cause) {
@@ -778,693 +792,423 @@ export default function StudioAiEditPage() {
     }
   }
 
-  async function resolveBrandAssetOriginalUrl(asset: BootstrapResponse["brandAssets"][number]) {
-    if (asset.originalUrl) {
-      return asset.originalUrl;
+  function handleAddTextLayer(preset: "heading" | "subheading" | "body" = "heading") {
+    if (!state.currentImage) {
+      setError("Upload a source image before adding text.");
+      return;
     }
-
-    if (!sessionToken) {
-      return asset.previewUrl ?? null;
-    }
-
-    const urls = await getBrandAssetImageUrls(sessionToken, asset.brandId, asset.id).catch(() => null);
-    return urls?.originalUrl ?? asset.previewUrl ?? null;
+    const layer = buildTextLayer(state.currentImage, preset);
+    pushToHistory();
+    addLayer(layer);
+    editor.setToolMode("select");
+    setStatus("Text layer added.");
+    setError(null);
   }
 
-  async function handleAddBrandAssetLayer(asset: BootstrapResponse["brandAssets"][number]) {
-    if (!currentImage) {
-      setError("Upload a source image or choose a template before adding brand assets.");
+  function handleAddShapeLayer(shape: "rect" | "circle" | "triangle" | "star" | "badge") {
+    if (!state.currentImage) {
+      setError("Upload a source image before adding elements.");
       return;
     }
+    const layer = buildShapeLayer(shape, state.currentImage);
+    pushToHistory();
+    addLayer(layer);
+    editor.setToolMode("select");
+    setStatus(`${layer.label} added.`);
+    setError(null);
+  }
 
-    const sourceUrl = await resolveBrandAssetOriginalUrl(asset);
-    if (!sourceUrl) {
-      setError(`${asset.label} does not have a preview URL yet.`);
-      return;
-    }
-
-    try {
-      const dimensions = await loadImageSourceDimensions(sourceUrl);
-      const isQr = asset.kind === "rera_qr";
-      const width = isQr ? 0.16 : 0.22;
-      const height = Math.min(
-        isQr ? 0.22 : 0.18,
-        width * (dimensions.height / dimensions.width) * (currentImage.width / currentImage.height)
-      );
-      const nextLayer: CanvasImageLayer = {
-        id: createLayerId(asset.kind),
-        type: "image",
-        name: asset.label,
-        src: sourceUrl,
-        x: isQr ? 0.78 : 0.08,
-        y: isQr ? 0.78 : 0.08,
-        width,
-        height: Math.max(0.04, height),
-        rotation: 0,
-        filter: "none",
-        opacity: 1
-      };
-
-      pushToEditorHistory();
-      setCanvasLayers((layers) => [...layers, nextLayer]);
-      setSelectedLayerId(nextLayer.id);
-      setToolMode("select");
-      setActiveEditorPane("layers");
-      setStatus(`${asset.kind === "rera_qr" ? "RERA QR" : "Logo"} asset added.`);
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to add brand asset.");
+  function handleEditorPaneChange(pane: typeof EDITOR_PANES[number]["id"]) {
+    editor.setActiveEditorPane(pane);
+    if (pane === "draw") {
+      editor.setToolMode("draw");
+      editor.setSelectedLayerId(null);
+    } else if (pane === "ai-edit") {
+      editor.setToolMode("select");
     }
   }
 
-  async function handleAddGeneratedOutputLayer(output: BootstrapResponse["recentOutputs"][number]) {
-    const sourceUrl =
-      output.originalUrl ??
-      (sessionToken
-        ? (await getCreativeOutput(sessionToken, output.id).catch(() => null))?.originalUrl
-        : null) ??
-      output.previewUrl;
-    if (!sourceUrl) {
-      setError("This generated post is missing a preview URL.");
-      return;
-    }
+  function centerStageOnNextFrame() {
+    requestAnimationFrame(() => {
+      const shell = stageShellRef.current;
+      if (!shell) return;
 
-    try {
-      if (!currentImage) {
-        const file = await sourceToFile(
-          sourceUrl,
-          `generated-post-${output.outputIndex + 1}.png`,
-          "image/png"
-        );
-        const image = await createEditableImage(file);
-
-        setOriginalImage(image);
-        setCurrentImage(image);
-        setCurrentSourceOutputId(output.id);
-        setCurrentSourceBrandId(output.brandId);
-        setCurrentSourceProjectId(output.projectId);
-        setCurrentSourceReviewState(output.reviewState);
-        setCanvasLayers([]);
-        setSelectedLayerId(null);
-        setToolMode("select");
-        setActiveEditorPane("uploads");
-        setStatus("Generated post loaded as the base image.");
-        setError(null);
-        return;
-      }
-
-      const dimensions = await loadImageSourceDimensions(sourceUrl);
-      const width = 0.36;
-      const height = Math.min(0.5, width * (dimensions.height / dimensions.width) * (currentImage.width / currentImage.height));
-      const nextLayer: CanvasImageLayer = {
-        id: createLayerId("generated-post"),
-        type: "image",
-        name: `Generated post #${output.outputIndex + 1}`,
-        src: sourceUrl,
-        x: 0.06,
-        y: 0.06,
-        width,
-        height: Math.max(0.08, height),
-        rotation: 0,
-        filter: "none",
-        opacity: 1
-      };
-
-      pushToEditorHistory();
-      setCanvasLayers((layers) => [...layers, nextLayer]);
-      setSelectedLayerId(nextLayer.id);
-      setToolMode("select");
-      setActiveEditorPane("layers");
-      setStatus("Generated post added as an image layer.");
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to add generated post.");
-    }
-  }
-
-  async function handleAddReraComplianceBlock(option: (typeof reraComplianceOptions)[number]) {
-    if (!currentImage) {
-      setError("Upload a source image before adding a RERA block.");
-      return;
-    }
-
-    const number = option.registration.registrationNumber?.trim();
-    const qrSourceUrl = option.qrAsset ? await resolveBrandAssetOriginalUrl(option.qrAsset) : null;
-
-    if (!number && !qrSourceUrl) {
-      setError("This RERA registration does not have a number or QR asset.");
-      return;
-    }
-
-    const authorityLabel = workspaceComplianceSettings.reraAuthorityLabel.trim() || "MahaRERA";
-    const websiteUrl = workspaceComplianceSettings.reraWebsiteUrl.trim() || "https://maharera.maharashtra.gov.in";
-    const textColor = normalizeHexColor(reraBlockTextColor, "#111111");
-    const blockImage = await createReraComplianceBlockImage({
-      authorityLabel,
-      registrationNumber: number || "RERA",
-      websiteUrl,
-      textColor,
-      ...(qrSourceUrl ? { qrSourceUrl } : {})
+      shell.scrollLeft = Math.max(0, (shell.scrollWidth - shell.clientWidth) / 2);
+      shell.scrollTop = Math.max(0, (shell.scrollHeight - shell.clientHeight) / 2);
     });
-    const layerWidth = 0.42;
-    const layerHeight = Math.min(
-      0.18,
-      layerWidth * (blockImage.height / blockImage.width) * (currentImage.width / currentImage.height)
-    );
-    const nextLayer: CanvasImageLayer = {
-      id: createLayerId("rera-block"),
-      type: "image",
-      name: "RERA compliance block",
-      src: blockImage.dataUrl,
-      x: 0.54,
-      y: 0.04,
-      width: layerWidth,
-      height: Math.max(0.06, layerHeight),
-      rotation: 0,
-      filter: "none",
-      opacity: 1,
-      reraBlock: {
-        authorityLabel,
-        registrationNumber: number || "RERA",
-        websiteUrl,
-        textColor,
-        ...(qrSourceUrl ? { qrSourceUrl } : {})
-      }
-    };
-
-    pushToEditorHistory();
-    setCanvasLayers((layers) => [...layers, nextLayer]);
-    setSelectedLayerId(nextLayer.id);
-    setToolMode("select");
-    setActiveEditorPane("layers");
-    setStatus("RERA compliance block added.");
-    setError(null);
   }
 
-  async function handleSelectedReraBlockColorChange(nextColor: string) {
-    const normalizedColor = normalizeHexColor(nextColor, "#111111");
-    setReraBlockTextColor(normalizedColor);
+  function setStageZoomAroundPoint(nextZoom: number, focusPoint?: { clientX: number; clientY: number }) {
+    const shell = stageShellRef.current;
+    const frame = stageFrameRef.current;
+    const clampedZoom = clampNumber(Number(nextZoom.toFixed(2)), 0.1, 5);
 
-    if (!selectedReraBlockLayer?.reraBlock) {
+    if (!shell || !frame || clampedZoom === state.stageZoom) {
+      editor.setStageZoom(clampedZoom);
       return;
     }
-    const block = selectedReraBlockLayer.reraBlock;
 
-    const nextBlockImage = await createReraComplianceBlockImage({
-      authorityLabel: block.authorityLabel,
-      registrationNumber: block.registrationNumber,
-      websiteUrl: block.websiteUrl,
-      textColor: normalizedColor,
-      ...(block.qrSourceUrl ? { qrSourceUrl: block.qrSourceUrl } : {})
+    const shellRect = shell.getBoundingClientRect();
+    const frameRect = frame.getBoundingClientRect();
+    const focusClientX = focusPoint?.clientX ?? shellRect.left + shell.clientWidth / 2;
+    const focusClientY = focusPoint?.clientY ?? shellRect.top + shell.clientHeight / 2;
+    const focusRatioX = clampNumber((focusClientX - frameRect.left) / frameRect.width, 0, 1);
+    const focusRatioY = clampNumber((focusClientY - frameRect.top) / frameRect.height, 0, 1);
+
+    editor.setStageZoom(clampedZoom);
+
+    requestAnimationFrame(() => {
+      const nextFrame = stageFrameRef.current;
+      const nextShell = stageShellRef.current;
+      if (!nextFrame || !nextShell) return;
+
+      const nextFrameRect = nextFrame.getBoundingClientRect();
+      const nextFocusClientX = nextFrameRect.left + nextFrameRect.width * focusRatioX;
+      const nextFocusClientY = nextFrameRect.top + nextFrameRect.height * focusRatioY;
+      nextShell.scrollLeft += nextFocusClientX - focusClientX;
+      nextShell.scrollTop += nextFocusClientY - focusClientY;
     });
-
-    pushToEditorHistory();
-    setCanvasLayers((layers) =>
-      layers.map((layer) =>
-        layer.id === selectedReraBlockLayer.id && layer.type === "image"
-          ? ({
-              ...layer,
-              src: nextBlockImage.dataUrl,
-              reraBlock: {
-                authorityLabel: block.authorityLabel,
-                registrationNumber: block.registrationNumber,
-                websiteUrl: block.websiteUrl,
-                textColor: normalizedColor,
-                ...(block.qrSourceUrl ? { qrSourceUrl: block.qrSourceUrl } : {})
-              }
-            } satisfies CanvasImageLayer)
-          : layer
-      )
-    );
-    setStatus("RERA block text color updated.");
-    setError(null);
   }
 
-  function handleAddReraNumberLayer() {
-    if (!currentImage) {
-      setError("Upload a source image before adding RERA text.");
-      return;
-    }
+  function fitStageToView(announce = true) {
+    if (!state.currentImage || !stageShellRef.current) return;
 
-    const value = reraNumberText.trim();
-    if (!value) {
-      setError("Enter a RERA number first.");
-      return;
-    }
+    const shell = stageShellRef.current;
+    const baseSize = getStageBaseSize(state.currentImage);
+    const availableWidth = Math.max(120, shell.clientWidth - 160);
+    const availableHeight = Math.max(120, shell.clientHeight - 240);
+    const fitZoom = clampNumber(Math.min(availableWidth / baseSize.width, availableHeight / baseSize.height), 0.1, 5);
 
-    const textValue = /^rera\b/i.test(value) ? value : `RERA: ${value}`;
-    const nextLayer: CanvasTextLayer = {
-      id: createLayerId("rera-text"),
-      type: "text",
-      text: textValue,
-      x: 0.06,
-      y: 0.9,
-      width: 0.52,
-      rotation: 0,
-      fontFamily: TEXT_FONT_OPTIONS[1]?.value ?? "'Helvetica Neue', Arial, sans-serif",
-      fontSize: Math.max(16, Math.round(currentImage.width * 0.02)),
-      fontWeight: "600",
-      color: "#ffffff",
-      backgroundColor: "rgba(17,24,39,0.82)",
-      align: "left",
-      letterSpacing: 0,
-      lineHeight: 1.2,
-      shadow: false,
-      opacity: 1
-    };
-
-    pushToEditorHistory();
-    setCanvasLayers((layers) => [...layers, nextLayer]);
-    setSelectedLayerId(nextLayer.id);
-    setToolMode("select");
-    setActiveEditorPane("layers");
-    setStatus("RERA number text added.");
-    setError(null);
-  }
-
-  async function handleApplyTemplate(templateId: (typeof TEMPLATE_PRESETS)[number]["id"]) {
-    try {
-      const templateImage = await createTemplateBaseImage(templateId);
-      const templateLayers = buildTemplateLayers(templateId, templateImage.width, templateImage.height);
-
-      pushToEditorHistory();
-      setOriginalImage(templateImage);
-      setCurrentImage(templateImage);
-      setCurrentSourceProjectId(null);
-      setCurrentSourceOutputId(null);
-      setCurrentSourceReviewState(null);
-      setCanvasLayers(templateLayers);
-      setSelectedLayerId(templateLayers[0]?.id ?? null);
-      setToolMode("select");
-      setActiveEditorPane("layers");
-      setStatus("Template applied. Edit the layers or add your own image.");
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to apply template.");
+    editor.setStageZoom(Number(fitZoom.toFixed(2)));
+    centerStageOnNextFrame();
+    if (announce) {
+      setStatus("Fitted to screen.");
     }
   }
 
-  function handleEditorPaneChange(nextPane: EditorPane) {
-    setActiveEditorPane(nextPane);
+  function resetStageZoom() {
+    setStageZoomAroundPoint(1, getLastStageFocusPoint());
+  }
 
-    if (nextPane === "draw") {
-      setToolMode("draw");
-      setSelectedLayerId(null);
-      return;
+  function rememberStagePointer(clientX: number, clientY: number) {
+    const shell = stageShellRef.current;
+    if (!shell) return;
+
+    const rect = shell.getBoundingClientRect();
+    const isInside = clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+    lastStagePointerRef.current = isInside ? { clientX, clientY } : null;
+  }
+
+  function getLastStageFocusPoint() {
+    const point = lastStagePointerRef.current;
+    if (!point) return undefined;
+
+    const shell = stageShellRef.current;
+    if (!shell) return undefined;
+
+    const rect = shell.getBoundingClientRect();
+    return point.clientX >= rect.left && point.clientX <= rect.right && point.clientY >= rect.top && point.clientY <= rect.bottom
+      ? point
+      : undefined;
+  }
+
+  function shouldStartPan(event: ReactPointerEvent<HTMLElement>) {
+    return event.button === 1 || (event.button === 0 && isSpacePressed);
+  }
+
+  function beginPan(event: ReactPointerEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsPanning(true);
+    setPanStart({
+      x: event.clientX,
+      y: event.clientY,
+      scrollLeft: stageShellRef.current?.scrollLeft || 0,
+      scrollTop: stageShellRef.current?.scrollTop || 0,
+    });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function updatePan(event: ReactPointerEvent<HTMLElement>) {
+    if (!isPanning || !stageShellRef.current) return;
+
+    const dx = event.clientX - panStart.x;
+    const dy = event.clientY - panStart.y;
+    stageShellRef.current.scrollLeft = panStart.scrollLeft - dx;
+    stageShellRef.current.scrollTop = panStart.scrollTop - dy;
+  }
+
+  function endPan(event: ReactPointerEvent<HTMLElement>) {
+    if (!isPanning) return;
+
+    setIsPanning(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
     }
+  }
 
-    if (nextPane === "ai-edit") {
-      setToolMode("select");
-      return;
+  function handleShellPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    rememberStagePointer(event.clientX, event.clientY);
+    if (shouldStartPan(event)) {
+      beginPan(event);
     }
+  }
 
-    setToolMode("select");
+  function handleShellPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    rememberStagePointer(event.clientX, event.clientY);
+    updatePan(event);
+  }
+
+  function handleShellPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    endPan(event);
+  }
+
+  function handleShellPointerMoveCapture(event: ReactPointerEvent<HTMLDivElement>) {
+    rememberStagePointer(event.clientX, event.clientY);
   }
 
   function handleStagePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (toolMode === "draw" && drawMode !== "select" && currentImage && !isApplying) {
-      const point = getStageNormalizedPoint(event);
-      const nextLayer: CanvasDrawLayer = {
+    if (shouldStartPan(event)) {
+      beginPan(event);
+      return;
+    }
+
+    if (state.toolMode === "draw" && state.drawMode !== "select" && state.currentImage) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const point = getStageNormalizedPoint(event, rect);
+      const layer: CanvasDrawLayer = {
         id: createLayerId("draw"),
         type: "draw",
-        label: drawMode === "highlighter" ? "Highlighter stroke" : "Pen stroke",
+        label: state.drawMode === "highlighter" ? "Highlighter stroke" : "Pen stroke",
         x: 0,
         y: 0,
         width: 1,
         height: 1,
         rotation: 0,
         points: [point],
-        color: drawColor,
-        size: drawMode === "highlighter" ? drawSize * 3 : drawSize,
-        opacity: drawMode === "highlighter" ? 0.42 : 1
+        color: state.drawColor,
+        size: state.drawMode === "highlighter" ? editor.state.drawSize * 3 : editor.state.drawSize,
+        opacity: state.drawMode === "highlighter" ? 0.42 : 1,
       };
-
-      pushToEditorHistory();
-      drawPathRef.current = nextLayer;
-      setCanvasLayers((layers) => [...layers, nextLayer]);
-      setSelectedLayerId(nextLayer.id);
+      beginTransaction();
+      drawPathRef.current = layer;
+      setDrawPath(layer);
+      addLayer(layer);
       event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
-
-    if (toolMode === "select") {
+    if (state.toolMode === "select") {
       setSelectedLayerId(null);
     }
   }
 
-  function getStageNormalizedPoint(event: ReactPointerEvent<HTMLElement>) {
-    const frame = stageFrameRef.current;
-    const rect = frame?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
-
-    return {
-      x: clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1),
-      y: clamp((event.clientY - rect.top) / Math.max(1, rect.height), 0, 1)
-    };
-  }
-
-  function updateSelectedLayer(
-    patch: Partial<CanvasTextLayer> | Partial<CanvasImageLayer> | Partial<CanvasShapeLayer> | Partial<CanvasDrawLayer>
-  ) {
-    if (!selectedLayerId) return;
-
-    pushToEditorHistory();
-    setCanvasLayers((layers) =>
-      layers.map((layer) => (layer.id === selectedLayerId ? ({ ...layer, ...patch } as CanvasLayer) : layer))
-    );
-  }
-
-  function duplicateSelectedLayer() {
-    if (!selectedLayer) return;
-
-    const nextLayer = {
-      ...selectedLayer,
-      id: createLayerId(selectedLayer.type),
-      x: clamp(selectedLayer.x + 0.04, 0, 0.96),
-      y: clamp(selectedLayer.y + 0.04, 0, 0.96)
-    } as CanvasLayer;
-
-    pushToEditorHistory();
-    setCanvasLayers((layers) => [...layers, nextLayer]);
-    setSelectedLayerId(nextLayer.id);
-    setStatus("Layer duplicated.");
-  }
-
-  function moveSelectedLayer(direction: "forward" | "backward") {
-    if (!selectedLayerId) return;
-
-    pushToEditorHistory();
-    setCanvasLayers((layers) => {
-      const index = layers.findIndex((layer) => layer.id === selectedLayerId);
-      if (index < 0) return layers;
-      const targetIndex = direction === "forward" ? Math.min(layers.length - 1, index + 1) : Math.max(0, index - 1);
-      if (targetIndex === index) return layers;
-
-      const nextLayers = [...layers];
-      const [layer] = nextLayers.splice(index, 1);
-      if (!layer) return layers;
-      nextLayers.splice(targetIndex, 0, layer);
-      return nextLayers;
-    });
-  }
-
-  function centerSelectedLayer(axis: "horizontal" | "vertical") {
-    if (!selectedLayerId) return;
-    if (axis === "horizontal") {
-      updateSelectedLayer({ x: 0.5 - (selectedLayer?.width ?? 0) / 2 });
+  function handleLayerPointerDown(event: ReactPointerEvent<HTMLElement>, layerId: string, mode: "move" | "resize" = "move", handleType?: ResizeHandleType) {
+    if (!state.currentImage) return;
+    if (shouldStartPan(event)) {
+      beginPan(event);
       return;
     }
 
-    const layerHeight = selectedLayer && "height" in selectedLayer ? selectedLayer.height : 0.1;
-    updateSelectedLayer({ y: 0.5 - layerHeight / 2 });
-  }
-
-  function handleDeleteSelectedLayer() {
-    if (!selectedLayerId) return;
-
-    pushToEditorHistory();
-    setCanvasLayers((layers) => layers.filter((layer) => layer.id !== selectedLayerId));
-    setSelectedLayerId(null);
-    setStatus("Layer removed.");
-  }
-
-  function createEditorSnapshot(): EditorSnapshot {
-    return {
-      originalImage: cloneEditableImage(originalImage),
-      currentImage: cloneEditableImage(currentImage),
-      canvasLayers: cloneCanvasLayers(canvasLayers),
-      toolMode
-    };
-  }
-
-  function pushToEditorHistory() {
-    pushSpecificEditorSnapshot(createEditorSnapshot());
-  }
-
-  function pushSpecificEditorSnapshot(snapshot: EditorSnapshot) {
-    setEditorHistory((prev) => {
-      const previousSnapshot = prev[prev.length - 1];
-      if (previousSnapshot && areEditorSnapshotsEqual(previousSnapshot, snapshot)) {
-        return prev;
-      }
-
-      return [...prev.slice(-19), snapshot];
-    });
-    setEditorFuture([]);
-  }
-
-  function restoreEditorSnapshot(snapshot: EditorSnapshot) {
-    setOriginalImage(cloneEditableImage(snapshot.originalImage));
-    setCurrentImage(cloneEditableImage(snapshot.currentImage));
-    setCanvasLayers(cloneCanvasLayers(snapshot.canvasLayers));
-    setToolMode(snapshot.toolMode);
-    setSelectedLayerId(null);
-  }
-
-  function handleUndo() {
-    if (editorHistory.length === 0) return;
-
-    const previous = editorHistory[editorHistory.length - 1];
-    if (!previous) return;
-    setEditorFuture((prev) => [createEditorSnapshot(), ...prev]);
-    setEditorHistory((prev) => prev.slice(0, -1));
-    restoreEditorSnapshot(previous);
-    setStatus("Undone.");
-  }
-
-  function handleRedo() {
-    if (editorFuture.length === 0) return;
-
-    const next = editorFuture[0];
-    if (!next) return;
-    setEditorHistory((prev) => [...prev, createEditorSnapshot()]);
-    setEditorFuture((prev) => prev.slice(1));
-    restoreEditorSnapshot(next);
-    setStatus("Redone.");
-  }
-
-  function handleLayerPointerDown(
-    event: ReactPointerEvent<HTMLElement>,
-    layer: CanvasLayer,
-    mode: "move" | "resize" = "move"
-  ) {
-    if (!currentImage || isApplying) return;
-
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    setSelectedLayerId(layer.id);
-    setToolMode("select");
-    layerDragRef.current = {
-      id: layer.id,
+    setSelectedLayerId(layerId);
+    editor.setToolMode("select");
+
+    const layer = state.canvasLayers.find((l) => l.id === layerId);
+    if (!layer) return;
+
+    const rect = stageFrameRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
+    const nextDrag: LayerDragState = {
+      id: layerId,
       mode,
+      ...(handleType ? { handleType } : {}),
       pushedHistory: false,
-      snapshot: createEditorSnapshot(),
+      snapshot: {
+        ...createSnapshot(),
+        selectedLayerId: layerId,
+        toolMode: "select",
+      },
       startClientX: event.clientX,
       startClientY: event.clientY,
       startX: layer.x,
       startY: layer.y,
       startWidth: layer.width,
-      startHeight: "height" in layer ? layer.height : 0.08
+      startHeight: "height" in layer ? layer.height : 0.08,
     };
+    layerDragRef.current = nextDrag;
+    setLayerDrag(nextDrag);
   }
 
   function handleLayerPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    if (drawPathRef.current && toolMode === "draw") {
-      const point = getStageNormalizedPoint(event);
-      const currentDrawLayer = drawPathRef.current;
-      const lastPoint = currentDrawLayer.points[currentDrawLayer.points.length - 1];
+    if (isPanning) {
+      updatePan(event);
+      return;
+    }
 
+    const activeDrawPath = drawPathRef.current;
+    if (activeDrawPath && state.toolMode === "draw") {
+      const rect = stageFrameRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
+      const point = getStageNormalizedPoint(event, rect);
+      const lastPoint = activeDrawPath.points[activeDrawPath.points.length - 1];
       if (!lastPoint || Math.hypot(point.x - lastPoint.x, point.y - lastPoint.y) > 0.002) {
-        const nextLayer = {
-          ...currentDrawLayer,
-          points: [...currentDrawLayer.points, point]
-        };
+        const nextLayer = { ...activeDrawPath, points: [...activeDrawPath.points, point] };
         drawPathRef.current = nextLayer;
-        setCanvasLayers((layers) => layers.map((layer) => (layer.id === nextLayer.id ? nextLayer : layer)));
+        setDrawPath(nextLayer);
+        updateLayer(activeDrawPath.id, { points: nextLayer.points });
       }
       return;
     }
 
     const drag = layerDragRef.current;
-    const frame = stageFrameRef.current;
-    if (!drag || !frame) return;
+    if (!drag) return;
 
-    const rect = frame.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
+    const rect = stageFrameRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
 
     const deltaX = (event.clientX - drag.startClientX) / rect.width;
     const deltaY = (event.clientY - drag.startClientY) / rect.height;
-    const movedEnough = Math.abs(deltaX) > 0.0001 || Math.abs(deltaY) > 0.0001;
-    if (movedEnough && !drag.pushedHistory) {
-      pushSpecificEditorSnapshot(drag.snapshot);
-      drag.pushedHistory = true;
-    }
 
-    if (!drag.pushedHistory) {
+    if (shouldPushHistory(deltaX, deltaY) && !drag.pushedHistory) {
+      beginTransaction(drag.snapshot);
+      const activeDrag = { ...drag, pushedHistory: true };
+      layerDragRef.current = activeDrag;
+      setLayerDrag(activeDrag);
+      applyLayerDrag(activeDrag, deltaX, deltaY);
       return;
     }
 
-    setCanvasLayers((layers) =>
-      layers.map((layer) => {
-        if (layer.id !== drag.id) return layer;
+    if (!drag.pushedHistory) return;
 
-        if (drag.mode === "resize") {
-          if (layer.type === "image" || layer.type === "shape") {
-            return {
-              ...layer,
-              width: clamp(drag.startWidth + deltaX, 0.04, 0.95 - layer.x),
-              height: clamp(drag.startHeight + deltaY, 0.04, 0.95 - layer.y)
-            };
-          }
-
-          return {
-            ...layer,
-            width: clamp(drag.startWidth + deltaX, 0.12, 0.95 - layer.x)
-          };
-        }
-
-        return {
-          ...layer,
-          x: clamp(drag.startX + deltaX, 0, 0.98),
-          y: clamp(drag.startY + deltaY, 0, 0.98)
-        };
-      })
-    );
+    applyLayerDrag(drag, deltaX, deltaY);
   }
 
   function handleLayerPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    if (isPanning) {
+      endPan(event);
+      return;
+    }
+
     if (drawPathRef.current) {
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
       drawPathRef.current = null;
+      setDrawPath(null);
+      commitTransaction();
       setStatus("Drawing added.");
       return;
     }
 
-    if (!layerDragRef.current) return;
-
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+    const activeDrag = layerDragRef.current;
+    if (activeDrag) {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      if (activeDrag.pushedHistory) {
+        commitTransaction();
+      }
+      layerDragRef.current = null;
+      setLayerDrag(null);
     }
-    layerDragRef.current = null;
   }
 
-  async function getComposedImageFile(fileName = currentImage ? buildComposedFileName(currentImage.file.name) : "composition.png") {
-    if (!currentImage) {
-      throw new Error("Upload a source image first.");
+  function applyLayerDrag(drag: LayerDragState, deltaX: number, deltaY: number) {
+    if (drag.mode === "resize") {
+      const type = drag.handleType || "se";
+      const updates: any = {};
+
+      if (type.includes("e")) {
+        updates.width = clampNumber(drag.startWidth + deltaX, 0.02, 1 - drag.startX);
+      }
+      if (type.includes("w")) {
+        updates.x = clampNumber(drag.startX + deltaX, 0, drag.startX + drag.startWidth - 0.02);
+        updates.width = clampNumber(drag.startWidth - deltaX, 0.02, drag.startX + drag.startWidth);
+      }
+      if (type.includes("s")) {
+        updates.height = clampNumber(drag.startHeight + deltaY, 0.02, 1 - drag.startY);
+      }
+      if (type.includes("n")) {
+        updates.y = clampNumber(drag.startY + deltaY, 0, drag.startY + drag.startHeight - 0.02);
+        updates.height = clampNumber(drag.startHeight - deltaY, 0.02, drag.startY + drag.startHeight);
+      }
+
+      updateLayer(drag.id, updates);
+      return;
     }
 
-    if (canvasLayers.length === 0) {
-      return cloneFileWithName(currentImage.file, fileName);
-    }
+    updateLayer(drag.id, {
+      x: clampNumber(drag.startX + deltaX, 0, 0.98),
+      y: clampNumber(drag.startY + deltaY, 0, 0.98),
+    });
+  }
 
-    return renderCompositionToFile(currentImage, canvasLayers, fileName);
+  function handleFitToScreen() {
+    fitStageToView(true);
   }
 
   async function handleDownloadComposition() {
-    if (!currentImage) return;
-
+    if (!state.currentImage) return;
     try {
-      const file = await getComposedImageFile();
+      const visibleLayerCount = state.canvasLayers.filter(isLayerVisible).length;
+      const file = await renderCompositionToFile(state.currentImage, state.canvasLayers, buildComposedFileName(state.currentImage.file.name));
       downloadFile(file);
-      setStatus(hasCanvasLayers ? "Composed image downloaded." : "Current image downloaded.");
+      setStatus(visibleLayerCount > 0 ? "Composed image downloaded." : "Current image downloaded.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to export the composition.");
     }
   }
 
-  async function handleShareCurrentImage() {
-    if (!currentImage) return;
-
-    setIsSharing(true);
-    setError(null);
-
-    try {
-      const composedFile = await getComposedImageFile();
-      const sharePayload = {
-        files: [composedFile],
-        title: composedFile.name,
-        text: "Shared from Briefly Social"
-      };
-
-      if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
-        const canShareFiles = typeof navigator.canShare !== "function" || navigator.canShare(sharePayload);
-        if (canShareFiles) {
-          await navigator.share(sharePayload);
-          setStatus("Share sheet opened.");
-          return;
-        }
-      }
-
-      if (
-        typeof navigator !== "undefined" &&
-        navigator.clipboard &&
-        typeof navigator.clipboard.write === "function" &&
-        typeof ClipboardItem !== "undefined"
-      ) {
-        await navigator.clipboard.write([
-          new ClipboardItem({
-            [composedFile.type || "image/png"]: composedFile
-          })
-        ]);
-        setStatus("Current image copied to clipboard.");
-        return;
-      }
-
-      downloadFile(composedFile);
-      setStatus("Share is not available here, so the current image was downloaded instead.");
-    } catch (cause) {
-      if (cause instanceof DOMException && cause.name === "AbortError") return;
-      setError(cause instanceof Error ? cause.message : "Unable to share the current image.");
-    } finally {
-      setIsSharing(false);
-    }
-  }
-
-  function openSaveDrawer() {
-    if (!currentImage) {
-      return;
-    }
-
-    setSaveMode(currentSourceOutputId ? "version" : "new");
-    setIsSaveDrawerOpen(true);
-  }
-
-  async function handleSaveOutput() {
+  async function handleSaveOutput(saveMode: "new" | "version" | "replace") {
     if (!sessionToken) {
       setError("Your session is missing. Refresh the page and try again.");
       return;
     }
-
     if (!activeBrandId) {
       setError("Select an active brand before saving.");
       return;
     }
-
-    if (!currentImage) {
+    if (!state.currentImage) {
       setError("Upload a source image first.");
       return;
     }
 
     setIsSavingOutput(true);
     setError(null);
+    const savedSignature = currentEditorSignature;
 
     try {
-      const file = await getComposedImageFile(buildComposedFileName(currentImage.file.name));
-      const saveBrandId = currentSourceOutputId ? currentSourceBrandId ?? activeBrandId : activeBrandId;
+      const [file, editorDocument] = await Promise.all([
+        renderCompositionToFile(state.currentImage, state.canvasLayers, buildComposedFileName(state.currentImage.file.name)),
+        buildEditorDocument(state.currentImage, state.canvasLayers),
+      ]);
+      const saveBrandId = state.currentSourceBrandId ?? activeBrandId;
       const response = await saveEditedCreativeOutput(sessionToken, {
         brandId: saveBrandId,
         saveMode,
-        sourceOutputId: currentSourceOutputId,
+        sourceOutputId: state.currentSourceOutputId,
         image: file,
-        imageFileName: file.name
+        imageFileName: file.name,
+        sourceImage: state.currentImage.file,
+        sourceImageFileName: state.currentImage.file.name,
+        layerImages: editorDocument.layerImages,
+        editorState: editorDocument.editorState,
       });
 
-      setCurrentSourceOutputId(response.output.id);
-      setCurrentSourceBrandId(response.output.brandId);
-      setCurrentSourceProjectId(response.output.projectId);
-      setCurrentSourceReviewState(response.output.reviewState);
+      const sourceMetadata = {
+        currentSourceOutputId: response.output.id,
+        currentSourceBrandId: response.output.brandId,
+        currentSourceProjectId: response.output.projectId,
+        currentSourceReviewState: response.output.reviewState,
+      };
+
+      editor.setCurrentSourceOutputId(sourceMetadata.currentSourceOutputId);
+      editor.setCurrentSourceBrandId(sourceMetadata.currentSourceBrandId);
+      editor.setCurrentSourceProjectId(sourceMetadata.currentSourceProjectId);
+      editor.setCurrentSourceReviewState(sourceMetadata.currentSourceReviewState);
+      rebaseHistorySourceMetadata(sourceMetadata);
       loadedOutputIdRef.current = response.output.id;
+      setLastSavedOutput(response.output);
+      setLastSavedEditorSignature(savedSignature);
       setIsSaveDrawerOpen(false);
       setStatus(
         response.resolvedMode === "replace"
@@ -1481,91 +1225,265 @@ export default function StudioAiEditPage() {
     }
   }
 
-  async function handleApplyEdit() {
+  async function handleEditApplied(payload: {
+    image: EditableImage;
+    layers: CanvasLayer[];
+    file: File;
+    mergedLayerCount: number;
+    preservedLayerCount: number;
+  }) {
     if (!sessionToken) {
-      setError("Your session is missing. Refresh the page and try again.");
+      setError("Edit applied, but auto-save could not run because your session is missing.");
       return;
     }
 
-    if (!activeBrandId) {
-      setError("Select an active brand before applying an edit.");
+    const saveBrandId = state.currentSourceBrandId ?? activeBrandId;
+    if (!saveBrandId) {
+      setError("Edit applied, but auto-save needs an active brand.");
       return;
     }
 
-    if (!currentImage) {
-      setError("Upload a source image first.");
-      return;
-    }
+    const sourceOutputId = state.currentSourceOutputId;
+    const saveMode = sourceOutputId ? "version" : "new";
+    const savedSignature = buildEditorSaveSignature(payload.image, payload.layers);
 
-    setIsApplying(true);
+    setIsSavingOutput(true);
     setError(null);
-    setStatus("Applying the edit. This can take a few moments.");
+    setStatus(sourceOutputId ? "Saving this AI edit as a new version..." : "Saving this AI edit to Gallery...");
 
     try {
-      const resolvedPrompt = await resolveActivePrompt();
-      if (!resolvedPrompt) {
-        return;
-      }
-
-      const sourceFile = await getComposedImageFile(buildNormalizedSourceFileName(currentImage.file.name));
-      const job = await startImageEditJob(sessionToken, {
-        brandId: activeBrandId,
-        prompt: resolvedPrompt,
-        width: currentImage.width,
-        height: currentImage.height,
-        image: sourceFile,
-        imageFileName: sourceFile.name
+      const editorDocument = await buildEditorDocument(payload.image, payload.layers);
+      const response = await saveEditedCreativeOutput(sessionToken, {
+        brandId: saveBrandId,
+        saveMode,
+        sourceOutputId,
+        image: payload.file,
+        imageFileName: payload.file.name,
+        sourceImage: payload.image.file,
+        sourceImageFileName: payload.image.file.name,
+        layerImages: editorDocument.layerImages,
+        editorState: editorDocument.editorState,
       });
-      setStatus("Applying the edit. This can take a few minutes.");
 
-      let result = null;
-      const startedAt = Date.now();
-      const timeoutMs = 10 * 60 * 1000;
+      const sourceMetadata = {
+        currentSourceOutputId: response.output.id,
+        currentSourceBrandId: response.output.brandId,
+        currentSourceProjectId: response.output.projectId,
+        currentSourceReviewState: response.output.reviewState,
+      };
 
-      while (Date.now() - startedAt < timeoutMs) {
-        await wait(2_500);
-        const jobStatus = await getImageEditJobStatus(sessionToken, job.jobId);
-
-        if (jobStatus.status === "completed") {
-          if (!jobStatus.result) {
-            throw new Error("AI edit completed without an image.");
-          }
-          result = jobStatus.result;
-          break;
-        }
-
-        if (jobStatus.status === "failed") {
-          throw new Error(jobStatus.error?.message ?? "AI edit failed.");
-        }
-      }
-
-      if (!result) {
-        throw new Error("AI edit is taking longer than expected. Please try again shortly.");
-      }
-
-      const nextFile = await sourceToFile(
-        result.imageDataUrl ?? result.imageUrl,
-        buildEditedFileName(currentImage.file.name),
-        "image/png"
+      editor.setCurrentSourceOutputId(sourceMetadata.currentSourceOutputId);
+      editor.setCurrentSourceBrandId(sourceMetadata.currentSourceBrandId);
+      editor.setCurrentSourceProjectId(sourceMetadata.currentSourceProjectId);
+      editor.setCurrentSourceReviewState(sourceMetadata.currentSourceReviewState);
+      rebaseHistorySourceMetadata(sourceMetadata);
+      loadedOutputIdRef.current = response.output.id;
+      setLastSavedOutput(response.output);
+      setLastSavedEditorSignature(savedSignature);
+      setStatus(
+        response.resolvedMode === "version"
+          ? `AI edit auto-saved as version ${response.output.versionNumber}.`
+          : "AI edit auto-saved to Gallery."
       );
-      const nextImage = await createEditableImage(nextFile);
-
-      pushToEditorHistory();
-      setCurrentImage(nextImage);
-      setCanvasLayers([]);
-      setSelectedLayerId(null);
-      setToolMode("select");
-      setStatus("Edit applied. Describe the next change to continue editing.");
+      router.replace(`/studio/ai-edit?outputId=${response.output.id}`);
     } catch (cause) {
-      setError(getUserSafeImageEditError(cause));
-      setStatus(null);
+      setError(cause instanceof Error ? `Edit applied, but auto-save failed: ${cause.message}` : "Edit applied, but auto-save failed.");
     } finally {
-      setIsApplying(false);
+      setIsSavingOutput(false);
     }
   }
 
-  async function handlePrimaryAction() {
-    await handleApplyEdit();
+  async function handleAddGeneratedOutputFromModal(output: CreativeOutputRecord) {
+    const fullOutput = sessionToken ? await getCreativeOutput(sessionToken, output.id).catch(() => null) : null;
+    const sourceUrl = fullOutput?.originalUrl ?? fullOutput?.previewUrl ?? output.originalUrl ?? output.previewUrl;
+    if (!sourceUrl) return;
+
+    try {
+      if (!state.currentImage) {
+        const file = await sourceToFile(sourceUrl, `generated-post-${output.outputIndex + 1}.png`, "image/png");
+        const image = await createEditableImage(file);
+        pushToHistory();
+        editor.setOriginalImage(image);
+        editor.setCurrentImage(image);
+        editor.setCurrentSourceOutputId(output.id);
+        editor.setCurrentSourceBrandId(output.brandId);
+        editor.setCurrentSourceProjectId(output.projectId);
+        editor.setCurrentSourceReviewState(output.reviewState);
+        editor.setCanvasLayers([]);
+        editor.setSelectedLayerId(null);
+        editor.setActiveEditorPane("uploads");
+        setLastSavedOutput(output);
+        setLastSavedEditorSignature(buildEditorSaveSignature(image, []));
+        setIsGeneratedPostsModalOpen(false);
+        setStatus("Generated post loaded as the base image.");
+        return;
+      }
+
+      const dimensions = await loadImageSourceDimensions(sourceUrl);
+      const width = 0.36;
+      const height = Math.min(0.5, width * (dimensions.height / dimensions.width) * (state.currentImage.width / state.currentImage.height));
+      const layer: CanvasImageLayer = {
+        id: createLayerId("generated-post"),
+        type: "image",
+        name: `Generated post #${output.outputIndex + 1}`,
+        src: sourceUrl,
+        sourceStoragePath: output.storagePath,
+        x: 0.06,
+        y: 0.06,
+        width,
+        height: Math.max(0.08, height),
+        rotation: 0,
+        filter: "none",
+        opacity: 1,
+      };
+      pushToHistory();
+      addLayer(layer);
+      editor.setActiveEditorPane("layers");
+      setIsGeneratedPostsModalOpen(false);
+      setStatus("Generated post added as an image layer.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to add generated post.");
+    }
+  }
+
+  function handleOpenVersion(output: CreativeOutputRecord) {
+    if (isHistoryLocked) {
+      return;
+    }
+
+    if (output.id === state.currentSourceOutputId) {
+      return;
+    }
+
+    if (hasUnsavedChanges && !window.confirm("Open this version and discard unsaved canvas changes?")) {
+      return;
+    }
+
+    setLoadingOutputId(output.id);
+    setStatus(`Opening version ${output.versionNumber}...`);
+    router.replace(`/studio/ai-edit?outputId=${output.id}`);
+  }
+
+  function handleOpenCompare() {
+    if (savedVersions.length < 2) {
+      return;
+    }
+
+    const afterOutput = savedVersions.find((output) => output.id === state.currentSourceOutputId) ?? savedVersions[0];
+    const beforeOutput =
+      savedVersions.find((output) => output.id !== afterOutput?.id && output.versionNumber < (afterOutput?.versionNumber ?? Number.POSITIVE_INFINITY)) ??
+      savedVersions.find((output) => output.id !== afterOutput?.id) ??
+      null;
+
+    if (!afterOutput || !beforeOutput) {
+      return;
+    }
+
+    setCompareAfterId(afterOutput.id);
+    setCompareBeforeId(beforeOutput.id);
+    setCompareSliderValue(50);
+    setIsCompareOpen(true);
+    void ensureCompareOutput(beforeOutput.id);
+    void ensureCompareOutput(afterOutput.id);
+  }
+
+  function handleClearCanvas() {
+    if (!state.currentImage) {
+      return;
+    }
+
+    if (!window.confirm("Remove the current image and all editable layers? This cannot be undone.")) {
+      return;
+    }
+
+    clearHistory();
+    loadedOutputIdRef.current = null;
+    editor.setOriginalImage(null);
+    editor.setCurrentImage(null);
+    editor.setCanvasLayers([]);
+    editor.setSelectedLayerId(null);
+    editor.setToolMode("select");
+    editor.setActiveEditorPane("uploads");
+    editor.setStageZoom(1);
+    editor.setCurrentSourceOutputId(null);
+    editor.setCurrentSourceBrandId(activeBrandId ?? null);
+    editor.setCurrentSourceProjectId(null);
+    editor.setCurrentSourceReviewState(null);
+    setLastSavedOutput(null);
+    setLastSavedEditorSignature(null);
+    setVersionHistory([]);
+    setCompareOutputCache({});
+    setCompareBeforeId(null);
+    setCompareAfterId(null);
+    setIsCompareOpen(false);
+    setLoadingOutputId(null);
+    setStatus("Canvas cleared. Upload a new image to start.");
+    setError(null);
+    router.replace("/studio/ai-edit");
+  }
+
+  function renderPane() {
+    switch (state.activeEditorPane) {
+      case "uploads":
+        return (
+          <UploadsPane
+            sessionToken={sessionToken}
+            activeBrandId={activeBrandId}
+            recentOutputs={editorRecentOutputs}
+            isLoadingRecent={isLoadingRecentOutputs}
+            onViewAllGenerated={() => setIsGeneratedPostsModalOpen(true)}
+            onUploadClick={() => fileInputRef.current?.click()}
+            onAddImageLayerClick={() => layerImageInputRef.current?.click()}
+            onClearCanvas={handleClearCanvas}
+          />
+        );
+      case "ai-edit":
+        return (
+          <AiEditPane
+            sessionToken={sessionToken}
+            activeBrandId={activeBrandId}
+            onError={setError}
+            onStatus={setStatus}
+            onBusyChange={setIsAiEditBusy}
+            onEditApplied={handleEditApplied}
+          />
+        );
+      case "assets":
+        return (
+          <AssetsPane
+            sessionToken={sessionToken}
+            activeBrandId={activeBrandId}
+            activeAssets={activeAssets}
+            workspaceComplianceSettings={workspaceComplianceSettings}
+            projectReraRegistrations={bootstrap?.projectReraRegistrations ?? []}
+          />
+        );
+      case "text":
+        return <TextPane onAddTextLayer={handleAddTextLayer} />;
+      case "elements":
+        return <ElementsPane />;
+      case "layers":
+        return <LayersPane />;
+      case "effects":
+        return <EffectsPane />;
+      case "position":
+        return <PositionPane />;
+      case "font":
+        return <FontPane />;
+      default:
+        return (
+          <UploadsPane
+            sessionToken={sessionToken}
+            activeBrandId={activeBrandId}
+            recentOutputs={editorRecentOutputs}
+            isLoadingRecent={isLoadingRecentOutputs}
+            onViewAllGenerated={() => setIsGeneratedPostsModalOpen(true)}
+            onUploadClick={() => fileInputRef.current?.click()}
+            onAddImageLayerClick={() => layerImageInputRef.current?.click()}
+            onClearCanvas={handleClearCanvas}
+          />
+        );
+    }
   }
 
   return (
@@ -1573,735 +1491,103 @@ export default function StudioAiEditPage() {
       <input accept="image/*" hidden onChange={handleFileChange} ref={fileInputRef} type="file" />
       <input accept="image/*" hidden onChange={handleLayerImageChange} ref={layerImageInputRef} type="file" />
 
-      <aside className="create-v2-sidebar ai-edit-sidebar-panel">
-        <div className="ai-editor-sidebar-shell">
-          <nav className="ai-editor-rail" aria-label="Editor tools">
-            <div className="ai-editor-rail-list">
-              {EDITOR_PANES.map((pane) => (
-                <button
-                  className={`ai-editor-rail-button ${activeEditorPane === pane.id ? "is-active" : ""}`}
-                  key={pane.id}
-                  onClick={() => handleEditorPaneChange(pane.id)}
-                  type="button"
-                >
-                  <span className="ai-editor-rail-icon">{pane.icon}</span>
-                  <span>{pane.label}</span>
-                </button>
-              ))}
-            </div>
-          </nav>
-          <div className="ai-editor-tray">
-            {activeEditorPane === "templates" ? (
-              <div className="ai-editor-pane">
-                <div className="ai-editor-pane-header">
-                  <p className="panel-label">Starter layouts</p>
-                  <h2>Templates</h2>
-                </div>
-                <input className="ai-editor-search-input" placeholder="Search templates..." type="search" />
-                <div className="ai-editor-template-list">
-                  {TEMPLATE_PRESETS.map((template) => (
-                    <button className="ai-editor-template-card" key={template.id} onClick={() => void handleApplyTemplate(template.id)} type="button">
-                      <span className={`ai-editor-template-preview ${template.className}`}>
-                        {template.text.split("\n").map((line) => (
-                          <span key={line}>{line}</span>
-                        ))}
-                      </span>
-                      <strong>{template.label}</strong>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {activeEditorPane === "assets" ? (
-              <div className="ai-editor-pane">
-                <div className="ai-editor-pane-header">
-                  <p className="panel-label">Brand assets</p>
-                  <h2>Assets</h2>
-                </div>
-                <p className="ai-editor-pane-copy">Place approved logos and compliant RERA blocks on the current canvas.</p>
-                <div className="ai-editor-asset-list">
-                  {logoAssets.length ? (
-                    logoAssets.map((asset) => (
-                      <button
-                        className="ai-editor-asset-card"
-                        disabled={!currentImage || !(asset.originalUrl ?? asset.previewUrl)}
-                        key={asset.id}
-                        onClick={() => void handleAddBrandAssetLayer(asset)}
-                        type="button"
-                      >
-                        <span className="ai-editor-asset-preview">
-                          {asset.thumbnailUrl ?? asset.previewUrl ? (
-                            <img alt={asset.label} src={asset.thumbnailUrl ?? asset.previewUrl} />
-                          ) : (
-                            <span>{asset.kind === "rera_qr" ? "QR" : "Logo"}</span>
-                          )}
-                        </span>
-                        <span className="ai-editor-asset-copy">
-                          <strong>{asset.label}</strong>
-                          <small>Logo</small>
-                        </span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="ai-editor-pane-empty-state">
-                      <div className="ai-editor-pane-empty-icon">◫</div>
-                      <p>No logo assets uploaded for this brand yet.</p>
-                    </div>
-                  )}
-                </div>
-                <section className="ai-editor-rera-section">
-                  <div>
-                    <h3 className="ai-editor-pane-subtitle">RERA compliance block</h3>
-                    <p className="ai-editor-pane-copy">
-                      Uses {workspaceComplianceSettings.reraAuthorityLabel} with the configured website and the project-specific number + QR.
-                    </p>
-                  </div>
-                  <label className="create-field-label">
-                    Text color
-                    <div className="ai-editor-inline-color-input">
-                      <input
-                        className="ai-editor-color-input"
-                        onChange={(event) => setReraBlockTextColor(normalizeHexColor(event.target.value, "#111111"))}
-                        type="color"
-                        value={normalizeHexColor(reraBlockTextColor, "#111111")}
-                      />
-                      <input
-                        className="input"
-                        onChange={(event) => setReraBlockTextColor(normalizeHexColor(event.target.value.startsWith("#") ? event.target.value : `#${event.target.value}`, "#111111"))}
-                        placeholder="#111111"
-                        value={reraBlockTextColor}
-                      />
-                    </div>
-                  </label>
-                  <div className="ai-editor-rera-card-list">
-                    {reraComplianceOptions.length ? (
-                      reraComplianceOptions.map((option) => (
-                        <button
-                          className="ai-editor-rera-card"
-                          disabled={!currentImage}
-                          key={option.registration.id}
-                          onClick={() => void handleAddReraComplianceBlock(option)}
-                          type="button"
-                        >
-                          <span className="ai-editor-rera-preview">
-                            <span style={{ color: normalizeHexColor(reraBlockTextColor, "#111111") }}>{workspaceComplianceSettings.reraAuthorityLabel}</span>
-                            <strong style={{ color: normalizeHexColor(reraBlockTextColor, "#111111") }}>{option.registration.registrationNumber ?? "QR only"}</strong>
-                            <small style={{ color: normalizeHexColor(reraBlockTextColor, "#111111") }}>{workspaceComplianceSettings.reraWebsiteUrl}</small>
-                            {option.qrAsset?.thumbnailUrl ?? option.qrAsset?.previewUrl ? (
-                              <img alt={option.qrAsset.label} src={option.qrAsset.thumbnailUrl ?? option.qrAsset.previewUrl} />
-                            ) : (
-                              <i aria-hidden="true" />
-                            )}
-                          </span>
-                          <span className="ai-editor-asset-copy">
-                            <strong>{option.registration.label}</strong>
-                            <small>{option.registration.projectId ? (option.registration.isDefault ? "Project default" : "Project RERA") : "General RERA"}</small>
-                          </span>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="ai-editor-pane-empty-state">
-                        <div className="ai-editor-pane-empty-icon">▦</div>
-                        <p>No project RERA registration found. Upload number + QR from Library media.</p>
-                      </div>
-                    )}
-                  </div>
-                  <details className="ai-editor-manual-rera">
-                    <summary>Manual RERA text fallback</summary>
-                    <label className="create-field-label">
-                      RERA number text
-                      <input
-                        className="input"
-                        onChange={(event) => setReraNumberText(event.target.value)}
-                        placeholder="Example: P52100012345"
-                        value={reraNumberText}
-                      />
-                    </label>
-                    <button className="button button-ghost ai-editor-full-button" disabled={!currentImage} onClick={handleAddReraNumberLayer} type="button">
-                      Add RERA number text
-                    </button>
-                  </details>
-                </section>
-                {!currentImage ? <p className="create-hint">Upload an image or choose a template before placing assets.</p> : null}
-              </div>
-            ) : null}
-
-            {activeEditorPane === "elements" ? (
-              <div className="ai-editor-pane">
-                <div className="ai-editor-pane-header">
-                  <p className="panel-label">Visual elements</p>
-                  <h2>Shapes</h2>
-                </div>
-                <input className="ai-editor-search-input" placeholder="Search elements..." type="search" />
-                <div className="ai-editor-large-shape-grid">
-                  <button className="ai-editor-large-shape-button" disabled={!currentImage} onClick={() => handleAddShapeLayer("rect")} type="button">
-                    <span className="ai-editor-shape-icon is-rect" />
-                  </button>
-                  <button className="ai-editor-large-shape-button" disabled={!currentImage} onClick={() => handleAddShapeLayer("circle")} type="button">
-                    <span className="ai-editor-shape-icon is-circle" />
-                  </button>
-                  <button className="ai-editor-large-shape-button" disabled={!currentImage} onClick={() => handleAddShapeLayer("triangle")} type="button">
-                    <span className="ai-editor-shape-icon is-triangle" />
-                  </button>
-                </div>
-                <h3 className="ai-editor-pane-subtitle">Stickers & badges</h3>
-                <div className="ai-editor-large-shape-grid">
-                  <button className="ai-editor-large-shape-button is-star" disabled={!currentImage} onClick={() => handleAddShapeLayer("star")} type="button">
-                    ★
-                  </button>
-                  <button className="ai-editor-large-shape-button is-badge" disabled={!currentImage} onClick={() => handleAddShapeLayer("badge")} type="button">
-                    NEW
-                  </button>
-                </div>
-                {!currentImage ? <p className="create-hint">Upload an image or choose a template before adding elements.</p> : null}
-              </div>
-            ) : null}
-
-            {activeEditorPane === "text" ? (
-              <div className="ai-editor-pane">
-                <div className="ai-editor-pane-header">
-                  <p className="panel-label">Typography</p>
-                  <h2>Text</h2>
-                </div>
-                <button className="button button-primary ai-editor-full-button" disabled={!currentImage} onClick={() => handleAddTextLayer()} type="button">
-                  Add a text box
-                </button>
-                <h3 className="ai-editor-pane-subtitle">Default text styles</h3>
-                <div className="ai-editor-text-preset-list">
-                  <button className="ai-editor-text-preset is-heading" disabled={!currentImage} onClick={() => handleAddTextLayer("heading")} type="button">
-                    Add a heading
-                  </button>
-                  <button className="ai-editor-text-preset is-subheading" disabled={!currentImage} onClick={() => handleAddTextLayer("subheading")} type="button">
-                    Add a subheading
-                  </button>
-                  <button className="ai-editor-text-preset" disabled={!currentImage} onClick={() => handleAddTextLayer("body")} type="button">
-                    Add a little bit of body text
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            {activeEditorPane === "uploads" ? (
-              <div className="ai-editor-pane">
-                <div className="ai-editor-pane-header">
-                  <p className="panel-label">Files</p>
-                  <h2>Uploads</h2>
-                </div>
-                <button className="ai-edit-upload-card" onClick={() => fileInputRef.current?.click()} type="button">
-                  <span className="ai-edit-upload-icon" aria-hidden="true">↑</span>
-                  <span>{currentImage ? "Replace base image" : "Upload source image"}</span>
-                  <small>{currentImage ? currentImage.file.name : "PNG, JPG, or WebP"}</small>
-                </button>
-                <button className="button button-ghost ai-editor-full-button" disabled={!currentImage} onClick={() => layerImageInputRef.current?.click()} type="button">
-                  Add image layer
-                </button>
-                <section className="ai-editor-generated-section">
-                  <div className="ai-editor-generated-header">
-                    <div>
-                      <h3 className="ai-editor-pane-subtitle">Recent generated posts</h3>
-                      <p className="ai-editor-pane-copy">Use a post as your base image or add it as a layer.</p>
-                    </div>
-                    {generatedOutputAssets.length > recentGeneratedOutputAssets.length ? (
-                      <button
-                        className="create-inline-action ai-editor-view-more"
-                        onClick={() => setIsGeneratedPostsModalOpen(true)}
-                        type="button"
-                      >
-                        View more
-                      </button>
-                    ) : null}
-                  </div>
-                  <div className="ai-editor-upload-source-list is-compact">
-                    {recentGeneratedOutputAssets.length ? (
-                      recentGeneratedOutputAssets.map((output) => (
-                      <button
-                        className="ai-editor-upload-source-card"
-                        disabled={!(output.originalUrl ?? output.previewUrl)}
-                        key={output.id}
-                        onClick={() => void handleAddGeneratedOutputLayer(output)}
-                        type="button"
-                      >
-                        <span className="ai-editor-upload-source-preview">
-                          {output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl ? (
-                            <img
-                              alt={`Generated post ${output.outputIndex + 1}`}
-                              src={output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl}
-                            />
-                          ) : (
-                            <span>Post</span>
-                          )}
-                        </span>
-                        <span className="ai-editor-upload-source-copy">
-                          <strong>{`Generated post #${output.outputIndex + 1}`}</strong>
-                          <small>{output.versionNumber ? `Version ${output.versionNumber}` : "Gallery output"}</small>
-                        </span>
-                      </button>
-                      ))
-                    ) : (
-                      <div className="ai-editor-pane-empty-state">
-                        <div className="ai-editor-pane-empty-icon">⌘</div>
-                        <p>No generated posts available yet for this brand.</p>
-                      </div>
-                    )}
-                  </div>
-                </section>
-                <div className="create-picker-summary">
-                  <div>
-                    <p className="create-picker-summary-label">Current canvas</p>
-                    <strong>{dimensionsLabel}</strong>
-                  </div>
-                  {canReset ? (
-                    <div className="create-picker-summary-actions">
-                      <button className="create-inline-action" onClick={handleResetImage} type="button">
-                        Reset
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-
-            {activeEditorPane === "layers" ? (
-              <div className="ai-editor-pane">
-                <div className="ai-editor-pane-header">
-                  <p className="panel-label">Stack</p>
-                  <h2>Layers Management</h2>
-                </div>
-                <p className="ai-editor-pane-copy">Click a layer to select it. Use controls below to edit or reorder.</p>
-                <div className="ai-editor-layer-list">
-                  {canvasLayers.length ? (
-                    canvasLayers.slice().reverse().map((layer) => (
-                      <button
-                        className={`ai-editor-layer-row ${selectedLayerId === layer.id ? "is-active" : ""}`}
-                        key={layer.id}
-                        onClick={() => {
-                          setSelectedLayerId(layer.id);
-                          setToolMode("select");
-                        }}
-                        type="button"
-                      >
-                        <span>{layer.type}</span>
-                        <strong>{getLayerLabel(layer)}</strong>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="ai-editor-pane-empty-state">
-                      <div className="ai-editor-pane-empty-icon">☰</div>
-                      <p>No editable layers yet. Add text or images to get started.</p>
-                    </div>
-                  )}
-                </div>
-                {selectedLayer ? (
-                  <div className="ai-editor-layer-controls">
-                    {selectedLayer.type === "text" ? (
-                      <>
-                        <label className="create-field-label">
-                          Text
-                          <textarea className="create-prompt-textarea ai-editor-textarea" onChange={(event) => updateSelectedLayer({ text: event.target.value })} rows={3} value={selectedLayer.text} />
-                        </label>
-                        <label className="create-field-label">
-                          Typeface
-                          <select className="select-input" onChange={(event) => updateSelectedLayer({ fontFamily: event.target.value })} value={selectedLayer.fontFamily}>
-                            {TEXT_FONT_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                        </label>
-                        <div className="ai-editor-control-grid">
-                          <label className="create-field-label">
-                            Size
-                            <input className="input" min={8} max={260} onChange={(event) => updateSelectedLayer({ fontSize: Number(event.target.value) })} type="number" value={selectedLayer.fontSize} />
-                          </label>
-                          <label className="create-field-label">
-                            Color
-                            <input className="ai-editor-color-input" onChange={(event) => updateSelectedLayer({ color: event.target.value })} type="color" value={selectedLayer.color} />
-                          </label>
-                        </div>
-                      </>
-                    ) : null}
-                    {selectedLayer.type === "shape" ? (
-                      <label className="create-field-label">
-                        Fill
-                        <input className="ai-editor-color-input" onChange={(event) => updateSelectedLayer({ fill: event.target.value })} type="color" value={selectedLayer.fill} />
-                      </label>
-                    ) : null}
-                    {selectedLayer.type === "image" ? (
-                      selectedLayer.reraBlock ? (
-                        <label className="create-field-label">
-                          RERA text color
-                          <div className="ai-editor-inline-color-input">
-                            <input
-                              className="ai-editor-color-input"
-                              onChange={(event) => void handleSelectedReraBlockColorChange(event.target.value)}
-                              type="color"
-                              value={normalizeHexColor(selectedLayer.reraBlock.textColor, "#111111")}
-                            />
-                            <input
-                              className="input"
-                              onChange={(event) =>
-                                void handleSelectedReraBlockColorChange(
-                                  event.target.value.startsWith("#") ? event.target.value : `#${event.target.value}`
-                                )
-                              }
-                              placeholder="#111111"
-                              value={selectedLayer.reraBlock.textColor}
-                            />
-                          </div>
-                        </label>
-                      ) : null
-                    ) : null}
-                    <div className="ai-editor-control-grid">
-                      <label className="create-field-label">
-                        Rotate
-                        <input className="input" min={-180} max={180} onChange={(event) => updateSelectedLayer({ rotation: Number(event.target.value) })} type="number" value={selectedLayer.rotation} />
-                      </label>
-                      <label className="create-field-label">
-                        Opacity: {Math.round(selectedLayer.opacity * 100)}%
-                        <input className="ai-edit-range" min={0.1} max={1} step={0.05} onChange={(event) => updateSelectedLayer({ opacity: Number(event.target.value) })} type="range" value={selectedLayer.opacity} />
-                      </label>
-                    </div>
-                    <div className="ai-editor-layer-actions">
-                      <button
-                        aria-label="Duplicate layer"
-                        className="ai-editor-layer-action-btn"
-                        onClick={duplicateSelectedLayer}
-                        title="Duplicate"
-                        type="button"
-                      >
-                        <svg fill="none" height="16" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <rect height="14" width="14" x="8" y="8" rx="2" ry="2" />
-                          <path d="M4 16V4a2 2 0 0 1 2-2h12" />
-                        </svg>
-                      </button>
-                      <button
-                        aria-label="Move layer up"
-                        className="ai-editor-layer-action-btn"
-                        onClick={() => moveSelectedLayer("forward")}
-                        title="Layer up"
-                        type="button"
-                      >
-                        <svg fill="none" height="16" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="m18 15-6-6-6 6" />
-                        </svg>
-                      </button>
-                      <button
-                        aria-label="Move layer down"
-                        className="ai-editor-layer-action-btn"
-                        onClick={() => moveSelectedLayer("backward")}
-                        title="Layer down"
-                        type="button"
-                      >
-                        <svg fill="none" height="16" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="m6 9 6 6 6-6" />
-                        </svg>
-                      </button>
-                      <button
-                        aria-label="Center horizontally"
-                        className="ai-editor-layer-action-btn"
-                        onClick={() => centerSelectedLayer("horizontal")}
-                        title="Center H"
-                        type="button"
-                      >
-                        <svg fill="none" height="16" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 3v18" />
-                          <path d="M8 8H3" />
-                          <path d="M8 16H3" />
-                          <path d="M16 8h5" />
-                          <path d="M16 16h5" />
-                        </svg>
-                      </button>
-                      <button
-                        aria-label="Delete layer"
-                        className="ai-editor-layer-action-btn is-danger"
-                        onClick={handleDeleteSelectedLayer}
-                        title="Delete"
-                        type="button"
-                      >
-                        <svg fill="none" height="16" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M3 6h18" />
-                          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                          <line x1="10" x2="10" y1="11" y2="17" />
-                          <line x1="14" x2="14" y1="11" y2="17" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
-            {activeEditorPane === "draw" ? (
-              <div className="ai-editor-pane">
-                <div className="ai-editor-pane-header">
-                  <p className="panel-label">Freehand</p>
-                  <h2>Draw</h2>
-                </div>
-                <p className="ai-editor-pane-copy">Freely draw on your canvas using brush tools.</p>
-                <div className="ai-editor-draw-tool-list">
-                  <button className={`ai-editor-draw-tool ${drawMode === "pen" ? "is-active" : ""}`} disabled={!currentImage} onClick={() => setDrawMode("pen")} type="button">Pen</button>
-                  <button className={`ai-editor-draw-tool ${drawMode === "highlighter" ? "is-active" : ""}`} disabled={!currentImage} onClick={() => setDrawMode("highlighter")} type="button">Highlighter</button>
-                  <button className={`ai-editor-draw-tool ${drawMode === "select" ? "is-active" : ""}`} onClick={() => setDrawMode("select")} type="button">Select (Stop)</button>
-                </div>
-                <label className="create-field-label">
-                  Color
-                  <div className="ai-editor-swatch-row">
-                    {DRAW_COLORS.map((color) => (
-                      <button aria-label={`Use ${color}`} className={`ai-editor-swatch ${drawColor === color ? "is-active" : ""}`} key={color} onClick={() => setDrawColor(color)} style={{ backgroundColor: color }} type="button" />
-                    ))}
-                  </div>
-                </label>
-                <label className="create-field-label">
-                  Size ({drawSize}px)
-                  <input className="ai-edit-range" max={50} min={1} onChange={(event) => setDrawSize(Number(event.target.value))} type="range" value={drawSize} />
-                </label>
-              </div>
-            ) : null}
-
-            {activeEditorPane === "ai-edit" ? (
-              <div className="ai-editor-pane">
-                <div className="ai-editor-pane-header">
-                  <p className="panel-label">Generative edit</p>
-                  <h2>AI Edit</h2>
-                </div>
-                <div className="create-mode-switch" role="tablist" aria-label="Prompt mode">
-                  <button className={`create-mode-option ${promptMode === "normal" ? "is-active" : ""}`} onClick={() => setPromptMode("normal")} role="tab" type="button">
-                    Normal prompt
-                  </button>
-                  <button className={`create-mode-option ${promptMode === "list" ? "is-active" : ""}`} onClick={() => setPromptMode("list")} role="tab" type="button">
-                    List mode
-                  </button>
-                </div>
-                {promptMode === "normal" ? (
-                  <label className="create-field-label create-field-label-prominent">
-                    Edit prompt
-                    <textarea
-                      className="create-prompt-textarea"
-                      onChange={(event) => setPrompt(event.target.value)}
-                      placeholder="Example: remove the worker, replace the signboard with blank stone, or change the sofa color to beige"
-                      rows={5}
-                      value={prompt}
-                    />
-                  </label>
-                ) : (
-                  <>
-                    <p className="ai-editor-pane-copy">Add each requested change separately. Apply AI edit will combine them automatically.</p>
-                    <div className="ai-editor-list-container">
-                      {listPromptItems.map((item, index) => (
-                        <div className="ai-editor-list-item" key={`change-item-${index + 1}`}>
-                          <textarea
-                            className="create-prompt-textarea is-list-item"
-                            onChange={(event) => {
-                              handleListPromptItemChange(index, event.target.value);
-                              event.currentTarget.style.height = "auto";
-                              event.currentTarget.style.height = event.currentTarget.scrollHeight + "px";
-                            }}
-                            onFocus={(event) => {
-                              event.currentTarget.style.height = "auto";
-                              event.currentTarget.style.height = event.currentTarget.scrollHeight + "px";
-                            }}
-                            placeholder={`Change ${index + 1}`}
-                            rows={1}
-                            value={item}
-                          />
-                          <button
-                            className="ai-editor-list-remove-btn"
-                            disabled={listPromptItems.length <= 1}
-                            onClick={() => handleRemoveListPromptItem(index)}
-                            title="Remove change"
-                            type="button"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M18 12H6" />
-                            </svg>
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="ai-editor-list-footer">
-                      <button className="ai-editor-list-add-btn" onClick={handleAddListPromptItem} type="button">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 5v14M5 12h14" />
-                        </svg>
-                        <span>Add change</span>
-                      </button>
-                    </div>
-                  </>
-                )}
-                <button className="button button-primary ai-edit-apply-button" disabled={!canApplyDirectEdit} onClick={() => void handlePrimaryAction()} type="button">
-                  {primaryActionLabel}
-                </button>
-              </div>
-            ) : null}
-
-            {status ? <div className="ai-edit-status-card">{status}</div> : null}
-            {error ? <div className="ai-edit-status-card is-error">{error}</div> : null}
-          </div>
-        </div>
-      </aside>
+      <EditorSidebar>{renderPane()}</EditorSidebar>
 
       <main className="create-v2-main ai-edit-main">
         <section className="ai-edit-stage-panel">
-          {currentImage ? (
-            <div className="ai-edit-stage-header">
-              <div>
-                <p className="panel-label">Canvas</p>
-                <h3>{currentImage.file.name}</h3>
-                <span className="ai-edit-stage-dimensions">{dimensionsLabel}</span>
-              </div>
-              <div className="ai-edit-stage-zoom-controls" aria-label="Canvas zoom controls">
-                <button
-                  aria-label="Zoom out"
-                  onClick={() => setStageZoom((current) => clamp(Number((current - 0.1).toFixed(2)), 0.4, 3))}
-                  type="button"
-                >
-                  -
+          <TopFormattingBar onOpenEffects={() => editor.setActiveEditorPane("effects")} onOpenPosition={() => editor.setActiveEditorPane("position")} onOpenFont={() => editor.setActiveEditorPane("font")} />
+
+          <div
+            className={`ai-edit-stage-shell ${isPanning ? "is-panning" : ""} ${isSpacePressed ? "has-hand-tool" : ""}`}
+            onPointerCancel={handleShellPointerUp}
+            onPointerDown={handleShellPointerDown}
+            onPointerLeave={() => { lastStagePointerRef.current = null; }}
+            onPointerMove={handleShellPointerMove}
+            onPointerMoveCapture={handleShellPointerMoveCapture}
+            onPointerUp={handleShellPointerUp}
+            ref={stageShellRef}
+          >
+            <StageCanvas
+              stageBusyMessage={stageBusyMessage}
+              onLayerPointerDown={handleLayerPointerDown}
+              onStagePointerDown={handleStagePointerDown}
+              onLayerPointerMove={handleLayerPointerMove}
+              onLayerPointerUp={handleLayerPointerUp}
+              onFitToScreen={handleFitToScreen}
+              stageFrameRef={stageFrameRef}
+              isPanning={isPanning}
+              isSpacePressed={isSpacePressed}
+            />
+          </div>
+
+          {isCompareOpen && state.currentImage && savedVersions.length >= 2 ? (
+            <EditorCompareOverlay
+              afterId={compareAfterId}
+              afterOutput={compareAfterOutput}
+              beforeId={compareBeforeId}
+              beforeOutput={compareBeforeOutput}
+              image={state.currentImage}
+              isLoading={isCompareLoading}
+              onAfterChange={(value) => setCompareAfterId(value)}
+              onBeforeChange={(value) => setCompareBeforeId(value)}
+              onClose={() => setIsCompareOpen(false)}
+              onSliderChange={setCompareSliderValue}
+              sliderValue={compareSliderValue}
+              versions={savedVersions}
+            />
+          ) : null}
+
+          {state.currentImage && lastSavedOutput && savedVersions.length > 1 ? (
+            <EditorVersionRail
+              currentOutputId={state.currentSourceOutputId}
+              isDisabled={isHistoryLocked}
+              isLoading={isLoadingVersionHistory}
+              lastSavedOutput={lastSavedOutput}
+              loadingOutputId={loadingOutputId}
+              onOpenVersion={handleOpenVersion}
+              versionHistory={versionHistory}
+            />
+          ) : null}
+
+          {state.currentImage ? (
+            <div className="ai-edit-stage-utility-stack">
+              <div className="ai-edit-stage-zoom-controls is-floating" aria-label="Canvas zoom controls">
+                <button aria-label="Zoom out" onClick={() => setStageZoomAroundPoint(state.stageZoom - 0.1, getLastStageFocusPoint())} type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
                 </button>
-                <button aria-label="Reset canvas zoom" onClick={() => setStageZoom(1)} type="button">
-                  {Math.round(stageZoom * 100)}%
+                <button className="ai-edit-zoom-value" aria-label="Reset canvas zoom" onClick={resetStageZoom} title="Reset to 100%" type="button">
+                  {Math.round(state.stageZoom * 100)}%
                 </button>
-                <button
-                  aria-label="Zoom in"
-                  onClick={() => setStageZoom((current) => clamp(Number((current + 0.1).toFixed(2)), 0.4, 3))}
-                  type="button"
-                >
-                  +
+                <button aria-label="Zoom in" onClick={() => setStageZoomAroundPoint(state.stageZoom + 0.1, getLastStageFocusPoint())} type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                </button>
+                <div className="ai-edit-zoom-divider" />
+                <button aria-label="Fit to screen" className="ai-edit-zoom-fit-btn" onClick={handleFitToScreen} title="Fit to screen" type="button">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M15 3h6v6" />
+                    <path d="M9 21H3v-6" />
+                    <path d="M21 3l-7 7" />
+                    <path d="M3 21l7-7" />
+                  </svg>
                 </button>
               </div>
             </div>
           ) : null}
-
-          <div className="ai-edit-stage-shell" ref={stageShellRef}>
-            {currentImage && currentImageUrl ? (
-              <div className="ai-edit-stage-scroll-content">
-                <div
-                  className="ai-edit-stage-frame"
-                  onPointerCancel={handleLayerPointerUp}
-                  onPointerDown={handleStagePointerDown}
-                  onPointerMove={handleLayerPointerMove}
-                  onPointerUp={handleLayerPointerUp}
-                  ref={stageFrameRef}
-                  style={{
-                    aspectRatio: `${currentImage.width} / ${currentImage.height}`,
-                    width: displayStageWidth ? `${displayStageWidth}px` : undefined
-                  }}
-                >
-                  <img alt="Source" className="ai-edit-stage-image" draggable={false} src={currentImageUrl} />
-                  <div className="ai-editor-layer-surface" aria-label="Editable layers">
-                    {canvasLayers.map((layer) => {
-                      const selected = layer.id === selectedLayerId;
-                      if (layer.type === "text") {
-                      return (
-                        <div
-                          className={`ai-editor-layer ai-editor-text-layer ${selected ? "is-selected" : ""}`}
-                          key={layer.id}
-                          onPointerDown={(event) => handleLayerPointerDown(event, layer)}
-                          style={{
-                            left: `${layer.x * 100}%`,
-                            top: `${layer.y * 100}%`,
-                            width: `${layer.width * 100}%`,
-                            transform: `rotate(${layer.rotation}deg)`,
-                            backgroundColor: isTransparentColor(layer.backgroundColor) ? "transparent" : layer.backgroundColor,
-                            color: layer.color,
-                            fontFamily: layer.fontFamily,
-                            fontSize: `${Math.max(8, layer.fontSize * stageScale)}px`,
-                            fontWeight: layer.fontWeight,
-                            opacity: layer.opacity,
-                            textAlign: layer.align,
-                            letterSpacing: `${layer.letterSpacing * stageScale}px`,
-                            lineHeight: layer.lineHeight,
-                            textShadow: layer.shadow ? "0 8px 24px rgba(0, 0, 0, 0.28)" : "none"
-                          }}
-                        >
-                          {layer.text || "Text"}
-                          {selected ? <span className="ai-editor-resize-handle" onPointerDown={(event) => handleLayerPointerDown(event, layer, "resize")} /> : null}
-                        </div>
-                      );
-                    }
-
-                    if (layer.type === "shape") {
-                      return (
-                        <div
-                          className={`ai-editor-layer ai-editor-shape-layer is-${layer.shape} ${selected ? "is-selected" : ""}`}
-                          key={layer.id}
-                          onPointerDown={(event) => handleLayerPointerDown(event, layer)}
-                          style={{
-                            left: `${layer.x * 100}%`,
-                            top: `${layer.y * 100}%`,
-                            width: `${layer.width * 100}%`,
-                            height: `${layer.height * 100}%`,
-                            opacity: layer.opacity,
-                            transform: `rotate(${layer.rotation}deg)`,
-                            color: layer.fill,
-                            backgroundColor: layer.shape === "rect" || layer.shape === "circle" || layer.shape === "badge" ? layer.fill : "transparent"
-                          }}
-                        >
-                          {layer.shape === "triangle" ? <span className="ai-editor-triangle-shape" /> : null}
-                          {layer.shape === "star" ? <span className="ai-editor-star-shape">★</span> : null}
-                          {layer.shape === "badge" ? <span className="ai-editor-badge-label">NEW</span> : null}
-                          {selected ? <span className="ai-editor-resize-handle" onPointerDown={(event) => handleLayerPointerDown(event, layer, "resize")} /> : null}
-                        </div>
-                      );
-                    }
-
-                    if (layer.type === "draw") {
-                      const points = layer.points.map((point) => `${point.x * 100},${point.y * 100}`).join(" ");
-                      return (
-                        <svg className="ai-editor-layer ai-editor-draw-layer" key={layer.id} preserveAspectRatio="none" style={{ inset: 0, opacity: layer.opacity }} viewBox="0 0 100 100">
-                          <polyline fill="none" points={points} stroke={layer.color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={Math.max(0.12, (layer.size * stageScale * 100) / Math.max(1, displayStageWidth ?? 1))} />
-                        </svg>
-                      );
-                    }
-
-                      return (
-                        <div
-                          className={`ai-editor-layer ai-editor-image-layer ${selected ? "is-selected" : ""}`}
-                          key={layer.id}
-                          onPointerDown={(event) => handleLayerPointerDown(event, layer)}
-                          style={{
-                            left: `${layer.x * 100}%`,
-                            top: `${layer.y * 100}%`,
-                            width: `${layer.width * 100}%`,
-                            height: `${layer.height * 100}%`,
-                            opacity: layer.opacity,
-                            transform: `rotate(${layer.rotation}deg)`,
-                            filter: layer.filter === "grayscale" ? "grayscale(1)" : layer.filter === "sepia" ? "sepia(0.85)" : "none"
-                          }}
-                        >
-                          <img alt={layer.name} draggable={false} src={layer.src} />
-                          {selected ? <span className="ai-editor-resize-handle" onPointerDown={(event) => handleLayerPointerDown(event, layer, "resize")} /> : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {stageBusyMessage ? (
-                    <div className="ai-edit-stage-overlay" role="status" aria-live="polite">
-                      <div className="ai-edit-stage-spinner" />
-                      <span>{stageBusyMessage}</span>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : (
-              <div className="ai-edit-empty-canvas">
-                <div className="create-empty-icon" aria-hidden="true">
-                  <svg fill="none" height="40" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                    <circle cx="8.5" cy="8.5" r="1.5" />
-                    <polyline points="21 15 16 10 5 21" />
-                  </svg>
-                </div>
-                <h2>Start your composition</h2>
-                <p>Upload a high-quality image or select a base layer from your gallery to begin the AI editing process.</p>
-                <button className="button button-primary" onClick={() => fileInputRef.current?.click()} type="button">
-                  Upload source image
-                </button>
-              </div>
-            )}
-          </div>
         </section>
       </main>
+
+      {error || status ? (
+        <div className={`ai-edit-toast ${error ? "is-error" : ""}`} role={error ? "alert" : "status"} aria-live={error ? "assertive" : "polite"}>
+          {error ?? status}
+        </div>
+      ) : null}
+
+      <SaveDrawer isOpen={isSaveDrawerOpen} onClose={() => setIsSaveDrawerOpen(false)} onSave={handleSaveOutput} isSaving={isSavingOutput} hasUnsavedChanges={hasUnsavedChanges} />
 
       {isGeneratedPostsModalOpen ? (
         <div className="drawer-overlay ai-editor-generated-modal-overlay" onClick={() => setIsGeneratedPostsModalOpen(false)}>
@@ -2316,25 +1602,25 @@ export default function StudioAiEditPage() {
               </button>
             </div>
             <div className="ai-editor-generated-modal-body">
-              {generatedOutputAssets.length ? (
+              {isLoadingRecentOutputs ? (
                 <div className="ai-editor-generated-modal-grid">
-                  {generatedOutputAssets.map((output) => (
+                  {[...Array(6)].map((_, i) => (
+                    <div className="ai-editor-upload-source-card ai-editor-generated-modal-card ai-editor-skeleton" key={i} style={{ height: 180 }} />
+                  ))}
+                </div>
+              ) : editorRecentOutputs.length ? (
+                <div className="ai-editor-generated-modal-grid">
+                  {editorRecentOutputs.map((output) => (
                     <button
                       className="ai-editor-upload-source-card ai-editor-generated-modal-card"
                       disabled={!(output.originalUrl ?? output.previewUrl)}
                       key={output.id}
-                      onClick={() => {
-                        setIsGeneratedPostsModalOpen(false);
-                        void handleAddGeneratedOutputLayer(output);
-                      }}
+                      onClick={() => void handleAddGeneratedOutputFromModal(output)}
                       type="button"
                     >
                       <span className="ai-editor-upload-source-preview">
                         {output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl ? (
-                          <img
-                            alt={`Generated post ${output.outputIndex + 1}`}
-                            src={output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl}
-                          />
+                          <img alt={`Generated post ${output.outputIndex + 1}`} src={output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl} />
                         ) : (
                           <span>Post</span>
                         )}
@@ -2356,787 +1642,216 @@ export default function StudioAiEditPage() {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
 
-      {isSaveDrawerOpen ? (
-        <div className="drawer-overlay" onClick={() => setIsSaveDrawerOpen(false)}>
-          <div className="drawer-content" onClick={(event) => event.stopPropagation()}>
-            <div className="drawer-header">
-              <div>
-                <p className="panel-label">Editor save</p>
-                <h2>Save changes</h2>
-              </div>
-              <button className="drawer-close" onClick={() => setIsSaveDrawerOpen(false)} type="button">
-                ×
-              </button>
-            </div>
-            <div className="drawer-body">
-              <div className="drawer-form">
-                <p className="ai-editor-pane-copy">
-                  {currentSourceOutputId
-                    ? "Choose whether this save should preserve the current output as a previous version or overwrite the current draft."
-                    : "Save the current editor composition as a new output in Gallery."}
-                </p>
+function EditorTopbarSaveState({
+  hasUnsavedChanges,
+  isSaving,
+  lastSavedOutput,
+  onSaveChanges,
+}: {
+  hasUnsavedChanges: boolean;
+  isSaving: boolean;
+  lastSavedOutput: CreativeOutputRecord | null;
+  onSaveChanges: () => void;
+}) {
+  const statusLabel = isSaving
+    ? "Saving..."
+    : hasUnsavedChanges
+      ? "Unsaved changes"
+      : lastSavedOutput
+        ? `Saved v${lastSavedOutput.versionNumber}`
+        : "Not saved yet";
 
-                {currentSourceOutputId ? (
-                  <div className="ai-editor-save-mode-list">
-                    <label className={`ai-editor-save-mode-card ${saveMode === "version" ? "is-active" : ""}`}>
-                      <input
-                        checked={saveMode === "version"}
-                        name="editor-save-mode"
-                        onChange={() => setSaveMode("version")}
-                        type="radio"
-                      />
-                      <div>
-                        <strong>Create new version</strong>
-                        <p>Keeps the current design and saves this edit as the next version in Gallery.</p>
-                      </div>
-                    </label>
-                    <label className={`ai-editor-save-mode-card ${saveMode === "replace" ? "is-active" : ""} ${!canReplaceCurrentSource ? "is-disabled" : ""}`}>
-                      <input
-                        checked={saveMode === "replace"}
-                        disabled={!canReplaceCurrentSource}
-                        name="editor-save-mode"
-                        onChange={() => setSaveMode("replace")}
-                        type="radio"
-                      />
-                      <div>
-                        <strong>Replace current draft</strong>
-                        <p>
-                          {canReplaceCurrentSource
-                            ? "Updates the current draft in place instead of creating a new output."
-                            : "Only draft-like outputs can be replaced. Approved or closed outputs must be saved as a new version."}
-                        </p>
-                      </div>
-                    </label>
-                  </div>
-                ) : (
-                  <div className="create-picker-summary">
-                    <div>
-                      <p className="create-picker-summary-label">Save target</p>
-                      <strong>New Gallery output</strong>
-                    </div>
-                  </div>
-                )}
-
-                <div className="drawer-footer">
-                  <button className="button button-ghost" onClick={() => setIsSaveDrawerOpen(false)} type="button">
-                    Cancel
-                  </button>
-                  <button className="button button-primary" disabled={isSavingOutput} onClick={() => void handleSaveOutput()} type="button">
-                    {isSavingOutput
-                      ? "Saving..."
-                      : currentSourceOutputId
-                        ? saveMode === "replace"
-                          ? "Replace draft"
-                          : "Save as version"
-                        : "Save to Gallery"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+  return (
+    <div className={`ai-edit-topbar-save-state ${hasUnsavedChanges ? "is-dirty" : "is-saved"}`} role="status" aria-live="polite">
+      <span className="ai-edit-save-dot" />
+      <strong>{statusLabel}</strong>
+      {hasUnsavedChanges ? (
+        <button disabled={isSaving} onClick={onSaveChanges} type="button">
+          Save
+        </button>
       ) : null}
     </div>
   );
 }
 
-function useObjectUrl(file: File | null) {
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!file) {
-      setObjectUrl(null);
-      return;
-    }
-
-    const nextUrl = URL.createObjectURL(file);
-    setObjectUrl(nextUrl);
-
-    return () => {
-      URL.revokeObjectURL(nextUrl);
-    };
-  }, [file]);
-
-  return objectUrl;
+function getCreativeOutputOriginalUrl(output: CreativeOutputRecord | null) {
+  return output?.originalUrl ?? null;
 }
 
-async function createEditableImage(file: File): Promise<EditableImage> {
-  const dimensions = await loadImageDimensions(file);
-  return { file, width: dimensions.width, height: dimensions.height };
-}
-
-async function createTemplateBaseImage(templateId: (typeof TEMPLATE_PRESETS)[number]["id"]): Promise<EditableImage> {
-  const backgrounds: Record<(typeof TEMPLATE_PRESETS)[number]["id"], string> = {
-    minimal: "#f4f5f7",
-    quote: "#fff8e7",
-    sale: "#f43f46",
-    dark: "#0c0d10"
-  };
-  const canvas = document.createElement("canvas");
-  canvas.width = 1080;
-  canvas.height = 1080;
-  const ctx = canvas.getContext("2d");
-
-  if (!ctx) {
-    throw new Error("Unable to create a template canvas.");
-  }
-
-  ctx.fillStyle = backgrounds[templateId];
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((value) => {
-      if (!value) {
-        reject(new Error("Unable to render the selected template."));
-        return;
-      }
-
-      resolve(value);
-    }, "image/png");
-  });
-
-  return createEditableImage(new File([blob], `${templateId}-template.png`, { type: "image/png" }));
-}
-
-function buildTemplateLayers(
-  templateId: (typeof TEMPLATE_PRESETS)[number]["id"],
-  width: number,
-  _height: number
-): CanvasLayer[] {
-  const baseText = (patch: Partial<CanvasTextLayer>): CanvasTextLayer => ({
-    id: createLayerId("text"),
-    type: "text",
-    text: "Template text",
-    x: 0.16,
-    y: 0.35,
-    width: 0.68,
-    rotation: 0,
-    fontFamily: TEXT_FONT_OPTIONS[1]?.value ?? "'Helvetica Neue', Arial, sans-serif",
-    fontSize: Math.round(width * 0.085),
-    fontWeight: "700",
-    color: "#151821",
-    backgroundColor: "#00000000",
-    align: "center",
-    letterSpacing: 0,
-    lineHeight: 0.95,
-    shadow: false,
-    opacity: 1,
-    ...patch
-  });
-
-  if (templateId === "quote") {
-    return [
-      baseText({
-        text: "\"Simplicity.\"",
-        x: 0.14,
-        y: 0.45,
-        width: 0.72,
-        fontFamily: TEXT_FONT_OPTIONS[3]?.value ?? "Georgia, serif",
-        fontSize: Math.round(width * 0.05),
-        fontWeight: "400",
-        color: "#111111",
-        lineHeight: 1.1
-      })
-    ];
-  }
-
-  if (templateId === "sale") {
-    return [
-      baseText({
-        text: "SALE",
-        x: 0.1,
-        y: 0.41,
-        width: 0.8,
-        fontSize: Math.round(width * 0.13),
-        fontWeight: "700",
-        color: "#ffffff",
-        letterSpacing: 3
-      })
-    ];
-  }
-
-  if (templateId === "dark") {
-    return [
-      baseText({
-        text: "FUTURE\nTECH",
-        x: 0.22,
-        y: 0.36,
-        width: 0.56,
-        fontSize: Math.round(width * 0.084),
-        fontWeight: "700",
-        color: "#f7f7f8",
-        letterSpacing: 4
-      })
-    ];
-  }
-
-  return [
-    baseText({
-      text: "THE NEW\nSTANDARD",
-      x: 0.2,
-      y: 0.38,
-      width: 0.6,
-      fontSize: Math.round(width * 0.07),
-      fontWeight: "700",
-      letterSpacing: -1
-    })
-  ];
-}
-
-async function loadImageDimensions(file: File) {
-  const objectUrl = URL.createObjectURL(file);
-
-  try {
-    return await new Promise<{ width: number; height: number }>((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
-      image.onerror = () => reject(new Error("Unable to read image dimensions."));
-      image.src = objectUrl;
-    });
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-}
-
-async function loadImageSourceDimensions(source: string) {
-  const image = await loadImage(source);
-  return { width: image.naturalWidth || image.width, height: image.naturalHeight || image.height };
-}
-
-async function sourceToFile(source: string, fileName: string, fallbackType: string) {
-  const response = await fetch(source);
-  if (!response.ok) {
-    throw new Error(`Unable to load the edited image (${response.status}).`);
-  }
-
-  const blob = await response.blob();
-  const contentType = blob.type || fallbackType;
-  return new File([blob], ensureExtension(fileName, contentType), { type: contentType });
-}
-
-function cloneFileWithName(file: File, fileName: string) {
-  const contentType = file.type || "image/png";
-  return new File([file], ensureExtension(fileName, contentType), {
-    type: contentType,
-    lastModified: file.lastModified
-  });
-}
-
-async function loadImage(source: string) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image();
-    if (/^https?:\/\//i.test(source)) {
-      image.crossOrigin = "anonymous";
-    }
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Unable to load image."));
-    image.src = source;
-  });
-}
-
-async function createReraComplianceBlockImage(input: {
-  authorityLabel: string;
-  registrationNumber: string;
-  websiteUrl: string;
-  textColor: string;
-  qrSourceUrl?: string | null;
+function EditorCompareOverlay({
+  afterId,
+  afterOutput,
+  beforeId,
+  beforeOutput,
+  image,
+  isLoading,
+  onAfterChange,
+  onBeforeChange,
+  onClose,
+  onSliderChange,
+  sliderValue,
+  versions,
+}: {
+  afterId: string | null;
+  afterOutput: CreativeOutputRecord | null;
+  beforeId: string | null;
+  beforeOutput: CreativeOutputRecord | null;
+  image: EditableImage;
+  isLoading: boolean;
+  onAfterChange: (value: string) => void;
+  onBeforeChange: (value: string) => void;
+  onClose: () => void;
+  onSliderChange: (value: number) => void;
+  sliderValue: number;
+  versions: CreativeOutputRecord[];
 }) {
-  const width = 920;
-  const height = 250;
-  const paddingX = 4;
-  const qrSize = input.qrSourceUrl ? 190 : 0;
-  const qrX = width - qrSize - paddingX;
-  const textMaxWidth = input.qrSourceUrl ? qrX - paddingX - 26 : width - paddingX * 2;
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
+  const beforeUrl = getCreativeOutputOriginalUrl(beforeOutput);
+  const afterUrl = getCreativeOutputOriginalUrl(afterOutput);
+  const beforeLabel = beforeOutput ? `v${beforeOutput.versionNumber}` : "Before";
+  const afterLabel = afterOutput ? `v${afterOutput.versionNumber}` : "After";
+  const showLoading = isLoading || !beforeUrl || !afterUrl;
 
-  if (!ctx) {
-    throw new Error("Unable to create the RERA block.");
-  }
-
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = input.textColor;
-  ctx.textBaseline = "alphabetic";
-
-  ctx.font = "700 34px 'Helvetica Neue', Arial, sans-serif";
-  ctx.fillText(input.authorityLabel, paddingX, 48, textMaxWidth);
-  const labelWidth = Math.min(ctx.measureText(input.authorityLabel).width, textMaxWidth * 0.42);
-  ctx.strokeStyle = input.textColor;
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.moveTo(paddingX + labelWidth + 16, 48);
-  ctx.lineTo(textMaxWidth, 48);
-  ctx.stroke();
-
-  ctx.font = fitCanvasFont(ctx, input.registrationNumber, "700", textMaxWidth, 86, 42);
-  ctx.fillText(input.registrationNumber, paddingX, 132, textMaxWidth);
-
-  ctx.font = fitCanvasFont(ctx, input.websiteUrl, "700", textMaxWidth, 34, 22);
-  ctx.fillText(input.websiteUrl, paddingX, 196, textMaxWidth);
-
-  if (input.qrSourceUrl) {
-    const qrImage = await loadImage(input.qrSourceUrl);
-    ctx.drawImage(qrImage, qrX, 30, qrSize, qrSize);
-  }
-
-  return {
-    dataUrl: canvas.toDataURL("image/png"),
-    width,
-    height
-  };
-}
-
-function fitCanvasFont(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  weight: "600" | "700" | "800",
-  maxWidth: number,
-  startSize: number,
-  minSize: number
-) {
-  let size = startSize;
-  while (size > minSize) {
-    const font = `${weight} ${size}px 'Helvetica Neue', Arial, sans-serif`;
-    ctx.font = font;
-    if (ctx.measureText(text).width <= maxWidth) {
-      return font;
-    }
-    size -= 2;
-  }
-  return `${weight} ${minSize}px 'Helvetica Neue', Arial, sans-serif`;
-}
-
-function downloadFile(file: File) {
-  const url = URL.createObjectURL(file);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = file.name;
-  anchor.click();
-  window.setTimeout(() => {
-    URL.revokeObjectURL(url);
-  }, 0);
-}
-
-function buildEditedFileName(fileName: string) {
-  return `${stripFileExtension(fileName)}-edit.png`;
-}
-
-function buildComposedFileName(fileName: string) {
-  return `${stripFileExtension(fileName)}-composition.png`;
-}
-
-function buildNormalizedSourceFileName(fileName: string) {
-  return `${stripFileExtension(fileName)}-source.png`;
-}
-
-async function renderCompositionToFile(sourceImage: EditableImage, layers: CanvasLayer[], fileName: string) {
-  const sourceUrl = URL.createObjectURL(sourceImage.file);
-
-  try {
-    const image = await loadImage(sourceUrl);
-    const canvas = document.createElement("canvas");
-    canvas.width = sourceImage.width;
-    canvas.height = sourceImage.height;
-    const ctx = canvas.getContext("2d");
-
-    if (!ctx) {
-      throw new Error("Unable to export the composition.");
-    }
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-    for (const layer of layers) {
-      ctx.save();
-      ctx.globalAlpha = layer.opacity;
-
-      if (layer.type === "image") {
-        const layerImage = await loadImage(layer.src);
-        applyCanvasFilter(ctx, layer.filter);
-        drawRotated(ctx, layer.x * canvas.width, layer.y * canvas.height, layer.width * canvas.width, layer.height * canvas.height, layer.rotation, () => {
-          drawContainedImage(ctx, layerImage, layer.width * canvas.width, layer.height * canvas.height);
-        });
-      } else if (layer.type === "shape") {
-        drawShapeLayer(ctx, layer, canvas.width, canvas.height);
-      } else if (layer.type === "draw") {
-        drawFreehandLayer(ctx, layer, canvas.width, canvas.height);
-      } else {
-        drawWrappedText(ctx, layer, canvas.width, canvas.height);
-      }
-
-      ctx.restore();
-    }
-
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((value) => {
-        if (!value) {
-          reject(new Error("Unable to export the composition."));
-          return;
-        }
-
-        resolve(value);
-      }, "image/png");
-    });
-
-    return new File([blob], fileName, { type: "image/png" });
-  } finally {
-    URL.revokeObjectURL(sourceUrl);
-  }
-}
-
-function drawShapeLayer(
-  ctx: CanvasRenderingContext2D,
-  layer: CanvasShapeLayer,
-  canvasWidth: number,
-  canvasHeight: number
-) {
-  const x = layer.x * canvasWidth;
-  const y = layer.y * canvasHeight;
-  const width = layer.width * canvasWidth;
-  const height = layer.height * canvasHeight;
-
-  ctx.fillStyle = layer.fill;
-  drawRotated(ctx, x, y, width, height, layer.rotation, () => {
-    if (layer.shape === "circle") {
-      ctx.beginPath();
-      ctx.ellipse(width / 2, height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
-      ctx.fill();
-      return;
-    }
-
-    if (layer.shape === "triangle") {
-      ctx.beginPath();
-      ctx.moveTo(width / 2, 0);
-      ctx.lineTo(width, height);
-      ctx.lineTo(0, height);
-      ctx.closePath();
-      ctx.fill();
-      return;
-    }
-
-    if (layer.shape === "star") {
-      drawStarPath(ctx, width / 2, height / 2, Math.min(width, height) / 2, Math.min(width, height) / 4);
-      ctx.fill();
-      return;
-    }
-
-    roundedRect(ctx, 0, 0, width, height, layer.shape === "badge" ? height / 2 : Math.min(width, height) * 0.08);
-    ctx.fill();
-
-    if (layer.shape === "badge") {
-      ctx.fillStyle = "#ffffff";
-      ctx.font = `800 ${Math.max(12, height * 0.34)}px 'Helvetica Neue', Arial, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("NEW", width / 2, height / 2, width * 0.78);
-    }
-  });
-}
-
-function drawFreehandLayer(
-  ctx: CanvasRenderingContext2D,
-  layer: CanvasDrawLayer,
-  canvasWidth: number,
-  canvasHeight: number
-) {
-  if (layer.points.length < 1) return;
-
-  ctx.save();
-  ctx.strokeStyle = layer.color;
-  ctx.lineWidth = layer.size;
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-
-  layer.points.forEach((point, index) => {
-    const x = point.x * canvasWidth;
-    const y = point.y * canvasHeight;
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawRotated(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  rotation: number,
-  draw: () => void
-) {
-  ctx.save();
-  ctx.translate(x + width / 2, y + height / 2);
-  ctx.rotate((rotation * Math.PI) / 180);
-  ctx.translate(-width / 2, -height / 2);
-  draw();
-  ctx.restore();
-}
-
-function drawContainedImage(
-  ctx: CanvasRenderingContext2D,
-  image: CanvasImageSource & { width?: number; height?: number; naturalWidth?: number; naturalHeight?: number },
-  targetWidth: number,
-  targetHeight: number
-) {
-  const sourceWidth = "naturalWidth" in image && typeof image.naturalWidth === "number" && image.naturalWidth > 0
-    ? image.naturalWidth
-    : "width" in image && typeof image.width === "number" && image.width > 0
-      ? image.width
-      : null;
-  const sourceHeight = "naturalHeight" in image && typeof image.naturalHeight === "number" && image.naturalHeight > 0
-    ? image.naturalHeight
-    : "height" in image && typeof image.height === "number" && image.height > 0
-      ? image.height
-      : null;
-
-  if (!sourceWidth || !sourceHeight || targetWidth <= 0 || targetHeight <= 0) {
-    ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
-    return;
-  }
-
-  const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
-  const drawWidth = sourceWidth * scale;
-  const drawHeight = sourceHeight * scale;
-  const offsetX = (targetWidth - drawWidth) / 2;
-  const offsetY = (targetHeight - drawHeight) / 2;
-
-  ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
-}
-
-function applyCanvasFilter(ctx: CanvasRenderingContext2D, filter: CanvasImageLayer["filter"]) {
-  ctx.filter = filter === "grayscale" ? "grayscale(1)" : filter === "sepia" ? "sepia(0.85)" : "none";
-}
-
-function drawStarPath(
-  ctx: CanvasRenderingContext2D,
-  centerX: number,
-  centerY: number,
-  outerRadius: number,
-  innerRadius: number
-) {
-  ctx.beginPath();
-  for (let index = 0; index < 10; index += 1) {
-    const radius = index % 2 === 0 ? outerRadius : innerRadius;
-    const angle = (Math.PI * 2 * index) / 10 - Math.PI / 2;
-    const x = centerX + radius * Math.cos(angle);
-    const y = centerY + radius * Math.sin(angle);
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
-}
-
-function roundedRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  radius: number
-) {
-  const safeRadius = Math.min(radius, width / 2, height / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + safeRadius, y);
-  ctx.arcTo(x + width, y, x + width, y + height, safeRadius);
-  ctx.arcTo(x + width, y + height, x, y + height, safeRadius);
-  ctx.arcTo(x, y + height, x, y, safeRadius);
-  ctx.arcTo(x, y, x + width, y, safeRadius);
-  ctx.closePath();
-}
-
-function drawWrappedText(
-  ctx: CanvasRenderingContext2D,
-  layer: CanvasTextLayer,
-  canvasWidth: number,
-  canvasHeight: number
-) {
-  const x = layer.x * canvasWidth;
-  const y = layer.y * canvasHeight;
-  const maxWidth = layer.width * canvasWidth;
-  const fontSize = layer.fontSize;
-  const lineHeight = fontSize * layer.lineHeight;
-  const paragraphs = layer.text.split(/\n/g);
-  const lines: string[] = [];
-
-  ctx.font = `${layer.fontWeight} ${fontSize}px ${layer.fontFamily}`;
-  ctx.fillStyle = layer.color;
-  ctx.textAlign = layer.align;
-  ctx.textBaseline = "top";
-  ctx.shadowColor = layer.shadow ? "rgba(0, 0, 0, 0.3)" : "transparent";
-  ctx.shadowBlur = layer.shadow ? Math.max(6, fontSize * 0.12) : 0;
-  ctx.shadowOffsetY = layer.shadow ? Math.max(2, fontSize * 0.06) : 0;
-
-  for (const paragraph of paragraphs) {
-    const words = paragraph.trim().length > 0 ? paragraph.split(/\s+/g) : [""];
-    let currentLine = "";
-
-    for (const word of words) {
-      const testLine = currentLine ? `${currentLine} ${word}` : word;
-      if (measureTextWithLetterSpacing(ctx, testLine, layer.letterSpacing) <= maxWidth || !currentLine) {
-        currentLine = testLine;
-        continue;
-      }
-
-      lines.push(currentLine);
-      currentLine = word;
-    }
-
-    lines.push(currentLine);
-  }
-
-  const alignedX = layer.align === "center" ? maxWidth / 2 : layer.align === "right" ? maxWidth : 0;
-  const blockHeight = Math.max(lineHeight, lines.length * lineHeight);
-
-  drawRotated(ctx, x, y, maxWidth, blockHeight, layer.rotation, () => {
-    if (!isTransparentColor(layer.backgroundColor)) {
-      ctx.save();
-      ctx.shadowColor = "transparent";
-      ctx.fillStyle = layer.backgroundColor;
-      roundedRect(ctx, -fontSize * 0.22, -fontSize * 0.18, maxWidth + fontSize * 0.44, blockHeight + fontSize * 0.28, fontSize * 0.16);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    ctx.font = `${layer.fontWeight} ${fontSize}px ${layer.fontFamily}`;
-    ctx.fillStyle = layer.color;
-    ctx.textAlign = layer.align;
-    ctx.textBaseline = "top";
-    ctx.shadowColor = layer.shadow ? "rgba(0, 0, 0, 0.3)" : "transparent";
-    ctx.shadowBlur = layer.shadow ? Math.max(6, fontSize * 0.12) : 0;
-    ctx.shadowOffsetY = layer.shadow ? Math.max(2, fontSize * 0.06) : 0;
-
-    lines.forEach((line, index) => {
-      const nextY = index * lineHeight;
-      if (y + nextY <= canvasHeight) {
-        fillTextWithLetterSpacing(ctx, line, alignedX, nextY, layer.letterSpacing);
-      }
-    });
-  });
-}
-
-function measureTextWithLetterSpacing(ctx: CanvasRenderingContext2D, text: string, letterSpacing: number) {
-  if (text.length <= 1) return ctx.measureText(text).width;
-  return ctx.measureText(text).width + (text.length - 1) * letterSpacing;
-}
-
-function fillTextWithLetterSpacing(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  letterSpacing: number
-) {
-  if (letterSpacing === 0 || text.length <= 1) {
-    ctx.fillText(text, x, y);
-    return;
-  }
-
-  const totalWidth = measureTextWithLetterSpacing(ctx, text, letterSpacing);
-  let cursorX = ctx.textAlign === "center" ? x - totalWidth / 2 : ctx.textAlign === "right" ? x - totalWidth : x;
-
-  for (const char of text) {
-    ctx.fillText(char, cursorX, y);
-    cursorX += ctx.measureText(char).width + letterSpacing;
-  }
-}
-
-function createLayerId(prefix: string) {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function cloneEditableImage(image: EditableImage | null): EditableImage | null {
-  return image ? { ...image } : null;
-}
-
-function cloneCanvasLayers(layers: CanvasLayer[]) {
-  return layers.map((layer) => ({ ...layer, ...(layer.type === "draw" ? { points: layer.points.map((point) => ({ ...point })) } : {}) }));
-}
-
-function areCanvasLayersEqual(left: CanvasLayer[], right: CanvasLayer[]) {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function areEditorSnapshotsEqual(left: EditorSnapshot, right: EditorSnapshot) {
   return (
-    areEditableImagesEqual(left.originalImage, right.originalImage) &&
-    areEditableImagesEqual(left.currentImage, right.currentImage) &&
-    areCanvasLayersEqual(left.canvasLayers, right.canvasLayers) &&
-    left.toolMode === right.toolMode
+    <div className="ai-edit-compare-overlay" role="dialog" aria-label="Compare versions">
+      <div className="ai-edit-compare-toolbar">
+        <div className="ai-edit-compare-title">
+          <strong>Compare</strong>
+          <span>{beforeLabel} / {afterLabel}</span>
+        </div>
+        <label>
+          <span>Before</span>
+          <select value={beforeId ?? ""} onChange={(event) => onBeforeChange(event.target.value)}>
+            {versions.map((output) => (
+              <option disabled={output.id === afterId} key={output.id} value={output.id}>
+                v{output.versionNumber}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>After</span>
+          <select value={afterId ?? ""} onChange={(event) => onAfterChange(event.target.value)}>
+            {versions.map((output) => (
+              <option disabled={output.id === beforeId} key={output.id} value={output.id}>
+                v{output.versionNumber}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button aria-label="Close compare" className="ai-edit-compare-close" onClick={onClose} type="button">
+          ×
+        </button>
+      </div>
+
+      <div
+        className={`ai-edit-compare-frame ${showLoading ? "is-loading" : ""}`}
+        style={{ aspectRatio: `${image.width} / ${image.height}` }}
+      >
+        {beforeUrl ? <img alt={`${beforeLabel} before`} className="ai-edit-compare-image" decoding="async" src={beforeUrl} /> : null}
+        {afterUrl ? (
+          <div className="ai-edit-compare-after" style={{ clipPath: `inset(0 ${100 - sliderValue}% 0 0)` }}>
+            <img alt={`${afterLabel} after`} className="ai-edit-compare-image" decoding="async" src={afterUrl} />
+          </div>
+        ) : null}
+        <span className="ai-edit-compare-chip is-before">{beforeLabel}</span>
+        <span className="ai-edit-compare-chip is-after">{afterLabel}</span>
+        <span className="ai-edit-compare-divider" style={{ left: `${sliderValue}%` }}>
+          <span />
+        </span>
+        <input
+          aria-label="Compare before and after"
+          className="ai-edit-compare-range"
+          max={100}
+          min={0}
+          onChange={(event) => onSliderChange(Number(event.target.value))}
+          type="range"
+          value={sliderValue}
+        />
+        {showLoading ? (
+          <div className="ai-edit-compare-loading">
+            <span />
+            <strong>Loading full-resolution comparison...</strong>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
-function areEditableImagesEqual(left: EditableImage | null, right: EditableImage | null) {
-  if (!left && !right) return true;
-  if (!left || !right) return false;
+function EditorVersionRail({
+  currentOutputId,
+  isDisabled,
+  isLoading,
+  lastSavedOutput,
+  loadingOutputId,
+  onOpenVersion,
+  versionHistory,
+}: {
+  currentOutputId: string | null;
+  isDisabled: boolean;
+  isLoading: boolean;
+  lastSavedOutput: CreativeOutputRecord;
+  loadingOutputId: string | null;
+  onOpenVersion: (output: CreativeOutputRecord) => void;
+  versionHistory: CreativeOutputRecord[];
+}) {
+  const versions = versionHistory.length ? versionHistory : [lastSavedOutput];
 
   return (
-    left.width === right.width &&
-    left.height === right.height &&
-    left.file.name === right.file.name &&
-    left.file.size === right.file.size &&
-    left.file.lastModified === right.file.lastModified &&
-    left.file.type === right.file.type
+    <aside className="ai-edit-version-rail" aria-label="Version history">
+      <div className="ai-edit-version-rail-header">
+        <strong>Versions</strong>
+        <span>{isLoading ? "Loading..." : `${versions.length}`}</span>
+      </div>
+      <div className="ai-edit-version-thumb-list">
+        {versions.map((output) => {
+          const imageUrl = output.thumbnailUrl ?? output.previewUrl ?? output.originalUrl;
+          const isLoadingSelected = output.id === loadingOutputId;
+          const isSelected = output.id === currentOutputId || isLoadingSelected;
+          return (
+            <button
+              aria-busy={isLoadingSelected}
+              className={`ai-edit-version-thumb ${isSelected ? "is-active" : ""} ${isLoadingSelected ? "is-loading" : ""}`}
+              disabled={isDisabled || isLoadingSelected}
+              key={output.id}
+              onClick={() => onOpenVersion(output)}
+              type="button"
+            >
+              <span className="ai-edit-version-thumb-media">
+                {imageUrl ? (
+                  <img alt={`Version ${output.versionNumber}`} src={imageUrl} />
+                ) : (
+                  <span>v{output.versionNumber}</span>
+                )}
+                {isLoadingSelected ? <span className="ai-edit-version-thumb-loading" aria-hidden="true" /> : null}
+              </span>
+              <span className="ai-edit-version-thumb-label">{isLoadingSelected ? "Loading" : `v${output.versionNumber}`}</span>
+            </button>
+          );
+        })}
+      </div>
+    </aside>
   );
 }
 
-function getLayerLabel(layer: CanvasLayer) {
-  if (layer.type === "text") return layer.text || "Untitled text";
-  if (layer.type === "image") return layer.name;
-  if (layer.type === "draw") return layer.label;
-  return layer.label;
+function StudioAiEditPage() {
+  const { sessionToken, activeBrand, activeBrandId, activeAssets, bootstrap } = useStudio();
+
+  return (
+    <EditorProvider>
+      <StudioAiEditPageContent
+        sessionToken={sessionToken}
+        activeBrand={activeBrand}
+        activeBrandId={activeBrandId}
+        activeAssets={activeAssets}
+        bootstrap={bootstrap}
+      />
+    </EditorProvider>
+  );
 }
 
-function normalizeHexColor(value: string, fallback: string) {
-  return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
-}
-
-function isTransparentColor(value: string) {
-  return value === "transparent" || value === "#00000000" || value.trim().length === 0;
-}
-
-async function fileToDataUrl(file: File) {
-  return await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-        return;
-      }
-
-      reject(new Error("Unable to read image layer."));
-    };
-    reader.onerror = () => reject(new Error("Unable to read image layer."));
-    reader.readAsDataURL(file);
-  });
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function stripFileExtension(fileName: string) {
-  return fileName.replace(/\.[^.]+$/, "") || "image";
-}
-
-function ensureExtension(fileName: string, contentType: string) {
-  const baseName = stripFileExtension(fileName);
-  if (contentType === "image/webp") return `${baseName}.webp`;
-  if (contentType === "image/jpeg") return `${baseName}.jpg`;
-  return `${baseName}.png`;
-}
-
-function getUserSafeImageEditError(cause: unknown) {
-  const message = cause instanceof Error ? cause.message : "";
-  if (/payment required|insufficient|credit/i.test(message)) {
-    return message;
-  }
-
-  return "AI edit failed. Please try again with a simpler edit or a smaller image.";
-}
+export default StudioAiEditPage;

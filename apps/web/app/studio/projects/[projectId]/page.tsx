@@ -36,7 +36,7 @@ export default function ProjectDetailPage() {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formState, setFormState] = useState<ProjectFormState | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "product" | "experience" | "compliance" | "faq">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "facts" | "pricing" | "amenities_location" | "legal_rera" | "media" | "claims">("overview");
   const [mediaTab, setMediaTab] = useState<"elevations" | "amenities" | "interiors" | "all">("elevations");
   const [mediaSearch, setMediaSearch] = useState("");
   const [mediaFilters, setMediaFilters] = useState({
@@ -120,8 +120,8 @@ export default function ProjectDetailPage() {
     const profile = detail.activeProfile?.profile;
 
     return {
-      backHref: "/studio/projects",
-      backLabel: "Back to projects",
+      backHref: "/studio/brand-kit",
+      backLabel: "Back to Brand Kits",
       title: detail.project.name,
       subtitle: detail.project.description ?? profile?.positioning ?? "Project detail",
       badges: (
@@ -245,10 +245,12 @@ export default function ProjectDetailPage() {
           {/* TAB NAV */}
           <nav className="tab-nav high-density-tabs" style={{ marginBottom: "40px" }}>
             <button className={`tab-link ${activeTab === "overview" ? "is-active" : ""}`} onClick={() => setActiveTab("overview")} type="button"><span className="tab-num">01</span>Overview</button>
-            <button className={`tab-link ${activeTab === "product" ? "is-active" : ""}`} onClick={() => setActiveTab("product")} type="button"><span className="tab-num">02</span>Product</button>
-            <button className={`tab-link ${activeTab === "experience" ? "is-active" : ""}`} onClick={() => setActiveTab("experience")} type="button"><span className="tab-num">03</span>Experience</button>
-            <button className={`tab-link ${activeTab === "compliance" ? "is-active" : ""}`} onClick={() => setActiveTab("compliance")} type="button"><span className="tab-num">04</span>Compliance</button>
-            <button className={`tab-link ${activeTab === "faq" ? "is-active" : ""}`} onClick={() => setActiveTab("faq")} type="button"><span className="tab-num">05</span>FAQs</button>
+            <button className={`tab-link ${activeTab === "facts" ? "is-active" : ""}`} onClick={() => setActiveTab("facts")} type="button"><span className="tab-num">02</span>Facts</button>
+            <button className={`tab-link ${activeTab === "pricing" ? "is-active" : ""}`} onClick={() => setActiveTab("pricing")} type="button"><span className="tab-num">03</span>Pricing</button>
+            <button className={`tab-link ${activeTab === "amenities_location" ? "is-active" : ""}`} onClick={() => setActiveTab("amenities_location")} type="button"><span className="tab-num">04</span>Amenities & Location</button>
+            <button className={`tab-link ${activeTab === "legal_rera" ? "is-active" : ""}`} onClick={() => setActiveTab("legal_rera")} type="button"><span className="tab-num">05</span>Legal/RERA</button>
+            <button className={`tab-link ${activeTab === "media" ? "is-active" : ""}`} onClick={() => setActiveTab("media")} type="button"><span className="tab-num">06</span>Media</button>
+            <button className={`tab-link ${activeTab === "claims" ? "is-active" : ""}`} onClick={() => setActiveTab("claims")} type="button"><span className="tab-num">07</span>Claims</button>
           </nav>
 
       {/* PANELS */}
@@ -310,12 +312,12 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {activeTab === "product" && (
+      {activeTab === "facts" && (
         <div className="page-stack">
           <div className="project-section-header">
             <div>
-              <span className="project-section-super">Product</span>
-              <h2 className="project-section-title">Home Mix, Pricing & Commercials</h2>
+              <span className="project-section-super">Facts</span>
+              <h2 className="project-section-title">Home Mix, Scale & Product Truth</h2>
             </div>
           </div>
 
@@ -376,7 +378,56 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {activeTab === "experience" && (
+      {activeTab === "pricing" && (
+        <div className="page-stack">
+          <div className="project-section-header">
+            <div>
+              <span className="project-section-super">Pricing</span>
+              <h2 className="project-section-title">Commercials, Offers & Payment Context</h2>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+            <div className="project-card">
+              <div className="project-block-head">Pricing Core</div>
+              <ProjectDataField label="Pricing Band" value={profile.pricingBand} />
+              <ProjectDataField label="Starting Price" value={profile.startingPrice} isLarge />
+              <ProjectDataField label="Booking Amount" value={profile.bookingAmount} />
+              <ProjectDataField label="Payment Plan" value={profile.paymentPlanSummary} />
+            </div>
+            <div className="project-card">
+              <div className="project-block-head">Offer Context</div>
+              <ProjectDataField label="Offer Validity" value={profile.offerValidity} />
+              {profile.financingPartners.length > 0 ? (
+                <div className="project-tag-wrap">
+                  {profile.financingPartners.map((partner) => <span key={partner} className="project-tag">{partner}</span>)}
+                </div>
+              ) : <span className="project-info-text">No financing partners stored</span>}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginTop: "20px" }}>
+            <div className="project-card">
+              <div className="project-block-head">Config-wise Pricing</div>
+              {profile.priceRangeByConfig.length > 0 ? (
+                <ul className="project-list">
+                  {profile.priceRangeByConfig.map((item) => <li key={item} className="project-list-item">{item}</li>)}
+                </ul>
+              ) : <div style={{ fontSize: "12px", color: "var(--ink-soft)" }}>No configuration-wise pricing stored.</div>}
+            </div>
+            <div className="project-card">
+              <div className="project-block-head">Current Offers</div>
+              {profile.currentOffers.length > 0 ? (
+                <ul className="project-list">
+                  {profile.currentOffers.map((item) => <li key={item} className="project-list-item is-success">{item}</li>)}
+                </ul>
+              ) : <div style={{ fontSize: "12px", color: "var(--ink-soft)" }}>No active offers stored.</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "amenities_location" && (
         <div className="page-stack">
           <div className="project-section-header">
             <div>
@@ -430,12 +481,12 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {activeTab === "compliance" && (
+      {activeTab === "legal_rera" && (
         <div className="page-stack">
           <div className="project-section-header">
             <div>
-              <span className="project-section-super">Compliance & Truth</span>
-              <h2 className="project-section-title">Progress & Guidelines</h2>
+              <span className="project-section-super">Legal/RERA</span>
+              <h2 className="project-section-title">Registration, Progress & Legal Notes</h2>
             </div>
           </div>
 
@@ -444,8 +495,9 @@ export default function ProjectDetailPage() {
               <div className="project-block-head">Current Status</div>
               <ProjectDataField label="Construction Phase" value={profile.constructionStatus} />
               <ProjectDataField label="Latest Update" value={profile.latestUpdate} />
+              <ProjectDataField label="RERA Number" value={profile.reraNumber} />
               <ProjectDataField label="Legal Summary" value={profile.approvalsSummary} />
-              <ProjectDataField label="Posession Window" value={profile.completionWindow} />
+              <ProjectDataField label="Possession Window" value={profile.completionWindow} />
             </div>
             <div className="project-card">
               <div className="project-block-head">Milestone History</div>
@@ -457,6 +509,60 @@ export default function ProjectDetailPage() {
             </div>
           </div>
 
+          <div className="project-card" style={{ marginTop: "20px" }}>
+            <div className="project-block-head">Legal Notes</div>
+            {profile.legalNotes.length > 0 ? (
+              <ul className="project-list">
+                {profile.legalNotes.map((note) => <li key={note} className="project-list-item">{note}</li>)}
+              </ul>
+            ) : <div style={{ fontSize: "12px", color: "var(--ink-soft)" }}>No legal notes stored.</div>}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "media" && (
+        <div className="page-stack">
+          <div className="project-section-header">
+            <div>
+              <span className="project-section-super">Media</span>
+              <h2 className="project-section-title">Project Images, Sample Flats & Amenity Assets</h2>
+            </div>
+          </div>
+
+          <ProjectMediaGallery
+            elevations={actualProjectImages}
+            amenities={amenityImages}
+            interiors={sampleFlatImages}
+            allAssets={brandAssets}
+            tab={mediaTab}
+            onTabChange={(next) => {
+              setMediaTab(next);
+              setMediaLimit(24);
+            }}
+            search={mediaSearch}
+            onSearchChange={(value) => {
+              setMediaSearch(value);
+              setMediaLimit(24);
+            }}
+            filters={mediaFilters}
+            onFilterChange={(next) => {
+              setMediaFilters(next);
+              setMediaLimit(24);
+            }}
+            limit={mediaLimit}
+            onLoadMore={() => setMediaLimit((prev) => prev + 24)}
+          />
+        </div>
+      )}
+
+      {activeTab === "claims" && (
+        <div className="page-stack">
+          <div className="project-section-header">
+            <div>
+              <span className="project-section-super">Claims</span>
+              <h2 className="project-section-title">Approved Claims, Blocked Claims & Buyer Objections</h2>
+            </div>
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginTop: "20px" }}>
             <div className="project-card">
               <div className="project-block-head">Approved Claims</div>
@@ -481,17 +587,6 @@ export default function ProjectDetailPage() {
                   {profile.keyObjections.map(o => <li key={o} className="project-list-item">{o}</li>)}
                 </ul>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === "faq" && (
-        <div className="page-stack">
-          <div className="project-section-header">
-            <div>
-              <span className="project-section-super">Assistance</span>
-              <h2 className="project-section-title">Common Inquiries</h2>
             </div>
           </div>
 

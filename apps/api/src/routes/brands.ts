@@ -53,7 +53,17 @@ export async function registerBrandRoutes(app: FastifyInstance) {
     const brand = await getBrand((request.params as { brandId: string }).brandId);
     await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
 
-    const assets = await listBrandAssets(brand.id);
+    const query = request.query as { projectId?: string };
+    const preferredProjectId = typeof query.projectId === "string" && query.projectId.trim() ? query.projectId.trim() : null;
+    const assets = (await listBrandAssets(brand.id)).sort((a, b) => {
+      if (!preferredProjectId) return 0;
+      const aRank = a.projectId === preferredProjectId ? 0 : a.projectId == null ? 1 : 2;
+      const bRank = b.projectId === preferredProjectId ? 0 : b.projectId == null ? 1 : 2;
+      if (aRank !== bRank) return aRank - bRank;
+      if (a.kind === "logo" && b.kind !== "logo") return -1;
+      if (a.kind !== "logo" && b.kind === "logo") return 1;
+      return a.label.localeCompare(b.label);
+    });
     const assetUrls = await Promise.all(
       assets.map((asset) => createSignedImageUrls(asset.storagePath, asset.thumbnailStoragePath))
     );

@@ -90,10 +90,7 @@ export async function registerSessionRoutes(app: FastifyInstance) {
       Promise.all(
         brandAssets.map((asset) =>
           isEditorView
-            ? createSignedPreviewUrl(asset.storagePath, asset.thumbnailStoragePath).then((previewUrl) => ({
-                previewUrl: previewUrl ?? undefined,
-                thumbnailUrl: previewUrl ?? undefined
-              }))
+            ? createSignedImageUrls(asset.storagePath, asset.thumbnailStoragePath)
             : createSignedImageUrls(asset.storagePath, asset.thumbnailStoragePath)
         )
       ),
@@ -110,12 +107,9 @@ export async function registerSessionRoutes(app: FastifyInstance) {
       brands,
       brandAssets: brandAssets.map((asset, index) => ({
         ...asset,
-        previewUrl:
-          assetUrls[index] && "originalUrl" in assetUrls[index]
-            ? assetUrls[index]?.originalUrl
-            : assetUrls[index]?.previewUrl,
+        previewUrl: assetUrls[index]?.originalUrl,
         thumbnailUrl: assetUrls[index]?.thumbnailUrl,
-        ...(assetUrls[index] && "originalUrl" in assetUrls[index] && assetUrls[index]?.originalUrl
+        ...(assetUrls[index]?.originalUrl
           ? { originalUrl: assetUrls[index]?.originalUrl }
           : {})
       })),

@@ -163,8 +163,8 @@ export default function TemplateDetailPage() {
       "Reusable template";
 
     return {
-      backHref: "/studio/templates",
-      backLabel: "Back to templates",
+      backHref: "/studio/brand-kit",
+      backLabel: "Back to Brand Kit",
       title: detail.template.name,
       subtitle,
       badges: (
@@ -535,7 +535,7 @@ export default function TemplateDetailPage() {
                   ) : (
                     <div className="empty-inline-state">
                       <strong>No references yet</strong>
-                      <p>Upload references in Library if this template should carry supporting visuals.</p>
+                      <p>Upload references in Brand Kit media if this template should carry supporting visuals.</p>
                     </div>
                   )}
                 </div>

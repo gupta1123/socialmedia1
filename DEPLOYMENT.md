@@ -73,6 +73,15 @@ FAL_KEY=...
 FAL_WEBHOOK_URL=https://socialapp1-c83bcf63dc0d.herokuapp.com/api/fal/webhooks
 FAL_STYLE_SEED_MODEL=fal-ai/nano-banana-pro
 FAL_FINAL_MODEL=fal-ai/nano-banana-pro/edit
+AI_EDIT_GOOGLE_LOW_MODEL=fal-ai/nano-banana/edit
+AI_EDIT_GOOGLE_HIGH_MODEL=fal-ai/nano-banana-pro/edit
+```
+
+AI Edit model presets are backend-resolved. The frontend sends only preset keys:
+
+```env
+AI_EDIT_OPENAI_MODEL=gpt-image-2
+OPENAI_IMAGE_QUALITY=high
 ```
 
 OpenRouter:

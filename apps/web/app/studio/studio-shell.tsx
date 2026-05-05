@@ -104,8 +104,8 @@ const primaryNavigation = [
   //   )
   // },
   {
-    href: "/studio/library",
-    label: "Library",
+    href: "/studio/brand-kit",
+    label: "Brand Kits",
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>
@@ -374,9 +374,13 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
     title: "Calendar",
     subtitle: "See scheduled posts for the week and adjust timing as plans change.",
   },
+  "/studio/brand-kit": {
+    title: "Brand Kits",
+    subtitle: "Manage brand identities, logos, colors, fonts, and guidelines for consistent creatives.",
+  },
   "/studio/library": {
-    title: "Library",
-    subtitle: "Manage brands, templates, references, channels, and posting windows.",
+    title: "Brand Kits",
+    subtitle: "Manage brand identities, logos, colors, fonts, and guidelines for consistent creatives.",
   },
   "/studio/review": {
     title: "Review",
@@ -907,6 +911,13 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
 }
 
 function resolvePageMeta(pathname: string) {
+  if (pathname.startsWith("/studio/brand-kit/")) {
+    return {
+      title: "Brand Kit",
+      subtitle: "Brand profile, projects, media, rules, templates, and compliance."
+    };
+  }
+
   if (pathname.startsWith("/studio/projects/")) {
     return {
       title: "Project detail",
@@ -960,10 +971,6 @@ function resolvePageMeta(pathname: string) {
 
   if (pathname.startsWith("/studio/plan")) {
     return PAGE_META["/studio/plan"] ?? { title: "Plan", subtitle: "" };
-  }
-
-  if (pathname.startsWith("/studio/projects")) {
-    return PAGE_META["/studio/projects"] ?? { title: "Projects", subtitle: "" };
   }
 
   if (pathname.startsWith("/studio/templates")) {
@@ -1032,7 +1039,7 @@ function resolvePageMeta(pathname: string) {
 function groupAppNavigation(items: any[]) {
   const home = items.filter((item) => item.href === "/studio");
   const creativeHrefs = new Set(["/studio/create?mode=ad-hoc", "/studio/create-v3", "/studio/ai-edit"]);
-  const workHrefs = new Set(["/studio/review", "/studio/gallery", "/studio/library"]);
+  const workHrefs = new Set(["/studio/review", "/studio/gallery", "/studio/brand-kit"]);
   const adminHrefs = new Set(["/studio/workspace-admin", "/studio/admin"]);
 
   const creative = items.filter((item) => creativeHrefs.has(item.href));
@@ -1081,6 +1088,8 @@ function resolveBootstrapMode(pathname: string) {
     pathname.startsWith("/studio/gallery/") ||
     pathname === "/studio/outputs" ||
     pathname.startsWith("/studio/outputs/") ||
+    pathname === "/studio/brand-kit" ||
+    pathname.startsWith("/studio/brand-kit/") ||
     pathname === "/studio/library" ||
     pathname.startsWith("/studio/library/") ||
     pathname === "/studio/workspace-admin" ||
@@ -1089,7 +1098,6 @@ function resolveBootstrapMode(pathname: string) {
     pathname.startsWith("/studio/admin/") ||
     pathname === "/studio/brands" ||
     pathname.startsWith("/studio/brands/") ||
-    pathname === "/studio/projects" ||
     pathname.startsWith("/studio/projects/") ||
     pathname === "/studio/campaigns" ||
     pathname.startsWith("/studio/campaigns/") ||

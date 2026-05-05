@@ -240,10 +240,9 @@ export default function OutputDetailPage() {
         setSwitchingOutput(!isInitialLoad);
         setError(null);
         const cachedOutput = outputCacheRef.current.get(selectedOutputId) ?? null;
-        const activeOutput =
-          cachedOutput?.originalUrl || cachedOutput?.previewUrl
-            ? cachedOutput
-            : await getCreativeOutput(token, selectedOutputId);
+        const activeOutput = cachedOutput?.originalUrl
+          ? cachedOutput
+          : await getCreativeOutput(token, selectedOutputId);
         outputCacheRef.current.set(activeOutput.id, activeOutput);
 
         if (cancelled) return;

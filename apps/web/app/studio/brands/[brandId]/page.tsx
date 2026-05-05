@@ -87,8 +87,8 @@ export default function BrandDetailPage() {
     }
 
     return {
-      backHref: "/studio/brands",
-      backLabel: "Back to brands",
+      backHref: "/studio/brand-kit",
+      backLabel: "Back to Brand Kit",
       title: detail.brand.name,
       subtitle: detail.brand.description ?? "Brand system",
       badges: (

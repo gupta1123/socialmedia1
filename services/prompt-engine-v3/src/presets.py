@@ -40,9 +40,32 @@ def preset_logo_rules(preset: Dict[str, Any]) -> Dict[str, Any]:
     return dict(logo) if isinstance(logo, dict) else {}
 
 
+def preset_secondary_logo_rules(preset: Dict[str, Any]) -> Dict[str, Any]:
+    logo = preset_json(preset).get("secondary_logo") or preset_json(preset).get("secondary_logo_layer")
+    return dict(logo) if isinstance(logo, dict) else {}
+
+
+def preset_requires_secondary_logo(preset: Dict[str, Any]) -> bool:
+    logo = preset_secondary_logo_rules(preset)
+    return bool(logo.get("required"))
+
+
+def preset_secondary_logo_position(preset: Dict[str, Any]) -> str:
+    logo = preset_secondary_logo_rules(preset)
+    return str(logo.get("position") or "top_left") if logo else "top_left"
+
+
 def preset_rera_position(preset: Dict[str, Any]) -> str:
     rera = preset_json(preset).get("rera_qr") or preset_json(preset).get("rera_qr_layer")
     return str(rera.get("position") or "top_right") if isinstance(rera, dict) else "top_right"
+
+
+def preset_rera_trigger_fact_types(preset: Dict[str, Any]) -> List[str]:
+    rera = preset_json(preset).get("rera_qr") or preset_json(preset).get("rera_qr_layer")
+    if not isinstance(rera, dict):
+        return []
+    raw = rera.get("trigger_required_when_fact_types") or rera.get("required_when_fact_types") or []
+    return [str(item).strip().lower() for item in raw if str(item).strip()] if isinstance(raw, list) else []
 
 
 def preset_contact_items(preset: Dict[str, Any]) -> List[str]:
@@ -56,6 +79,16 @@ def preset_contact_items(preset: Dict[str, Any]) -> List[str]:
 def preset_contact_position(preset: Dict[str, Any]) -> str:
     contact = preset_json(preset).get("contact") or preset_json(preset).get("contact_layer")
     return str(contact.get("position") or "bottom_footer") if isinstance(contact, dict) else "bottom_footer"
+
+
+def preset_location_rules(preset: Dict[str, Any]) -> Dict[str, Any]:
+    location = preset_json(preset).get("location") or preset_json(preset).get("location_layer")
+    return dict(location) if isinstance(location, dict) else {}
+
+
+def preset_requires_location(preset: Dict[str, Any]) -> bool:
+    location = preset_location_rules(preset)
+    return bool(location.get("required"))
 
 
 def contact_values_from_context(context: Dict[str, Any], items: List[str]) -> Dict[str, str]:

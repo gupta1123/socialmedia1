@@ -119,14 +119,25 @@ export default function BrandPresetsSettingsPage() {
   }
 
   function buildPresetJson() {
+    const existing = selectedPreset?.preset_json && typeof selectedPreset.preset_json === "object"
+      ? selectedPreset.preset_json as Record<string, any>
+      : {};
+    const existingLogo = existing.logo && typeof existing.logo === "object" && !Array.isArray(existing.logo) ? existing.logo : {};
+    const existingRera = existing.rera_qr && typeof existing.rera_qr === "object" && !Array.isArray(existing.rera_qr) ? existing.rera_qr : {};
+    const existingContact = existing.contact && typeof existing.contact === "object" && !Array.isArray(existing.contact) ? existing.contact : {};
+    const existingTypography = existing.typography && typeof existing.typography === "object" && !Array.isArray(existing.typography) ? existing.typography : {};
+    const existingPalette = existing.palette && typeof existing.palette === "object" && !Array.isArray(existing.palette) ? existing.palette : {};
     return {
+      ...existing,
       logo: {
+        ...existingLogo,
         required: form.logoRequired,
         position: form.logoPosition,
         max_instances: 1,
         source: "exact_asset_only"
       },
       rera_qr: {
+        ...existingRera,
         required: form.reraRequired,
         position: form.reraPosition,
         max_instances: 1,
@@ -138,16 +149,19 @@ export default function BrandPresetsSettingsPage() {
         never_generate_qr: true
       },
       contact: {
+        ...existingContact,
         required: form.contactItems.length > 0,
         include_if_grounded: true,
         position: form.contactPosition,
         items: form.contactItems
       },
       typography: {
+        ...existingTypography,
         source: form.typographyMood === "brand_profile" ? "brand_profile" : "preset",
         fallback_mood: form.typographyMood
       },
       palette: {
+        ...existingPalette,
         source: form.paletteMode
       }
     };

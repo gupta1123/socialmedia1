@@ -14,7 +14,7 @@ import { supabaseAdmin } from "../lib/supabase.js";
 import { env } from "../lib/config.js";
 import { generateOpenAiImages } from "../lib/openai-images.js";
 import type { OpenAiGeneratedImage } from "../lib/openai-images.js";
-import { downloadStorageBlob, ingestRemoteImageToStorage, uploadBufferToStorage } from "../lib/storage.js";
+import { downloadStorageBlob, ingestRemoteImageToStorage, uploadBufferToStorage, createSignedUrl } from "../lib/storage.js";
 import { buildStoragePath, randomId } from "../lib/utils.js";
 import type { AuthenticatedViewer } from "../lib/viewer.js";
 import { createThumbnailFromStorageOrNull } from "../lib/thumbnails.js";
@@ -27,6 +27,33 @@ const CopySchema = z.object({
   cta: z.string().optional().nullable()
 }).default({});
 
+const CreativeModeSchema = z.enum([
+  "auto",
+  "image_led",
+  "copy_led",
+  "asset_led",
+  "template_led",
+  "proof_led",
+  "offer_led",
+  "lifestyle_led",
+  "brand_led",
+  "graphic_led"
+]);
+
+const TextStrategySchema = z.enum([
+  "auto",
+  "render_exact_text",
+  "reserve_editable_space",
+  "minimal_text",
+  "typography_dominant",
+  "no_text_visual_only",
+  "proof_badges",
+  "poster_copy_block"
+]);
+
+const ConstructionVisualModeSchema = z.enum(["auto", "actual_progress_reference", "visualized_progress_from_project_truth"]);
+const FestivalVisualScopeSchema = z.enum(["auto", "brand_only", "project_supported", "building_led"]);
+
 const CreativeV3CompileRequestSchema = z.object({
   brandId: z.string().uuid(),
   projectId: z.string().uuid().optional().nullable(),
@@ -37,7 +64,13 @@ const CreativeV3CompileRequestSchema = z.object({
   format: z.string().default("portrait"),
   variantCount: z.number().int().min(1).max(3).default(1),
   variationStrategy: z.string().default("auto"),
-  assetVariation: z.boolean().default(true),
+  assetVariation: z.boolean().default(false),
+  creativeMode: CreativeModeSchema.default("auto"),
+  textStrategy: TextStrategySchema.default("auto"),
+  noveltyLevel: z.number().min(0).max(1).default(0.7),
+  constructionVisualMode: ConstructionVisualModeSchema.default("auto"),
+  constructionProgressPercent: z.number().int().min(25).max(90).default(50),
+  festivalVisualScope: FestivalVisualScopeSchema.default("auto"),
   copyMode: z.enum(["auto", "manual"]).default("auto"),
   copyLanguage: z.string().default("en"),
   copy: CopySchema,
@@ -48,6 +81,7 @@ const CreativeV3CompileRequestSchema = z.object({
   includeLogo: z.boolean().default(false),
   logoAssetId: z.string().uuid().optional().nullable(),
   includeReraQr: z.boolean().default(false),
+  reraQrAssetId: z.string().uuid().optional().nullable(),
   contactItems: z.array(z.enum(["phone", "email", "website", "whatsapp"])).default([]),
   options: z.record(z.string(), z.unknown()).default({})
 });
@@ -125,6 +159,7 @@ function normalizeAssetForEngine(asset: Awaited<ReturnType<typeof listBrandAsset
 
   return {
     asset_id: asset.id,
+    project_id: asset.projectId ?? null,
     label: asset.label,
     role: asset.kind,
     storage_path: storagePath,
@@ -141,10 +176,34 @@ function normalizeAssetForEngine(asset: Awaited<ReturnType<typeof listBrandAsset
       (typeof metadata.usageIntent === "string" ? metadata.usageIntent : null),
     safe_claims: asset.safeClaims ?? [],
     do_not_claim: asset.doNotClaim ?? [],
+    visual_analysis: firstVisualAnalysis(metadata),
+    visualAnalysis: firstVisualAnalysis(metadata),
     is_image: isImageStoragePath(storagePath),
     file_type: fileTypeFromStoragePath(storagePath),
     metadata
   };
+}
+
+function firstVisualAnalysis(metadata: Record<string, any>) {
+  const keys = [
+    "visualAnalysis",
+    "visual_analysis",
+    "assetAnalysis",
+    "asset_analysis",
+    "imageAnalysis",
+    "image_analysis",
+    "aiAnalysis",
+    "ai_analysis",
+    "vision",
+    "analysis"
+  ];
+  for (const key of keys) {
+    const value = metadata[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function isImageStoragePath(storagePath?: string | null) {
@@ -320,6 +379,30 @@ function slugifyPresetKey(value: string) {
     .slice(0, 80) || `preset_${Date.now()}`;
 }
 
+function presetReraTriggerApplies(
+  presetJson: Record<string, any>,
+  params: { brief: string; project: unknown; postTypeCode: string | null }
+) {
+  const reraRules = isPlainRecord(presetJson.rera_qr)
+    ? presetJson.rera_qr
+    : isPlainRecord(presetJson.rera_qr_layer)
+      ? presetJson.rera_qr_layer
+      : null;
+  const triggerTypes = Array.isArray(reraRules?.trigger_required_when_fact_types)
+    ? reraRules.trigger_required_when_fact_types
+    : Array.isArray(reraRules?.required_when_fact_types)
+      ? reraRules.required_when_fact_types
+      : [];
+  const triggers = new Set(triggerTypes.map((item) => String(item).trim().toLowerCase()).filter(Boolean));
+  if (triggers.size === 0) return false;
+
+  const brief = params.brief.toLowerCase();
+  if (triggers.has("project") && params.project) return true;
+  if (triggers.has("typology") && /\b(?:[1-9]\s*(?:bhk|bed)|typology|configuration|apartment|flat|residence|villa)\b/i.test(brief)) return true;
+  if (triggers.has("pricing") && (params.postTypeCode === "pricing-ad" || /\b(?:price|pricing|emi|offer|starting at|starting from|lakh|lac|crore|cr)\b|₹|rs\.?|inr/i.test(brief))) return true;
+  return false;
+}
+
 async function listCreativeV3VisualTemplates(params: {
   workspaceId: string;
   brandId: string;
@@ -331,7 +414,7 @@ async function listCreativeV3VisualTemplates(params: {
   const [catalogResult, workspaceResult] = await Promise.all([
     supabaseAdmin
       .from("creative_v3_visual_template_catalog")
-      .select("id, template_key, name, description, content_job_id, allowed_formats, lever_signature, template_json, status")
+      .select("id, template_key, name, description, content_job_id, allowed_formats, lever_signature, template_json, status, preview_storage_path")
       .eq("status", "approved")
       .order("created_at", { ascending: true }),
     supabaseAdmin
@@ -375,7 +458,8 @@ async function listCreativeV3VisualTemplates(params: {
       content_job_id: row.content_job_id,
       formats: Array.isArray(row.allowed_formats) ? row.allowed_formats : [],
       lever_signature: row.lever_signature ?? {},
-      template_json: row.template_json ?? {}
+      template_json: row.template_json ?? {},
+      preview_storage_path: row.preview_storage_path ?? null
     }));
 }
 
@@ -502,12 +586,15 @@ async function runCreativeV3Compile(params: {
       return [];
     })
   ]);
-  const logoAssetId =
-    body.logoAssetId ??
-    assets.find((asset) => asset.kind === "logo" && (project ? asset.projectId === project.id || asset.projectId == null : true))?.id ??
-    null;
+  const projectLogoAssetId = project
+    ? assets.find((asset) => asset.kind === "logo" && asset.projectId === project.id)?.id ?? null
+    : null;
+  const brandLogoAssetId = assets.find((asset) => asset.kind === "logo" && asset.projectId == null)?.id ?? null;
+  const anyLogoAssetId = assets.find((asset) => asset.kind === "logo")?.id ?? null;
+  const logoAssetId = body.logoAssetId ?? projectLogoAssetId ?? brandLogoAssetId ?? anyLogoAssetId ?? null;
   const selectedReraRegistration = selectReraRegistrationForProject(reraRegistrations, project?.id ?? null);
   const reraQrAssetId =
+    body.reraQrAssetId ??
     selectedReraRegistration?.qrAssetId ??
     assets.find((asset) => asset.kind === "rera_qr" && (project ? asset.projectId === project.id || asset.projectId == null : true))?.id ??
     null;
@@ -521,17 +608,33 @@ async function runCreativeV3Compile(params: {
       : {};
   const presetRequiresLogo = Boolean(selectedPresetJson.logo?.required || selectedPresetJson.logo_layer?.required);
   const presetRequiresReraQr = Boolean(selectedPresetJson.rera_qr?.required || selectedPresetJson.rera_qr_layer?.required);
-  const effectiveIncludeLogo = body.includeLogo || presetRequiresLogo;
-  const effectiveIncludeReraQr = body.includeReraQr || presetRequiresReraQr;
+  const presetTriggersReraQr = presetReraTriggerApplies(selectedPresetJson, {
+    brief: body.brief,
+    project,
+    postTypeCode: postType?.code ?? null
+  });
+  const effectiveIncludeLogo = body.includeLogo || Boolean(body.logoAssetId) || presetRequiresLogo;
+  const effectiveIncludeReraQr = body.includeReraQr || Boolean(body.reraQrAssetId) || presetRequiresReraQr || presetTriggersReraQr;
   const presetContactItems = Array.isArray(selectedPresetJson.contact?.items)
     ? selectedPresetJson.contact.items.map(String).filter(Boolean)
     : [];
   const effectiveContactItems = body.contactItems.length > 0 ? body.contactItems : presetContactItems;
+  const explicitlyRequestedLayerIds = new Set([logoAssetId, reraQrAssetId].filter((value): value is string => typeof value === "string" && value.length > 0));
   const engineAssets = assets.filter((asset) => {
-    if (project) return asset.projectId === project.id || asset.projectId == null;
     if (selectedAssetIds.includes(asset.id)) return true;
+    if (explicitlyRequestedLayerIds.has(asset.id)) return true;
+    if (project) return asset.projectId === project.id || asset.projectId == null;
     return asset.projectId == null;
   });
+  const effectiveAssetVariation = body.variantCount > 1 && body.assetVariation && selectedAssetIds.length === 0;
+  const effectiveTextStrategy = body.textStrategy !== "auto"
+    ? body.textStrategy
+    : typeof body.options.textStrategy === "string"
+      ? String(body.options.textStrategy)
+      : typeof body.options.text_strategy === "string"
+        ? String(body.options.text_strategy)
+        : "auto";
+
   const enginePayload = {
     capability: "image_prompt_generation",
     brand_id: brand.id,
@@ -543,7 +646,13 @@ async function runCreativeV3Compile(params: {
     audience: body.audience ?? null,
     variant_count: body.variantCount,
     variation_strategy: body.variationStrategy,
-    asset_variation: body.assetVariation,
+    asset_variation: effectiveAssetVariation,
+    creative_mode: body.creativeMode,
+    text_strategy: effectiveTextStrategy,
+    novelty_level: body.noveltyLevel,
+    construction_visual_mode: body.constructionVisualMode,
+    construction_progress_percent: body.constructionProgressPercent,
+    festival_visual_scope: body.festivalVisualScope,
     copy_mode: body.copyMode,
     copy_language: body.copyLanguage,
     copy: {
@@ -562,7 +671,16 @@ async function runCreativeV3Compile(params: {
     contact_items: effectiveContactItems,
     options: {
       strict_grounding: true,
-      ...body.options
+      ...body.options,
+      generation_run_id: typeof body.options.generationRunId === "string" && body.options.generationRunId.trim()
+        ? body.options.generationRunId.trim()
+        : randomId(),
+      text_treatment: effectiveTextStrategy === "reserve_editable_space" || effectiveTextStrategy === "no_text_visual_only" || body.options.textTreatment === "reserve_space" || body.options.text_treatment === "reserve_space"
+        ? "reserve_space"
+        : "render_text",
+      construction_visual_mode: body.constructionVisualMode,
+      construction_progress_percent: body.constructionProgressPercent,
+      festival_visual_scope: body.festivalVisualScope
     },
     context: {
       brand: {
@@ -639,6 +757,7 @@ async function runCreativeV3Compile(params: {
     brandProfileVersion,
     project,
     postType,
+    visualTemplates,
     status,
     enginePayload,
     engineResponse,
@@ -675,15 +794,17 @@ async function renderCreativeV3Variant(params: {
       ? params.variant.render_package as Record<string, unknown>
       : {};
   const prompt =
-    typeof renderPackage.compiled_prompt === "string" && renderPackage.compiled_prompt.trim()
-      ? renderPackage.compiled_prompt
-      : typeof params.variant.compiled_prompt === "string" && params.variant.compiled_prompt.trim()
-        ? params.variant.compiled_prompt
-        : typeof renderPackage.prompt === "string" && renderPackage.prompt.trim()
-          ? renderPackage.prompt
-          : typeof params.variant.prompt === "string"
-            ? params.variant.prompt
-            : "";
+    typeof renderPackage.provider_prompt === "string" && renderPackage.provider_prompt.trim()
+      ? renderPackage.provider_prompt
+      : typeof renderPackage.compiled_prompt === "string" && renderPackage.compiled_prompt.trim()
+        ? renderPackage.compiled_prompt
+        : typeof params.variant.compiled_prompt === "string" && params.variant.compiled_prompt.trim()
+          ? params.variant.compiled_prompt
+          : typeof renderPackage.prompt === "string" && renderPackage.prompt.trim()
+            ? renderPackage.prompt
+            : typeof params.variant.prompt === "string"
+              ? params.variant.prompt
+              : "";
 
   if (!prompt.trim()) {
     throw new Error("Variant does not include a prompt or compiled_prompt.");
@@ -696,12 +817,20 @@ async function renderCreativeV3Variant(params: {
         ? renderPackage.format
         : "4:5";
 
-  const requestedAssetIds = [
+  const providerReferences = Array.isArray(renderPackage.provider_references)
+    ? renderPackage.provider_references.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    : [];
+  const modelReferenceAssetIds = providerReferences
+    .filter((item) => item.sent_to_model !== false)
+    .map((item) => item.asset_id)
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
+  const layerAssetIds = [renderPackage.logo_asset_id, renderPackage.secondary_logo_asset_id, renderPackage.rera_qr_asset_id]
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
+  const requestedAssetIds = Array.from(new Set([
     ...(Array.isArray(renderPackage.project_asset_ids) ? renderPackage.project_asset_ids : []),
-    renderPackage.logo_asset_id,
-    renderPackage.rera_qr_asset_id,
-    ...(Array.isArray(renderPackage.reference_image_ids) ? renderPackage.reference_image_ids : [])
-  ].filter((value): value is string => typeof value === "string" && value.length > 0);
+    ...(Array.isArray(renderPackage.reference_image_ids) ? renderPackage.reference_image_ids : []),
+    ...modelReferenceAssetIds
+  ].filter((value): value is string => typeof value === "string" && value.length > 0)));
 
   const [brandAssets, reraRegistrations] = await Promise.all([
     listBrandAssets(brand.id),
@@ -735,15 +864,30 @@ async function renderCreativeV3Variant(params: {
         .filter((asset) => !project || asset.projectId === project.id || asset.projectId == null)
         .filter(isRenderableImageAsset)
         .map((asset) => asset.storagePath),
-      ...(reraCompositeStoragePath ? [reraCompositeStoragePath] : [])
     ]
   ));
+  const hasLogoReference = providerReferences.some((item) =>
+    item.sent_to_model !== false &&
+    typeof item.asset_id === "string" &&
+    item.asset_id === renderPackage.logo_asset_id
+  );
+  const hasReraReference = Boolean(reraCompositeStoragePath) || providerReferences.some((item) =>
+    typeof item.asset_id === "string" &&
+    item.asset_id === renderPackage.rera_qr_asset_id
+  );
+  const hasSecondaryLogoReference = providerReferences.some((item) =>
+    item.sent_to_model !== false &&
+    typeof item.asset_id === "string" &&
+    item.asset_id === renderPackage.secondary_logo_asset_id
+  );
   const renderPrompt = buildCreativeV3RendererPrompt({
     prompt,
     hasProjectReference: Array.isArray(renderPackage.project_asset_ids) && renderPackage.project_asset_ids.length > 0,
-    hasLogoReference: typeof renderPackage.logo_asset_id === "string" && renderPackage.logo_asset_id.length > 0,
-    hasReraReference: Boolean(reraCompositeStoragePath),
+    hasLogoReference,
+    hasSecondaryLogoReference,
+    hasReraReference,
     logoRules: isPlainRecord(renderPackage.logo_rules) ? renderPackage.logo_rules : null,
+    secondaryLogoRules: isPlainRecord(renderPackage.secondary_logo_rules) ? renderPackage.secondary_logo_rules : null,
   });
 
   const result = await generateOpenAiImages({
@@ -753,14 +897,23 @@ async function renderCreativeV3Variant(params: {
     count: params.count,
     referencePaths
   });
+  const images = reraCompositeStoragePath
+    ? await compositeReraBlockOnGeneratedImages({
+        images: result.images,
+        reraCompositeStoragePath,
+        reraRules: isPlainRecord(renderPackage.rera_qr_rules) ? renderPackage.rera_qr_rules : null
+      })
+    : result.images;
 
   return {
     provider: "openai",
     model: env.OPENAI_FINAL_MODEL,
     requestId: result.request_id,
+    providerPrompt: renderPrompt,
     referenceAssetIds: requestedAssetIds,
+    layerAssetIds,
     referenceStoragePaths: referencePaths,
-    images: result.images
+    images
   };
 }
 
@@ -768,25 +921,20 @@ function buildCreativeV3RendererPrompt(params: {
   prompt: string;
   hasProjectReference: boolean;
   hasLogoReference: boolean;
+  hasSecondaryLogoReference: boolean;
   hasReraReference: boolean;
   logoRules?: Record<string, unknown> | null;
+  secondaryLogoRules?: Record<string, unknown> | null;
 }) {
-  const roleNotes = [
-    "Create a finished designed social-media poster, not a simple text overlay on the reference image.",
-    "The output must visibly transform the reference into a designed layout using framing, crop, mask, whitespace, graphic fields, and typography zones. Do not keep the reference image unchanged as a full-bleed background with text placed over it.",
-  ];
-  if (params.hasProjectReference) {
-    roleNotes.push(
-      "The primary project/amenity reference image is a truth anchor: preserve its real architecture, amenity geometry, facade rhythm, materials, and identity, but you may crop, cut out, scale, frame, mask, extend whitespace, and compose it into a new poster layout."
-    );
-  }
+  const roleNotes = ["Use the following provider prompt as the final art direction. Do not add contradictory text, logo, QR, contact, or factual claims beyond it."];
   if (params.hasLogoReference) {
     roleNotes.push(compileLogoRenderInstruction(params.logoRules));
   }
+  if (params.hasSecondaryLogoReference) {
+    roleNotes.push(compileSecondaryLogoRenderInstruction(params.secondaryLogoRules));
+  }
   if (params.hasReraReference) {
-    roleNotes.push(
-      "Use the RERA compliance composite only as a compact top-right badge, approximately the same visual height as the logo and no wider than one-quarter of the canvas. Never stretch the RERA block full-width and never place it as a footer banner."
-    );
+    roleNotes.push("Leave a clean compact RERA compliance safe zone if requested; the exact RERA block is composited after generation. Never invent, redraw, or stylize a QR code.");
   }
   return `${roleNotes.join("\n")}\n\n${params.prompt}`;
 }
@@ -817,6 +965,16 @@ function compileLogoRenderInstruction(logoRules?: Record<string, unknown> | null
     "Place the logo exactly as provided: do not redraw, modify, stylize, recolor, warp, simplify, crop, replace, or reinterpret it.",
     "Keep the logo sharp, fully visible, separate from the building image, and never on the building facade or as physical signage."
   ].filter(Boolean).join(" ");
+}
+
+function compileSecondaryLogoRenderInstruction(logoRules?: Record<string, unknown> | null) {
+  const position = typeof logoRules?.position === "string" ? logoRules.position : "top_left";
+  return [
+    "Use the supplied secondary logo reference exactly once as a separate flat brand mark layer.",
+    `Secondary logo position: ${formatLogoPosition(position)}.`,
+    "Keep it visually subordinate to the primary project/logo mark, with comfortable spacing and no overlap with RERA or headline areas.",
+    "Do not redraw, recolor, crop, merge, stylize, or place the secondary logo on the building facade."
+  ].join(" ");
 }
 
 function readNumericRule(rules: Record<string, unknown> | null | undefined, key: string) {
@@ -878,14 +1036,18 @@ async function persistCreativeV3Outputs(params: {
       ? firstVariant.render_package as Record<string, unknown>
       : {};
   const finalPrompt =
-    typeof firstRenderPackage.compiled_prompt === "string"
-      ? firstRenderPackage.compiled_prompt
-      : typeof firstVariant.compiled_prompt === "string"
+    typeof firstRenderPackage.provider_prompt === "string"
+      ? firstRenderPackage.provider_prompt
+      : typeof firstRenderPackage.compiled_prompt === "string"
+        ? firstRenderPackage.compiled_prompt
+        : typeof firstVariant.compiled_prompt === "string"
         ? firstVariant.compiled_prompt
         : typeof firstVariant.prompt === "string"
           ? firstVariant.prompt
           : params.compiled.enginePayload.brief as string;
   const referenceAssetIds = collectReferenceAssetIds(params.compiled.response.result?.variants ?? []);
+  const templateInfo = extractCreativeV3TemplateInfo(firstVariant);
+  const safeTemplateDbId = await resolveExistingCreativeTemplateId(templateInfo.dbId);
 
   const creativeRequestId = randomId();
   const promptPackageId = randomId();
@@ -926,7 +1088,7 @@ async function persistCreativeV3Outputs(params: {
     deliverable_id: deliverableId,
     project_id: params.compiled.project?.id ?? null,
     post_type_id: params.compiled.postType?.id ?? null,
-    creative_template_id: null,
+    creative_template_id: safeTemplateDbId,
     calendar_item_id: null,
     prompt_summary: "Creative V3 generated post",
     seed_prompt: finalPrompt,
@@ -939,7 +1101,9 @@ async function persistCreativeV3Outputs(params: {
     resolved_constraints: {
       source: "creative_v3",
       content_job_id: params.compiled.response.result?.content_job_id ?? null,
-      variation_strategy: params.compiled.response.result?.variation_strategy ?? null
+      variation_strategy: params.compiled.response.result?.variation_strategy ?? null,
+      selected_template_id: templateInfo.templateId,
+      selected_template_db_id: safeTemplateDbId ?? templateInfo.dbId
     },
     compiler_trace: {
       source: "creative_v3",
@@ -962,10 +1126,11 @@ async function persistCreativeV3Outputs(params: {
     deliverable_id: deliverableId,
     project_id: params.compiled.project?.id ?? null,
     post_type_id: params.compiled.postType?.id ?? null,
-    creative_template_id: null,
+    creative_template_id: safeTemplateDbId,
     calendar_item_id: null,
     prompt_package_id: promptPackageId,
-    selected_template_id: null,
+    // DB selected_template_id is a UUID/FK in some deployments. Store only a verified DB UUID here; keep the string template key in request_payload/metadata.
+    selected_template_id: safeTemplateDbId,
     job_type: "final",
     status: "completed",
     provider: "openai",
@@ -1014,7 +1179,7 @@ async function persistCreativeV3Outputs(params: {
         deliverable_id: deliverableId,
         project_id: params.compiled.project?.id ?? null,
         post_type_id: params.compiled.postType?.id ?? null,
-        creative_template_id: null,
+        creative_template_id: safeTemplateDbId,
         calendar_item_id: null,
         job_id: creativeJobId,
         post_version_id: null,
@@ -1035,7 +1200,12 @@ async function persistCreativeV3Outputs(params: {
           render_package: item.variant.render_package ?? null,
           reference_asset_ids: item.render.referenceAssetIds,
           reference_storage_paths: item.render.referenceStoragePaths,
-          provider_request_id: item.render.requestId
+          provider_request_id: item.render.requestId,
+          provider_prompt_used: item.render.providerPrompt,
+          provider_reference_asset_ids: item.render.referenceAssetIds,
+          provider_reference_storage_paths: item.render.referenceStoragePaths,
+          selected_template_id: extractCreativeV3TemplateInfo(item.variant).templateId,
+          selected_template_db_id: extractCreativeV3TemplateInfo(item.variant).dbId
         },
         created_by: params.actorUserId
       });
@@ -1067,6 +1237,9 @@ async function createCreativeV3ReviewDeliverable(params: {
   const rawFormat = String(params.compiled.enginePayload.format ?? params.compiled.response.result?.format ?? "portrait");
   const creativeFormat = creativeFormatForCreativeV3Format(rawFormat);
 
+  const firstVariantTemplateInfo = extractCreativeV3TemplateInfo(params.compiled.response.result?.variants?.[0] ?? {});
+  const safeTemplateDbId = await resolveExistingCreativeTemplateId(firstVariantTemplateInfo.dbId);
+
   const { error } = await supabaseAdmin.from("deliverables").insert({
     id: deliverableId,
     workspace_id: params.compiled.brand.workspaceId,
@@ -1077,7 +1250,7 @@ async function createCreativeV3ReviewDeliverable(params: {
     persona_id: null,
     content_pillar_id: null,
     post_type_id: params.compiled.postType.id,
-    creative_template_id: null,
+    creative_template_id: safeTemplateDbId,
     channel_account_id: null,
     planning_mode: "ad_hoc",
     objective_code: contentJobToObjectiveCode(params.compiled.response.result?.content_job_id),
@@ -1099,7 +1272,9 @@ async function createCreativeV3ReviewDeliverable(params: {
       creativeFormat,
       sourceFormat: rawFormat,
       variantCount: params.compiled.response.result?.variant_count ?? null,
-      variationStrategy: params.compiled.response.result?.variation_strategy ?? null
+      variationStrategy: params.compiled.response.result?.variation_strategy ?? null,
+      selectedTemplateId: firstVariantTemplateInfo.templateId,
+      selectedTemplateDbId: safeTemplateDbId ?? firstVariantTemplateInfo.dbId
     },
     created_by: params.createdBy
   });
@@ -1184,7 +1359,7 @@ async function persistCreativeV3CompileRun(params: {
     brand_id: params.brand.id,
     project_id: params.project?.id ?? null,
     post_type_id: params.postType?.id ?? null,
-    status: ["ready", "blocked", "needs_input", "failed"].includes(params.status) ? params.status : "failed",
+    status: ["ready", "ready_with_warnings", "blocked", "needs_input", "failed"].includes(params.status) ? params.status : "failed",
     request_json: params.enginePayload,
     response_json: params.engineResponse as any,
     engine_url: env.PROMPT_ENGINE_V3_URL ?? null,
@@ -1214,6 +1389,7 @@ function collectReferenceAssetIds(variants: Array<Record<string, unknown>>) {
     for (const value of [
       ...(Array.isArray(renderPackage.project_asset_ids) ? renderPackage.project_asset_ids : []),
       renderPackage.logo_asset_id,
+      renderPackage.secondary_logo_asset_id,
       renderPackage.rera_qr_asset_id,
       ...(Array.isArray(renderPackage.reference_image_ids) ? renderPackage.reference_image_ids : [])
     ]) {
@@ -1225,6 +1401,44 @@ function collectReferenceAssetIds(variants: Array<Record<string, unknown>>) {
   return Array.from(ids);
 }
 
+
+async function resolveExistingCreativeTemplateId(templateDbId: string | null): Promise<string | null> {
+  if (!templateDbId || !z.string().uuid().safeParse(templateDbId).success) {
+    return null;
+  }
+  const { data, error } = await supabaseAdmin
+    .from("creative_templates")
+    .select("id")
+    .eq("id", templateDbId)
+    .maybeSingle();
+  if (error) {
+    return null;
+  }
+  return typeof data?.id === "string" ? data.id : null;
+}
+
+function extractCreativeV3TemplateInfo(variant: unknown): { templateId: string | null; dbId: string | null } {
+  if (!variant || typeof variant !== "object") {
+    return { templateId: null, dbId: null };
+  }
+  const record = variant as Record<string, unknown>;
+  const renderPackage = isPlainRecord(record.render_package) ? record.render_package : {};
+  const templateContract = isPlainRecord(renderPackage.template_contract)
+    ? renderPackage.template_contract
+    : isPlainRecord(record.template_contract)
+      ? record.template_contract
+      : {};
+  const raw = isPlainRecord(templateContract.raw) ? templateContract.raw : {};
+  const templateId =
+    typeof record.selected_template_id === "string" ? record.selected_template_id :
+    typeof templateContract.template_id === "string" ? templateContract.template_id :
+    typeof raw.template_id === "string" ? raw.template_id :
+    typeof raw.template_key === "string" ? raw.template_key :
+    null;
+  const dbId = typeof raw.db_id === "string" && z.string().uuid().safeParse(raw.db_id).success ? raw.db_id : null;
+  return { templateId, dbId };
+}
+
 function extensionForGeneratedImage(image: OpenAiGeneratedImage) {
   const contentType = image.content_type?.toLowerCase() ?? "";
   if (contentType.includes("webp")) return "webp";
@@ -1232,6 +1446,67 @@ function extensionForGeneratedImage(image: OpenAiGeneratedImage) {
   const name = image.file_name?.toLowerCase() ?? "";
   const match = name.match(/\.([a-z0-9]+)$/);
   return match?.[1] && ["png", "jpg", "jpeg", "webp"].includes(match[1]) ? match[1] : "png";
+}
+
+async function compositeReraBlockOnGeneratedImages(params: {
+  images: OpenAiGeneratedImage[];
+  reraCompositeStoragePath: string;
+  reraRules: Record<string, unknown> | null;
+}): Promise<OpenAiGeneratedImage[]> {
+  const reraBlob = await downloadStorageBlob(params.reraCompositeStoragePath);
+  const reraBuffer = Buffer.from(await reraBlob.arrayBuffer());
+  return Promise.all(
+    params.images.map(async (image, index) => {
+      const sourceBuffer = await generatedImageToBuffer(image.url);
+      const sourceMeta = await sharp(sourceBuffer).metadata();
+      const width = sourceMeta.width ?? 0;
+      const height = sourceMeta.height ?? 0;
+      if (width <= 0 || height <= 0) {
+        return image;
+      }
+
+      const maxWidthRatio = readNumericRule(params.reraRules, "max_width_ratio") ?? 0.25;
+      const maxWidth = Math.max(180, Math.round(width * maxWidthRatio));
+      const resizedRera = await sharp(reraBuffer)
+        .resize({ width: maxWidth, withoutEnlargement: true })
+        .png()
+        .toBuffer();
+      const reraMeta = await sharp(resizedRera).metadata();
+      const reraWidth = reraMeta.width ?? maxWidth;
+      const reraHeight = reraMeta.height ?? Math.round(maxWidth * 0.18);
+      const marginTop = Math.round(height * (readNumericRule(params.reraRules, "margin_top_ratio") ?? 0.04));
+      const marginRight = Math.round(width * (readNumericRule(params.reraRules, "margin_right_ratio") ?? 0.05));
+      const marginLeft = Math.round(width * (readNumericRule(params.reraRules, "margin_left_ratio") ?? 0.05));
+      const position = typeof params.reraRules?.position === "string" ? params.reraRules.position : "top_right";
+      const left = position === "top_left" ? marginLeft : Math.max(marginLeft, width - reraWidth - marginRight);
+      const top = marginTop;
+      const output = await sharp(sourceBuffer)
+        .composite([{ input: resizedRera, left, top }])
+        .png()
+        .toBuffer();
+      return {
+        url: `data:image/png;base64,${output.toString("base64")}`,
+        content_type: "image/png",
+        file_name: image.file_name?.replace(/\.[a-z0-9]+$/i, ".png") ?? `creative-v3-rera-${index + 1}.png`
+      };
+    })
+  );
+}
+
+async function generatedImageToBuffer(sourceUrl: string) {
+  if (sourceUrl.startsWith("data:")) {
+    const match = sourceUrl.match(/^data:[^;,]+(?:;charset=[^;,]+)?;base64,(.+)$/);
+    if (!match?.[1]) {
+      throw new Error("Invalid generated image data URL");
+    }
+    return Buffer.from(match[1], "base64");
+  }
+
+  const response = await fetch(sourceUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch generated image for compositing: ${response.status}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
 }
 
 async function processCreativeV3GenerateJobLocally(params: {
@@ -1284,7 +1559,7 @@ async function processCreativeV3GenerateJobLocally(params: {
       log: params.log
     });
 
-    const variants = compiled.status === "ready" ? getCreativeV3Variants(compiled.response) : [];
+    const variants = ["ready", "ready_with_warnings"].includes(compiled.status) ? getCreativeV3Variants(compiled.response) : [];
     const renders = await Promise.all(
       variants.map(async (variant) => {
         const variantId = typeof variant.variant_id === "string" ? variant.variant_id : randomId();
@@ -1400,7 +1675,7 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
       if (postType.workspaceId && postType.workspaceId !== brand.workspaceId) {
         throw new Error("Post type does not belong to the selected workspace");
       }
-      return listCreativeV3VisualTemplates({
+      const templates = await listCreativeV3VisualTemplates({
         workspaceId: brand.workspaceId,
         brandId: brand.id,
         projectId: query.projectId ?? null,
@@ -1408,8 +1683,12 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
         contentJobId: toContentJobId(postType.code),
         format: query.format ? toNotebookFormat(query.format) : null
       });
+      const previewUrls = await Promise.all(
+        templates.map((t: any) => t.preview_storage_path ? createSignedUrl(t.preview_storage_path).catch(() => null) : null)
+      );
+      return templates.map((t: any, i: number) => ({ ...t, previewUrl: previewUrls[i] }));
     }
-    return listCreativeV3VisualTemplates({
+    const templatesNoPostType = await listCreativeV3VisualTemplates({
       workspaceId: brand.workspaceId,
       brandId: brand.id,
       projectId: query.projectId ?? null,
@@ -1417,6 +1696,10 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
       contentJobId: null,
       format: query.format ? toNotebookFormat(query.format) : null
     });
+    const previewUrlsNoPostType = await Promise.all(
+      templatesNoPostType.map((t: any) => t.preview_storage_path ? createSignedUrl(t.preview_storage_path).catch(() => null) : null)
+    );
+    return templatesNoPostType.map((t: any, i: number) => ({ ...t, previewUrl: previewUrlsNoPostType[i] }));
   });
 
   app.post("/api/creative-v3/brand-presets", { preHandler: app.authenticate }, async (request, reply) => {

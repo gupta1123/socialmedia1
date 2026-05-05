@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from .context_builder import brand_name, project_name
 from .creative_levers import describe_creative_direction
+from .asset_analysis_normalizer import get_visual_analysis, metadata_for_asset
 
 
 def compile_image_prompt(
@@ -15,7 +16,20 @@ def compile_image_prompt(
     creative_direction: Dict[str, Any],
     include_logo: bool,
     include_rera_qr: bool,
+    logo_asset_id: Optional[str] = None,
+    rera_qr_asset_id: Optional[str] = None,
+    contact_values: Optional[Dict[str, str]] = None,
+    template: Optional[Dict[str, Any]] = None,
     allow_price_claims: bool = False,
+    text_treatment: str = "render_text",
+    *,
+    intent: Any = None,
+    strategy: Any = None,
+    production: Any = None,
+    asset_decision: Any = None,
+    template_constraint: Any = None,
+    concept: Any = None,
+    copy_plan: Any = None,
 ) -> str:
     base = strip_internal_tokens(prompt or "")
     if not allow_price_claims:
@@ -26,64 +40,179 @@ def compile_image_prompt(
         base = normalize_unsupported_progress_visual_claims(base)
     if not base:
         base = fallback_prompt(context, asset, copy, creative_direction)
-    base = ensure_asset_truth_instruction(base, asset)
-    base = ensure_design_transformation_instruction(base, creative_direction, asset)
     if content_job_id == "construction_update":
         base = ensure_construction_update_visual_instruction(base, asset)
-    base = ensure_visible_copy_instruction(base, copy)
-    is_festive = context.get("content_job", {}).get("content_job_id") == "festive_greeting"
-    has_asset = has_visual_asset(asset)
-    subject_name = brand_name(context) if is_festive and not context.get("project") else project_name(context)
-    constraints = ["Hard constraints for %s:" % subject_name]
-    if has_asset:
-        constraints.extend([
-            "preserve the supplied project asset geometry, facade rhythm, material character, and render/photo truth while allowing poster-level crop, cutout, scale, background, framing, and graphic composition;",
-            "do not invent ocean, skyline, extra towers, roads, signage, legal claims, prices, contact details, or surroundings;",
-            "do not place text, logo, or QR on the building facade;",
-        ])
-        if content_job_id == "construction_update" and not asset_supports_construction_progress(asset):
-            constraints.append(
-                "show the project as an under-construction visualization based on the supplied building geometry, with tasteful scaffolding/construction-wrap/crane cues only as illustrative progress styling; do not claim this is a verified current site photograph or exact live progress status."
-            )
-        elif content_job_id == "construction_update":
-            constraints.append(
-                "show the real construction/progress condition from the supplied asset clearly and credibly; do not over-polish it into a completed building render."
-            )
-    else:
-        constraints.extend([
-            "do not invent project-specific architecture, pricing, legal claims, contact details, or unsupported surroundings;",
-            "keep any brand/project references as clean poster typography, not physical signage;",
-        ])
-    constraints.append("render the headline, subheadline, and CTA as clean social-poster typography for preview;")
-    if is_festive:
-        festival = context.get("festival") if isinstance(context.get("festival"), dict) else {}
-        festival_name = str(festival.get("name") or "the selected occasion").strip()
-        constraints.extend([
-            "make this an occasion-led festive greeting for %s, not a project launch or sales announcement;" % festival_name,
-            "use tasteful festive cues, warm restraint, and %s brand presence without pricing, offers, visit CTAs, or launch language;" % brand_name(context),
-        ])
-    if include_logo:
-        constraints.append("reserve one exact-logo layer zone only; never redraw or duplicate the logo;")
-    if include_rera_qr:
-        constraints.append(
-            "reserve one compact exact RERA compliance lockup at the top-right only; "
-            "keep it about the same visual height as the logo, no wider than roughly one-quarter of the canvas, "
-            "never stretch it into a full-width banner or footer, and never generate a fake QR;"
-        )
-    return trim_prompt("%s\n\n%s" % (base.strip(), " ".join(constraints)), 3000)
+    return compile_final_provider_prompt(
+        base,
+        context,
+        asset,
+        copy,
+        creative_direction,
+        include_logo=include_logo and bool(logo_asset_id),
+        include_rera_qr=include_rera_qr and bool(rera_qr_asset_id),
+        contact_values=contact_values or {},
+        template=template,
+        allow_price_claims=allow_price_claims,
+        text_treatment=text_treatment,
+        intent=intent,
+        strategy=strategy,
+        production=production,
+        asset_decision=asset_decision,
+        template_constraint=template_constraint,
+        concept=concept,
+        copy_plan=copy_plan,
+    )
 
+
+def compile_final_provider_prompt(
+    source_prompt: str,
+    context: Dict[str, Any],
+    asset: Dict[str, Any],
+    copy: Dict[str, str],
+    creative_direction: Dict[str, Any],
+    *,
+    include_logo: bool,
+    include_rera_qr: bool,
+    contact_values: Dict[str, str],
+    template: Optional[Dict[str, Any]] = None,
+    allow_price_claims: bool = False,
+    text_treatment: str = "render_text",
+    max_chars: int = 3200,
+    intent: Any = None,
+    strategy: Any = None,
+    production: Any = None,
+    asset_decision: Any = None,
+    template_constraint: Any = None,
+    concept: Any = None,
+    copy_plan: Any = None,
+) -> str:
+    # New section-based compiler. The image model only sees this final text, so the
+    # prompt must lead with brief intent, asset usage, concept, copy behavior, and
+    # only then constraints. The old branch remains as fallback for direct calls.
+    if intent is not None and strategy is not None and production is not None and asset_decision is not None and concept is not None and copy_plan is not None:
+        from .prompt_sections import assemble_prompt_sections
+        from .template_resolver import resolve_template_constraint
+
+        tc = template_constraint or resolve_template_constraint(template, asset_decision)
+        clean_source = sanitize_optional_layer_language(source_prompt, include_logo, include_rera_qr, bool(contact_values))
+        clean_source = strip_internal_tokens(clean_source)
+        sections = assemble_prompt_sections(
+            source_prompt=clean_source,
+            context=context,
+            intent=intent,
+            strategy=strategy,
+            production=production,
+            asset_decision=asset_decision,
+            template=tc,
+            concept=concept,
+            copy_plan=copy_plan,
+            creative_direction=creative_direction,
+            allow_price_claims=allow_price_claims,
+        )
+        prompt = " ".join(sentence_dedupe(sections))
+        prompt = semantic_prompt_repair(prompt, context, asset, intent=intent)
+        prompt = sanitize_optional_layer_language(prompt, include_logo, include_rera_qr, bool(contact_values))
+        if not allow_price_claims:
+            prompt = remove_price_claims(prompt)
+        return truncate_on_sentence(prompt, max_chars)
+
+    is_festive = context.get("content_job", {}).get("content_job_id") == "festive_greeting"
+    subject_name = brand_name(context) if is_festive and not context.get("project") else project_name(context)
+    output_format = str(context.get("format") or "4:5")
+    visual = asset_visual_analysis(asset)
+    parts: List[str] = [
+        "Create a finished premium %s real estate social creative for %s." % (output_format, subject_name),
+    ]
+    try:
+        from .prompt_sections import _brand_palette_section
+        palette_instruction = _brand_palette_section(context)
+        if palette_instruction:
+            parts.append(palette_instruction)
+    except Exception:
+        parts.append("Brand color direction: use a restrained premium palette drawn from the brand identity. Do not recolor or modify the supplied logo.")
+    if has_visual_asset(asset):
+        parts.append(asset_truth_sentence(asset, visual))
+    else:
+        parts.append("Use a graphic-led composition; do not invent project-specific architecture or unsupported surroundings.")
+
+    template_instruction = template_provider_instruction(template)
+    if template_instruction:
+        parts.append(template_instruction)
+    parts.append("Creative levers: %s." % describe_creative_direction(creative_direction))
+    composition = concrete_composition_instruction(creative_direction)
+    if composition:
+        parts.append(composition)
+    if visual.get("prompt_adaptation_guidance"):
+        parts.append("Adapt crop, composition, mood, and graphic treatment using this asset guidance: %s." % compact_join(visual.get("prompt_adaptation_guidance")))
+
+    reserve_text_space = text_treatment == "reserve_space"
+    if reserve_text_space:
+        parts.append(
+            "Do not render any poster text, captions, letters, numbers, CTA labels, headline, subheadline, placeholder words, lorem ipsum, gibberish typography, or text-like marks. "
+            "Design this as a clean background/key visual with intentional empty negative space reserved for editable copy to be added later. "
+            "Keep the reserved copy zone visually calm, uncluttered, and free of important subject details."
+        )
+    else:
+        copy_parts = []
+        for label, key in [("headline", "headline"), ("subheadline", "subheadline"), ("CTA", "cta")]:
+            value = str(copy.get(key) or "").strip()
+            if value:
+                copy_parts.append("%s '%s'" % (label, value))
+        if copy_parts:
+            parts.append("Render exact readable poster typography: %s; keep text in clean layout zones, never as facade signage." % ", ".join(copy_parts))
+
+    if include_logo:
+        parts.append("Use the supplied logo asset exactly once as a clean brand layer; never redraw, recolor, duplicate, or place it on the building facade.")
+    else:
+        parts.append("Do not generate, imply, draw, or place any logo or brand mark.")
+    if include_rera_qr:
+        parts.append("Use the supplied RERA QR asset exactly once as a compact compliance layer; never invent or redraw a QR code.")
+    else:
+        parts.append("Do not generate or mention any QR code or RERA QR block.")
+    if contact_values:
+        if reserve_text_space:
+            parts.append("Reserve a small clean contact area if needed, but do not render any contact text or values.")
+        else:
+            parts.append("Only use these grounded contact values if shown: %s." % ", ".join("%s %s" % (key, value) for key, value in contact_values.items()))
+    else:
+        parts.append("Do not generate phone numbers, email addresses, WhatsApp labels, websites, or contact details.")
+
+    forbidden = [
+        "Do not add facade signage, project or brand names on the building, fake logos, fake QR codes, invented phone/email/RERA/price claims, extra towers, ocean or water bodies, unsupported skyline, people, altered architecture, template names, asset IDs, or system labels.",
+    ]
+    if reserve_text_space:
+        forbidden.append("Do not render any readable or pseudo-readable text anywhere in the image; leave typography zones blank for later editing.")
+    unsupported = visual.get("not_visible_or_not_supported")
+    if unsupported:
+        forbidden.append("Do not show or claim these unsupported asset details: %s." % compact_join(unsupported))
+    if not allow_price_claims:
+        forbidden.append("Do not include price, EMI, offer, or booking amount claims.")
+    parts.extend(forbidden)
+    clean_source = sanitize_optional_layer_language(source_prompt, include_logo, include_rera_qr, bool(contact_values))
+    clean_source = strip_internal_tokens(clean_source)
+    if clean_source:
+        parts.append("Creative concept: %s" % clean_source.rstrip("."))
+    prompt = " ".join(sentence_dedupe(parts))
+    prompt = sanitize_optional_layer_language(prompt, include_logo, include_rera_qr, bool(contact_values))
+    if not allow_price_claims:
+        prompt = remove_price_claims(prompt)
+    return truncate_on_sentence(prompt, max_chars)
 
 def fallback_prompt(context: Dict[str, Any], asset: Dict[str, Any], copy: Dict[str, str], creative_direction: Dict[str, Any]) -> str:
     is_festive = context.get("content_job", {}).get("content_job_id") == "festive_greeting"
     subject = brand_name(context) if is_festive and not context.get("project") else project_name(context)
     if not has_visual_asset(asset):
+        kind = "brand festive greeting poster" if is_festive and not context.get("project") else "real-estate social creative"
+        asset_note = "No project/building image is required; do not add buildings unless explicitly requested." if is_festive and not context.get("project") else "Use a concept-led visual without inventing unsupported project architecture."
         return (
-            "Create a premium %s real-estate social creative for %s. "
-            "Creative direction: %s. "
+            "Create a premium %s %s for %s. "
+            "%s Creative direction: %s. "
             "Visible text: headline '%s', subheadline '%s', CTA '%s'."
         ) % (
             context.get("format") or "4:5",
+            kind,
             subject,
+            asset_note,
             describe_creative_direction(creative_direction),
             copy.get("headline", ""),
             copy.get("subheadline", ""),
@@ -235,6 +364,90 @@ def has_visual_asset(asset: Dict[str, Any]) -> bool:
     return bool(asset.get("asset_id") or asset.get("storage_path") or asset.get("url") or asset.get("label"))
 
 
+def asset_visual_analysis(asset: Dict[str, Any]) -> Dict[str, Any]:
+    visual = get_visual_analysis(asset)
+    if visual:
+        # Backward-compatible aliases expected by the compiler.
+        out = dict(visual)
+        out.setdefault("summary", visual.get("dominant_subject") or visual.get("composition"))
+        out.setdefault("prompt_adaptation_guidance", visual.get("prompt_guidance"))
+        out.setdefault("not_visible_or_not_supported", visual.get("forbidden_transformations"))
+        return out
+    return {}
+
+def asset_truth_sentence(asset: Dict[str, Any], visual: Dict[str, Any]) -> str:
+    label = str(asset.get("label") or "selected project reference").strip()
+    description = str(visual.get("summary") or visual.get("dominant_subject") or visual.get("composition") or asset.get("description") or "project-truth reference image").strip().rstrip(".")
+    truth = str(asset.get("truth_status") or "").strip()
+    sentence = (
+        "Use the supplied project reference image '%s' as the primary visual truth anchor: %s. "
+        "Preserve architecture, facade rhythm, massing, materials, perspective, and %s truth while allowing poster-level crop, cutout, scale, masking, framing, whitespace, and graphic composition."
+    ) % (label, description, truth or "image")
+    return sentence
+
+
+def template_provider_instruction(template: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(template, dict) or not template:
+        return ""
+    template_json = template.get("template_json") if isinstance(template.get("template_json"), dict) else {}
+    pieces = [
+        template.get("name"),
+        template_json.get("visual_notes"),
+        template_json.get("shape_selection_rule"),
+        template_json.get("reality_policy"),
+    ]
+    best_for = template_json.get("best_for")
+    if isinstance(best_for, list) and best_for:
+        pieces.append("Best use: %s" % ", ".join(str(item) for item in best_for[:3]))
+    text = compact_join([piece for piece in pieces if piece])
+    return "Follow the selected visual template as composition and hierarchy guidance: %s." % text if text else ""
+
+
+def compact_join(value: Any) -> str:
+    if isinstance(value, list):
+        return "; ".join(str(item).strip() for item in value if str(item).strip())
+    if isinstance(value, dict):
+        return "; ".join("%s: %s" % (key, val) for key, val in value.items() if str(val).strip())
+    return str(value or "").strip()
+
+
+def sanitize_optional_layer_language(text: str, include_logo: bool, include_rera_qr: bool, has_contact: bool) -> str:
+    if not text:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    out: List[str] = []
+    for sentence in sentences:
+        lowered = sentence.lower()
+        if not include_logo and re.search(r"\b(logos?|brand marks?)\b", lowered) and not re.search(r"\b(no|not|never|do not|don't|without)\b", lowered):
+            continue
+        if not include_rera_qr and re.search(r"\b(qr|rera qr)\b", lowered) and not re.search(r"\b(no|not|never|do not|don't|without)\b", lowered):
+            continue
+        if not has_contact and re.search(r"\b(phone|email|whatsapp|contact details?|website)\b", lowered) and not re.search(r"\b(no|not|never|do not|don't|without)\b", lowered):
+            continue
+        out.append(sentence)
+    result = " ".join(out)
+    if not include_logo:
+        result = re.sub(r"\b(?:the\s+)?[A-Z][A-Za-z0-9& ]{1,40}\s+logo\b", "brand mark", result)
+    if not include_rera_qr:
+        result = re.sub(r"\b(?:RERA\s*)?QR(?:\s*code|\s*block)?\b", "compliance block", result, flags=re.I)
+    if not has_contact:
+        result = re.sub(r"(?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}", "", result)
+        result = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "", result)
+    return re.sub(r"\s+", " ", result).strip()
+
+
+def sentence_dedupe(parts: List[str]) -> List[str]:
+    seen = set()
+    out = []
+    for part in parts:
+        text = re.sub(r"\s+", " ", str(part or "")).strip()
+        key = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+        if text and key not in seen:
+            out.append(text)
+            seen.add(key)
+    return out
+
+
 def ensure_visible_copy_instruction(prompt: str, copy: Dict[str, str]) -> str:
     values = [copy.get("headline"), copy.get("subheadline"), copy.get("cta")]
     values = [str(value).strip() for value in values if str(value or "").strip()]
@@ -298,16 +511,43 @@ def asset_supports_construction_progress(asset: Dict[str, Any]) -> bool:
 
 def normalize_unsupported_progress_visual_claims(text: str) -> str:
     replacements = {
-        r"\bshowcas(?:e|ing|es)?\s+(?:the\s+)?(?:current\s+)?construction\s+progress\b": "show an under-construction project visualization",
-        r"\bshowcas(?:e|ing|es)?\s+progress\b": "show an under-construction project visualization",
-        r"\bcurrent\s+construction\s+progress\b": "construction milestone visualization",
-        r"\bconstruction\s+progress\b": "construction milestone visualization",
-        r"\bfactual\s+progress\s+report\b": "credible construction update",
-        r"\bcurrent\s+construction\s+phase\b": "construction milestone stage",
-        r"\bsite\s+progress\b": "construction milestone visualization",
+        r"\bshowcas(?:e|ing|es)?\s+(?:the\s+)?(?:current\s+)?construction\s+progress\b": "show a construction-stage visualization based on approved project design",
+        r"\bshowcas(?:e|ing|es)?\s+progress\b": "show a construction-stage visualization",
+        r"\bcurrent\s+construction\s+progress\b": "visualized construction stage",
+        r"\bfactual\s+progress\s+report\b": "construction-stage visualization",
+        r"\bcurrent\s+construction\s+phase\b": "visualized construction stage",
+        r"\bunder\s+construction\s+photograph\b": "under-construction visualization",
+        r"\bcaptured\s+recently\b": "visualized from approved design",
+        r"\blatest\s+progress\b": "visualized progress concept",
+        r"\bactual\s+current\s+progress\b": "visualized construction state",
+        r"\badvancing\s+rapidly\b": "taking shape",
     }
     for pattern, replacement in replacements.items():
         text = re.sub(pattern, replacement, text, flags=re.I)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+
+def semantic_prompt_repair(text: str, context: Dict[str, Any], asset: Dict[str, Any], *, intent: Any = None) -> str:
+    content_job_id = str((context.get("content_job") or {}).get("content_job_id") or getattr(intent, "content_job_id", "") or "")
+    if content_job_id == "festive_greeting" and getattr(intent, "festival_visual_scope", "") == "brand_only":
+        # Brand-only festival posts must not inherit project/building wording.
+        replacements = {
+            r"Use the supplied project visual asset as the factual visual anchor\.?": "No project or building image is required.",
+            r"Use the supplied .*? asset as the factual visual anchor\.?": "No project or building image is required.",
+            r"Use .*? as architectural truth\.?": "Use symbolic festive motifs as the visual foundation.",
+            r"Preserve (?:the )?(?:tower|building|facade|massing)[^.]*\.": "",
+        }
+        for pattern, repl in replacements.items():
+            text = re.sub(pattern, repl, text, flags=re.I)
+        guard = "Brand-only festive rule: do not include any building, tower, facade, project render, construction scene, RERA, pricing, amenity, or real-estate claim unless explicitly requested."
+        if guard.lower() not in text.lower():
+            text += " " + guard
+    if content_job_id == "construction_update" and not asset_supports_construction_progress(asset):
+        text = normalize_unsupported_progress_visual_claims(text)
+        guard = "Construction visualization truth note: this is an under-construction visualization from approved project design, not an actual current site photo or verified latest progress report."
+        if guard.lower() not in text.lower():
+            text += " " + guard
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -316,3 +556,13 @@ def trim_prompt(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[: max_chars - 1].rstrip() + "…"
+
+
+def truncate_on_sentence(text: str, max_chars: int) -> str:
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars].rsplit(". ", 1)[0].strip()
+    if len(cut) < max_chars * 0.65:
+        cut = text[:max_chars].rsplit(" ", 1)[0].strip()
+    return cut.rstrip(" ,;:.") + "."

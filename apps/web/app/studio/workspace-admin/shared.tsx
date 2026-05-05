@@ -33,6 +33,7 @@ import {
   updateWorkspaceMemberRole
 } from "../../../lib/api";
 import { formatLocalTimeLabel, formatWeekdayLabel, weekdayOptions } from "../../../lib/posting-windows";
+import { StudioColorPicker } from "../components/StudioColorPicker";
 import { useStudio } from "../studio-context";
 import { useRegisterTopbarControls } from "../topbar-actions-context";
 
@@ -342,7 +343,7 @@ export function WorkspaceCompliancePanel() {
             </div>
           ) : (
             <div className="settings-note workspace-admin-compliance-status">
-              <span>No project RERA QR found yet. Upload one from Library / Media / RERA QR to preview it here.</span>
+              <span>No project RERA QR found yet. Upload one from Brand Kit / Media / RERA QR to preview it here.</span>
             </div>
           )}
         </div>
@@ -367,20 +368,7 @@ export function WorkspaceCompliancePanel() {
           </label>
           <label className="field-label workspace-admin-compliance-color-field">
             Text color
-            <div className="workspace-admin-color-input">
-              <input
-                aria-label="RERA text color"
-                onChange={(event) => setReraTextColor(event.target.value)}
-                type="color"
-                value={reraTextColor}
-              />
-              <input
-                onChange={(event) => setReraTextColor(event.target.value.startsWith("#") ? event.target.value : `#${event.target.value}`)}
-                pattern="^#?[0-9A-Fa-f]{6}$"
-                placeholder="#111111"
-                value={reraTextColor}
-              />
-            </div>
+            <StudioColorPicker onChange={setReraTextColor} value={reraTextColor} variant="field" />
           </label>
         </div>
       </form>
@@ -399,7 +387,7 @@ export function WorkspaceCompliancePanel() {
         ) : reraRegistrationGroups.length === 0 ? (
           <div className="empty-state">
             <strong>No RERA registrations yet</strong>
-            <p>Upload project-linked RERA QR assets from Library / Media to create registrations.</p>
+            <p>Upload project-linked RERA QR assets from Brand Kit / Media to create registrations.</p>
           </div>
         ) : (
           <div className="workspace-admin-rera-group-list">

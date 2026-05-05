@@ -21,6 +21,8 @@ type OpenAiImageEditFile = {
   fileName?: string;
 };
 
+type OpenAiImageQuality = "auto" | "low" | "medium" | "high";
+
 type OpenAiRequestOptions = {
   model: string;
   prompt: string;
@@ -93,13 +95,15 @@ export async function applyOpenAiDirectEdit({
   image,
   width,
   height,
-  model = env.OPENAI_FINAL_MODEL
+  model = env.OPENAI_FINAL_MODEL,
+  quality = env.OPENAI_IMAGE_QUALITY
 }: {
   prompt: string;
   image: OpenAiImageEditFile;
   width?: number;
   height?: number;
   model?: string;
+  quality?: OpenAiImageQuality;
 }): Promise<OpenAiDirectEditResult> {
   if (!env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is required when IMAGE_GENERATION_PROVIDER=openai");
@@ -110,7 +114,7 @@ export async function applyOpenAiDirectEdit({
   body.append("prompt", prompt);
   body.append("n", "1");
   body.append("size", resolveOpenAiDirectEditSize(width, height));
-  body.append("quality", env.OPENAI_IMAGE_QUALITY);
+  body.append("quality", quality);
   body.append("output_format", env.OPENAI_IMAGE_OUTPUT_FORMAT);
   body.append("background", env.OPENAI_IMAGE_BACKGROUND);
   if (supportsOpenAiInputFidelity(model)) {

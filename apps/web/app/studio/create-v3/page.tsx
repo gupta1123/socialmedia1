@@ -22,8 +22,16 @@ import {
 import { useStudio } from "../studio-context";
 
 type CopyMode = "auto" | "manual";
+type TextTreatment = "render_text" | "reserve_space";
 type V3Variant = CreativeV3CompileResponse["result"]["variants"][number];
 type RefModalKind = "templates" | "all" | "exteriors" | "interiors" | "amenities" | "location" | "generated";
+type GenerationRun = {
+  id: string;
+  label: string;
+  result: CreativeV3CompileResponse;
+  rendersByVariantId: Record<string, CreativeV3RenderResponse>;
+  outputIdsByVariantId: Record<string, string[]>;
+};
 
 const formatOptions = [
   { value: "square", label: "1:1", name: "Square" },
@@ -91,6 +99,7 @@ export default function CreateV3Page() {
   const [postTypeId, setPostTypeId] = useState("");
   const [festivalId, setFestivalId] = useState("");
   const [visualTemplateId, setVisualTemplateId] = useState("");
+  const [tempSelectedTemplateId, setTempSelectedTemplateId] = useState<string | null>(null);
   const [brandPresetId, setBrandPresetId] = useState("");
   const [brief, setBrief] = useState("Create a premium real-estate launch post with a strong architectural visual and restrained copy.");
   const [audience, setAudience] = useState("Homebuyers and investors");
@@ -98,6 +107,7 @@ export default function CreateV3Page() {
   const [variantCount, setVariantCount] = useState(2);
   const [variationStrategy, setVariationStrategy] = useState("auto");
   const [copyMode, setCopyMode] = useState<CopyMode>("auto");
+  const [textTreatment, setTextTreatment] = useState<TextTreatment>("render_text");
   const [copyLanguage, setCopyLanguage] = useState("en");
   const [headline, setHeadline] = useState("");
   const [subheadline, setSubheadline] = useState("");
@@ -115,6 +125,7 @@ export default function CreateV3Page() {
   const [result, setResult] = useState<CreativeV3CompileResponse | null>(null);
   const [rendersByVariantId, setRendersByVariantId] = useState<Record<string, CreativeV3RenderResponse>>({});
   const [outputIdsByVariantId, setOutputIdsByVariantId] = useState<Record<string, string[]>>({});
+  const [generationRuns, setGenerationRuns] = useState<GenerationRun[]>([]);
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
   const [generationSessionId, setGenerationSessionId] = useState<string | null>(null);
   const [refModalKind, setRefModalKind] = useState<RefModalKind>("all");
@@ -278,8 +289,8 @@ export default function CreateV3Page() {
   }, [logoAssetId, logoAssets]);
 
   const selectedVariant = useMemo(
-    () => result?.result.variants.find((variant) => variant.variant_id === selectedVariantId) ?? result?.result.variants[0] ?? null,
-    [result, selectedVariantId]
+    () => generationRuns[0]?.result.result.variants.find((variant) => variant.variant_id === selectedVariantId) ?? generationRuns[0]?.result.result.variants[0] ?? null,
+    [generationRuns, selectedVariantId]
   );
   const canCompile = Boolean(activeBrandId && brief.trim().length >= 10 && !loading && (!isFestiveGreeting || festivalId));
   const selectedLogoAsset = logoAssets.find((asset) => asset.id === logoAssetId) ?? logoAssets[0] ?? null;
@@ -291,6 +302,7 @@ export default function CreateV3Page() {
       setSelectedVariantId(null);
       setRendersByVariantId({});
       setOutputIdsByVariantId({});
+      setGenerationRuns([]);
     }
   }, [urlGenerationSessionId, generationSessionId]);
 
@@ -312,7 +324,7 @@ export default function CreateV3Page() {
         if (cancelled) return;
         hydrateFromGenerationInput(status.input);
         setGenerationSessionId(sessionId);
-        applyCompletedGenerationStatus(status);
+        applyCompletedGenerationStatus(status, sessionId);
       } catch (error) {
         if (!cancelled) {
           setMessage(error instanceof Error ? error.message : "Unable to load generation session.");
@@ -357,7 +369,11 @@ export default function CreateV3Page() {
       includeLogo,
       logoAssetId: includeLogo ? logoAssetId || null : null,
       includeReraQr: false,
-      contactItems: contactItems as Array<"phone" | "email" | "website" | "whatsapp">
+      contactItems: contactItems as Array<"phone" | "email" | "website" | "whatsapp">,
+      options: {
+        generationRunId: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+        textTreatment
+      }
     };
   }
 
@@ -367,10 +383,7 @@ export default function CreateV3Page() {
     setLoading(true);
     setPendingVariantCount(payload.variantCount ?? variantCount);
     setGenerationStatus("Starting generation...");
-    setResult(null);
     setSelectedVariantId(null);
-    setRendersByVariantId({});
-    setOutputIdsByVariantId({});
     try {
       const job = await generateCreativeV3Async(sessionToken, payload);
       setGenerationSessionId(job.jobId);
@@ -378,7 +391,7 @@ export default function CreateV3Page() {
       setMessage("Generating V3 images...");
       setGenerationStatus("Compiling prompt and generating images...");
       const status = await pollGenerationJob(sessionToken, job.jobId, setGenerationStatus);
-      applyCompletedGenerationStatus(status);
+      applyCompletedGenerationStatus(status, job.jobId);
       setMessage(status.result?.compile.result.status === "ready" ? "V3 images generated." : `V3 returned ${status.result?.compile.result.status ?? "completed"}.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "V3 generation failed");
@@ -388,14 +401,24 @@ export default function CreateV3Page() {
     }
   }
 
-  function applyCompletedGenerationStatus(status: CreativeV3GenerateAsyncStatus) {
+  function applyCompletedGenerationStatus(status: CreativeV3GenerateAsyncStatus, runId: string) {
     if (!status.result?.compile) {
       throw new Error("Creative V3 job completed without compile output.");
     }
     const compileResult = status.result.compile;
+    const nextRendersByVariantId = Object.fromEntries((status.result.renders ?? []).map((item) => [item.variantId, item.render]));
+    const nextOutputIdsByVariantId = Object.fromEntries((status.result.renders ?? []).map((item) => [item.variantId, item.outputIds ?? []]));
+    const nextRun: GenerationRun = {
+      id: runId,
+      label: "Generation",
+      result: compileResult,
+      rendersByVariantId: nextRendersByVariantId,
+      outputIdsByVariantId: nextOutputIdsByVariantId,
+    };
     setResult(compileResult);
-    setRendersByVariantId(Object.fromEntries((status.result.renders ?? []).map((item) => [item.variantId, item.render])));
-    setOutputIdsByVariantId(Object.fromEntries((status.result.renders ?? []).map((item) => [item.variantId, item.outputIds ?? []])));
+    setRendersByVariantId(nextRendersByVariantId);
+    setOutputIdsByVariantId(nextOutputIdsByVariantId);
+    setGenerationRuns((current) => [nextRun, ...current.filter((run) => run.id !== runId)].slice(0, 8));
     setSelectedVariantId(compileResult.result.variants[0]?.variant_id ?? null);
   }
 
@@ -410,6 +433,7 @@ export default function CreateV3Page() {
     setVariantCount(input.variantCount ?? 1);
     setVariationStrategy(input.variationStrategy ?? "auto");
     setCopyMode(input.copyMode ?? "auto");
+    setTextTreatment(input.options?.textTreatment === "reserve_space" ? "reserve_space" : "render_text");
     setCopyLanguage(input.copyLanguage ?? "en");
     setHeadline(input.copy?.headline ?? "");
     setSubheadline(input.copy?.subheadline ?? "");
@@ -720,6 +744,13 @@ export default function CreateV3Page() {
                 <button className={copyMode === "manual" ? "is-active" : ""} onClick={() => setCopyMode("manual")} type="button">Exact</button>
               </div>
             </div>
+            <div className="create-v3-advanced-row">
+              <span>Text in image</span>
+              <div className="create-v3-segment">
+                <button className={textTreatment === "render_text" ? "is-active" : ""} onClick={() => setTextTreatment("render_text")} type="button">Render text</button>
+                <button className={textTreatment === "reserve_space" ? "is-active" : ""} onClick={() => setTextTreatment("reserve_space")} type="button">Keep space</button>
+              </div>
+            </div>
           </div>
           {copyMode === "manual" && (
             <div className="create-v3-manual-inputs">
@@ -769,17 +800,17 @@ export default function CreateV3Page() {
           </nav>
         </header>
 
-        {(result?.result.validation.errors.length ?? 0) > 0 ? (
-          <div className="create-v3-status is-danger">{result?.result.validation.errors.join(" ")}</div>
-        ) : visibleValidationWarnings(result?.result.validation.warnings).length > 0 ? (
-          <div className="create-v3-status">{visibleValidationWarnings(result?.result.validation.warnings).join(" ")}</div>
+        {(generationRuns[0]?.result.result.validation.errors.length ?? 0) > 0 ? (
+          <div className="create-v3-status is-danger">{generationRuns[0]?.result.result.validation.errors.join(" ")}</div>
         ) : null}
 
-        {!result && !loading ? (
+        {generationRuns.length === 0 && !loading ? (
           <div className="create-v3-board-empty">
             <p>Choose a project, write a brief, and generate options.</p>
           </div>
-        ) : loading ? (
+        ) : null}
+
+        {loading ? (
           <div className="create-v3-generation-grid">
             {Array.from({ length: pendingVariantCount }).map((_, index) => (
               <article className="create-v3-result-card is-loading" key={index}>
@@ -792,50 +823,60 @@ export default function CreateV3Page() {
               </article>
             ))}
           </div>
-        ) : (
-          <div className="create-v3-generation-grid">
-            {result?.result.variants.map((variant, index) => {
-              const render = rendersByVariantId[variant.variant_id];
-              const asset = readPrimaryAsset(variant);
-              const selected = selectedVariant?.variant_id === variant.variant_id;
-              const outputId = outputIdsByVariantId[variant.variant_id]?.[0] ?? null;
-              const generationOutputIds = Object.values(outputIdsByVariantId).flat().filter(Boolean);
-              const generationStripParam = generationOutputIds.length > 0 ? `&stripIds=${encodeURIComponent(generationOutputIds.join(","))}` : "";
-              return (
-                <article className={`create-v3-result-card ${selected ? "is-selected" : ""}`} key={variant.variant_id}>
-                  <Link
-                    className="create-v3-result-preview"
-                    href={outputId
-                      ? `/studio/outputs/${outputId}?from=create-v3&sessionId=${encodeURIComponent(generationSessionId ?? "")}${generationStripParam}`
-                      : "#"}
-                    onClick={(event) => {
-                      if (!outputId) {
-                        event.preventDefault();
-                        setSelectedVariantId(variant.variant_id);
-                      }
-                    }}
-                  >
-                    {render?.images[0]?.url ? (
-                      <img alt={`Generated ${variant.variation_label}`} src={render.images[0].url} />
-                    ) : (
-                      <div className="create-v3-result-placeholder">
-                        <span>{result.result.format}</span>
-                        <strong>{variant.copy?.headline ? String(variant.copy.headline) : variant.variation_label || `Option ${index + 1}`}</strong>
-                        <p>{asset?.label ?? "Auto-selected asset"}</p>
+        ) : null}
+
+        {generationRuns.map((run, runIndex) => {
+          const generationOutputIds = Object.values(run.outputIdsByVariantId).flat().filter(Boolean);
+          const generationStripParam = generationOutputIds.length > 0 ? `&stripIds=${encodeURIComponent(generationOutputIds.join(","))}` : "";
+          return (
+            <section className="create-v3-generation-run" key={run.id}>
+              <div className="create-v3-generation-run-header">
+                <strong>{runIndex === 0 ? "Latest generation" : `Previous generation ${runIndex}`}</strong>
+                <span>{run.result.result.variants.length} option{run.result.result.variants.length === 1 ? "" : "s"}</span>
+              </div>
+              <div className="create-v3-generation-grid">
+                {run.result.result.variants.map((variant, index) => {
+                  const render = run.rendersByVariantId[variant.variant_id];
+                  const asset = readPrimaryAsset(variant);
+                  const selected = runIndex === 0 && selectedVariant?.variant_id === variant.variant_id;
+                  const outputId = run.outputIdsByVariantId[variant.variant_id]?.[0] ?? null;
+                  return (
+                    <article className={`create-v3-result-card ${selected ? "is-selected" : ""}`} key={`${run.id}-${variant.variant_id}`}>
+                      <Link
+                        className="create-v3-result-preview"
+                        href={outputId
+                          ? `/studio/outputs/${outputId}?from=create-v3&sessionId=${encodeURIComponent(run.id)}${generationStripParam}`
+                          : "#"}
+                        onClick={(event) => {
+                          if (!outputId) {
+                            event.preventDefault();
+                            setSelectedVariantId(variant.variant_id);
+                          }
+                        }}
+                      >
+                        {render?.images[0]?.url ? (
+                          <img alt={`Generated ${variant.variation_label}`} src={render.images[0].url} />
+                        ) : (
+                          <div className="create-v3-result-placeholder">
+                            <span>{run.result.result.format}</span>
+                            <strong>{variant.copy?.headline ? String(variant.copy.headline) : variant.variation_label || `Option ${index + 1}`}</strong>
+                            <p>{asset?.label ?? "Auto-selected asset"}</p>
+                          </div>
+                        )}
+                      </Link>
+                      <div className="create-v3-result-body">
+                        <div>
+                          <strong>{variant.variation_label || `Option ${index + 1}`}</strong>
+                          <span>{asset?.label ?? "No asset"} · {variant.variation_axis}</span>
+                        </div>
                       </div>
-                    )}
-                  </Link>
-                  <div className="create-v3-result-body">
-                    <div>
-                      <strong>{variant.variation_label || `Option ${index + 1}`}</strong>
-                      <span>{asset?.label ?? "No asset"} · {variant.variation_axis}</span>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
       </section>
       {showReferencePicker ? (
         <div className="create-v3-reference-modal-overlay" role="presentation" onMouseDown={() => setShowReferencePicker(false)}>
@@ -901,26 +942,29 @@ export default function CreateV3Page() {
               </header>
               
               <div className="create-v3-reference-modal-content">
-                <div className="create-v3-reference-modal-grid">
+                <div className={`create-v3-reference-modal-grid${tempSelectedTemplateId ? " has-preview" : ""}`}>
                   {refModalKind === "templates" ? (
                     filteredTemplates.length > 0 ? filteredTemplates.map((template) => {
                       const templateSummary = summarizeVisualTemplate(template);
+                      const isSelected = visualTemplateId === template.template_id;
+                      const isTempSelected = tempSelectedTemplateId === template.template_id && !isSelected;
                       return (
                       <button
-                        className={`ref-grid-item is-template ${visualTemplateId === template.template_id ? "is-selected" : ""}`}
+                        className={`ref-grid-item is-template ${isSelected ? "is-selected" : ""} ${isTempSelected ? "is-temp-selected" : ""}`}
                         key={template.template_id}
-                        onClick={() => {
-                          setVisualTemplateId(template.template_id);
-                          setShowReferencePicker(false);
-                        }}
+                        onClick={() => setTempSelectedTemplateId(template.template_id)}
                         title={`${template.name}\n${templateSummary}`}
                         type="button"
                       >
                         <div className="ref-grid-item-thumb">
-                          <div className="ref-grid-item-description-card template-card-visual">
-                            <span>{templatePickerKicker(template)}</span>
-                            <p>{templateSummary}</p>
-                          </div>
+                          {template.previewUrl ? (
+                            <img src={template.previewUrl} alt={template.name} />
+                          ) : (
+                            <div className="ref-grid-item-description-card template-card-visual">
+                              <span>{templatePickerKicker(template)}</span>
+                              <p>{templateSummary}</p>
+                            </div>
+                          )}
                         </div>
                         <strong>{template.name}</strong>
                       </button>
@@ -963,6 +1007,52 @@ export default function CreateV3Page() {
                     )
                   )}
                 </div>
+                {tempSelectedTemplateId && refModalKind === "templates" ? (
+                  <div className="create-v3-template-preview-panel">
+                    {(() => {
+                      const t = visualTemplates.find(tmpl => tmpl.template_id === tempSelectedTemplateId);
+                      if (!t) return null;
+                      return (
+                        <>
+                          <div className="template-preview-image">
+                            {t.previewUrl ? (
+                              <img src={t.previewUrl} alt={t.name} />
+                            ) : (
+                              <div className="template-preview-placeholder">
+                                <span>{templatePickerKicker(t)}</span>
+                                <p>{summarizeVisualTemplate(t)}</p>
+                              </div>
+                            )}
+                          </div>
+                          <div className="template-preview-info">
+                            <h3>{t.name}</h3>
+                            <p>{t.description || summarizeVisualTemplate(t)}</p>
+                          </div>
+                          <div className="template-preview-actions">
+                            <button
+                              type="button"
+                              className="template-preview-ok"
+                              onClick={() => {
+                                setVisualTemplateId(tempSelectedTemplateId);
+                                setTempSelectedTemplateId(null);
+                                setShowReferencePicker(false);
+                              }}
+                            >
+                              OK
+                            </button>
+                            <button
+                              type="button"
+                              className="template-preview-cancel"
+                              onClick={() => setTempSelectedTemplateId(null)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : null}
               </div>
             </main>
             
@@ -1304,11 +1394,17 @@ function summarizePreset(preset: CreativeV3BrandPreset) {
   if (json.logo?.required || json.logo_layer?.required) {
     parts.push(`Logo ${formatPresetPosition(json.logo?.position ?? json.logo_layer?.position)}`);
   }
+  if (json.secondary_logo?.required || json.secondary_logo_layer?.required) {
+    parts.push(`Second logo ${formatPresetPosition(json.secondary_logo?.position ?? json.secondary_logo_layer?.position)}`);
+  }
   if (json.rera_qr?.required || json.rera_qr_layer?.required) {
     parts.push(`RERA ${formatPresetPosition(json.rera_qr?.position ?? json.rera_qr_layer?.position)}`);
   }
   if (Array.isArray(json.contact?.items) && json.contact.items.length > 0) {
     parts.push(`Contact ${formatPresetPosition(json.contact?.position)}`);
+  }
+  if (json.location?.required || json.location_layer?.required) {
+    parts.push(`Location ${formatPresetPosition(json.location?.position ?? json.location_layer?.position)}`);
   }
   return parts.length > 0 ? parts.join(" · ") : preset.description ?? "Brand rule preset";
 }
@@ -1345,13 +1441,6 @@ function isReplaceableBrief(value: string) {
   if (!value) return true;
   if (defaultBriefValues.has(value)) return true;
   return /^create a premium .+ greeting that feels respectful, elegant, (?:occasion-led, )?and brand-safe\.$/i.test(value);
-}
-
-function visibleValidationWarnings(warnings?: string[]) {
-  return (warnings ?? []).filter((warning) => {
-    const text = warning.toLowerCase();
-    return !text.includes("dspy") && !text.includes("adapterparseerror") && !text.includes("registry planner");
-  });
 }
 
 function wait(ms: number) {
