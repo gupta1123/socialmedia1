@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { BrandAssetRecord, FestivalRecord, PostTypeRecord, ProjectRecord } from "@image-lab/contracts";
 import {
   generateCreativeV3Async,
@@ -23,6 +23,7 @@ import { useStudio } from "../studio-context";
 
 type CopyMode = "auto" | "manual";
 type TextTreatment = "render_text" | "reserve_space";
+type CreativeMode = NonNullable<CreativeV3CompilePayload["creativeMode"]>;
 type V3Variant = CreativeV3CompileResponse["result"]["variants"][number];
 type RefModalKind = "templates" | "all" | "exteriors" | "interiors" | "amenities" | "location" | "generated";
 type GenerationRun = {
@@ -63,6 +64,18 @@ const copyLanguageOptions = [
   { value: "te", label: "Telugu" },
   { value: "bn", label: "Bengali" }
 ] as const;
+const creativeModeHelp: Array<{ value: CreativeMode; label: string; description: string }> = [
+  { value: "auto", label: "Auto", description: "Let the system choose from the brief, post type, selected template, and selected image." },
+  { value: "image_led", label: "Image led", description: "Make the building/render/photo the hero; keep copy minimal." },
+  { value: "copy_led", label: "Copy led", description: "Make headline and text hierarchy the visual hook; image supports the message." },
+  { value: "asset_led", label: "Reference led", description: "Build around the selected reference image and preserve what it shows." },
+  { value: "template_led", label: "Template led", description: "Follow the selected template layout/style more strictly." },
+  { value: "proof_led", label: "Proof led", description: "Lead with verified facts like location, progress, amenities, trust, or compliance." },
+  { value: "offer_led", label: "Offer led", description: "Make pricing, EMI, launch offer, or proposition the main hierarchy." },
+  { value: "lifestyle_led", label: "Lifestyle led", description: "Lead with mood, aspiration, amenities, interiors, or living experience." },
+  { value: "brand_led", label: "Brand led", description: "Lead with brand identity, recall, festive greeting, or minimal project context." },
+  { value: "graphic_led", label: "Graphic led", description: "Lead with shapes, icons, badges, typography, and poster composition." }
+];
 const V3_GENERATION_POLL_INTERVAL_MS = 2500;
 const V3_GENERATION_TIMEOUT_MS = 10 * 60 * 1000;
 const createV3DefaultBriefs: Record<string, string> = {
@@ -106,6 +119,7 @@ export default function CreateV3Page() {
   const [format, setFormat] = useState("portrait");
   const [variantCount, setVariantCount] = useState(2);
   const [variationStrategy, setVariationStrategy] = useState("auto");
+  const [creativeMode, setCreativeMode] = useState<CreativeMode>("auto");
   const [copyMode, setCopyMode] = useState<CopyMode>("auto");
   const [textTreatment, setTextTreatment] = useState<TextTreatment>("render_text");
   const [copyLanguage, setCopyLanguage] = useState("en");
@@ -114,6 +128,7 @@ export default function CreateV3Page() {
   const [cta, setCta] = useState("");
   const [includeLogo, setIncludeLogo] = useState(false);
   const [logoAssetId, setLogoAssetId] = useState("");
+  const [additionalLogoAssetIds, setAdditionalLogoAssetIds] = useState<string[]>([]);
   const [showLogoPicker, setShowLogoPicker] = useState(false);
   const [showReferencePicker, setShowReferencePicker] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
@@ -239,6 +254,14 @@ export default function CreateV3Page() {
     () => referenceAssets.find((asset) => selectedAssetIds.includes(asset.id)) ?? null,
     [referenceAssets, selectedAssetIds]
   );
+  const creativeModeOptions = useMemo(
+    () => buildCreativeModeOptions({
+      hasTemplate: Boolean(selectedTemplate),
+      hasReference: Boolean(selectedReferenceAsset),
+      postTypeCode: selectedPostType?.code ?? null
+    }),
+    [selectedPostType?.code, selectedReferenceAsset, selectedTemplate]
+  );
 
   const filteredReferenceAssets = useMemo(() => {
     if (refModalKind === "templates") return [];
@@ -288,12 +311,26 @@ export default function CreateV3Page() {
     }
   }, [logoAssetId, logoAssets]);
 
+  useEffect(() => {
+    if (!additionalLogoAssetIds.length) return;
+    const allowedLogoIds = new Set(logoAssets.map((asset) => asset.id));
+    const nextAdditionalLogoAssetIds = additionalLogoAssetIds.filter((assetId) => allowedLogoIds.has(assetId) && assetId !== logoAssetId);
+    if (nextAdditionalLogoAssetIds.length !== additionalLogoAssetIds.length || nextAdditionalLogoAssetIds.some((assetId, index) => assetId !== additionalLogoAssetIds[index])) {
+      setAdditionalLogoAssetIds(nextAdditionalLogoAssetIds);
+    }
+  }, [additionalLogoAssetIds, logoAssetId, logoAssets]);
+
   const selectedVariant = useMemo(
     () => generationRuns[0]?.result.result.variants.find((variant) => variant.variant_id === selectedVariantId) ?? generationRuns[0]?.result.result.variants[0] ?? null,
     [generationRuns, selectedVariantId]
   );
   const canCompile = Boolean(activeBrandId && brief.trim().length >= 10 && !loading && (!isFestiveGreeting || festivalId));
   const selectedLogoAsset = logoAssets.find((asset) => asset.id === logoAssetId) ?? logoAssets[0] ?? null;
+  const selectedAdditionalLogoAssets = additionalLogoAssetIds
+    .map((assetId) => logoAssets.find((asset) => asset.id === assetId))
+    .filter((asset): asset is BrandAssetRecord => Boolean(asset));
+  const selectedLogoCount = (includeLogo && selectedLogoAsset ? 1 : 0) + selectedAdditionalLogoAssets.length;
+  const logoTileAsset = includeLogo ? selectedLogoAsset : selectedAdditionalLogoAssets[0] ?? selectedLogoAsset;
 
   useEffect(() => {
     if (!urlGenerationSessionId && generationSessionId) {
@@ -355,6 +392,7 @@ export default function CreateV3Page() {
       variantCount,
       variationStrategy,
       assetVariation: true,
+      creativeMode,
       copyMode,
       copyLanguage,
       copy: {
@@ -368,6 +406,7 @@ export default function CreateV3Page() {
       selectedAssetIds,
       includeLogo,
       logoAssetId: includeLogo ? logoAssetId || null : null,
+      additionalLogoAssetIds,
       includeReraQr: false,
       contactItems: contactItems as Array<"phone" | "email" | "website" | "whatsapp">,
       options: {
@@ -432,6 +471,7 @@ export default function CreateV3Page() {
     setFormat(input.format ?? "portrait");
     setVariantCount(input.variantCount ?? 1);
     setVariationStrategy(input.variationStrategy ?? "auto");
+    setCreativeMode(input.creativeMode ?? "auto");
     setCopyMode(input.copyMode ?? "auto");
     setTextTreatment(input.options?.textTreatment === "reserve_space" ? "reserve_space" : "render_text");
     setCopyLanguage(input.copyLanguage ?? "en");
@@ -442,12 +482,21 @@ export default function CreateV3Page() {
     setVisualTemplateId(input.visualTemplateId ?? input.visualTemplateIds?.[0] ?? "");
     setIncludeLogo(Boolean(input.includeLogo));
     setLogoAssetId(input.logoAssetId ?? "");
+    setAdditionalLogoAssetIds(input.additionalLogoAssetIds ?? []);
     setSelectedAssetIds((input.selectedAssetIds ?? []).slice(0, 1));
     setContactItems(input.contactItems ?? []);
   }
 
   function toggleContact(item: string) {
     setContactItems((current) => current.includes(item) ? current.filter((value) => value !== item) : [...current, item]);
+  }
+
+  function toggleAdditionalLogo(assetId: string) {
+    setAdditionalLogoAssetIds((current) =>
+      current.includes(assetId)
+        ? current.filter((value) => value !== assetId)
+        : [...current, assetId]
+    );
   }
 
   function toggleAsset(assetId: string) {
@@ -531,26 +580,26 @@ export default function CreateV3Page() {
 
         <div className="create-v3-reference-header">
           <span>Assets</span>
-          <strong>{selectedAssetIds.length}/1 ref · {referenceAssets.length} images</strong>
+          <strong>{selectedAssetIds.length}/1 ref · {selectedLogoCount} logo{selectedLogoCount === 1 ? "" : "s"} · {referenceAssets.length} images</strong>
         </div>
         <div className="create-v3-reference-slots">
-          <div className={`create-v3-reference-slot create-v3-reference-slot-logo ${showLogoPicker || includeLogo ? "is-active" : ""}`}>
+          <div className={`create-v3-reference-slot create-v3-reference-slot-logo ${showLogoPicker || selectedLogoCount > 0 ? "is-active" : ""}`}>
             <button
-              className={`create-v3-reference-slot-main ${includeLogo && selectedLogoAsset ? "has-logo" : ""}`}
+              className={`create-v3-reference-slot-main ${selectedLogoCount > 0 && selectedLogoAsset ? "has-logo" : ""}`}
               type="button"
               onClick={() => setShowLogoPicker((current) => !current)}
-              title={includeLogo && selectedLogoAsset ? `Change logo: ${selectedLogoAsset.label}` : "Add logo"}
+              title={selectedLogoCount > 0 ? "Change logos" : "Add logos"}
             >
-              {includeLogo && selectedLogoAsset ? (
+              {selectedLogoCount > 0 && logoTileAsset ? (
                 <>
                   <span className="create-v3-logo-tile-preview">
-                    {selectedLogoAsset.thumbnailUrl || selectedLogoAsset.previewUrl ? (
-                      <img src={selectedLogoAsset.thumbnailUrl ?? selectedLogoAsset.previewUrl} alt="" />
+                    {logoTileAsset.thumbnailUrl || logoTileAsset.previewUrl ? (
+                      <img src={logoTileAsset.thumbnailUrl ?? logoTileAsset.previewUrl} alt="" />
                     ) : (
-                      <span>{selectedLogoAsset.label.slice(0, 2)}</span>
+                      <span>{logoTileAsset.label.slice(0, 2)}</span>
                     )}
                   </span>
-                  <span className="create-v3-logo-tile-label">Logo</span>
+                  <span className="create-v3-logo-tile-label">{selectedLogoCount === 1 ? "Logo" : `Logos +${selectedLogoCount - 1}`}</span>
                 </>
               ) : (
                 <>
@@ -561,13 +610,14 @@ export default function CreateV3Page() {
                 </>
               )}
             </button>
-            {includeLogo ? (
+            {selectedLogoCount > 0 ? (
               <button
-                aria-label="Remove selected logo"
+                aria-label="Remove selected logos"
                 className="create-v3-reference-remove"
                 onClick={(event) => {
                   event.stopPropagation();
                   setIncludeLogo(false);
+                  setAdditionalLogoAssetIds([]);
                   setShowLogoPicker(false);
                 }}
                 type="button"
@@ -659,8 +709,18 @@ export default function CreateV3Page() {
         {showLogoPicker ? (
           <div className="create-v3-picker-block">
             <div className="create-v3-reference-header">
-              <span>Logo</span>
-              <strong>{includeLogo && selectedLogoAsset ? selectedLogoAsset.label : "Pick one"}</strong>
+              <span>Logos</span>
+              <strong>{selectedLogoCount > 0 ? `${selectedLogoCount} selected` : "Pick primary or extra"}</strong>
+            </div>
+            <div className="create-v3-logo-picker-section">
+              <span>Primary logo</span>
+              <button
+                className={!includeLogo ? "is-selected" : ""}
+                onClick={() => setIncludeLogo(false)}
+                type="button"
+              >
+                No primary
+              </button>
             </div>
             <div className="create-v3-logo-picker">
               {logoAssets.length > 0 ? logoAssets.map((asset) => (
@@ -671,7 +731,7 @@ export default function CreateV3Page() {
                   onClick={() => {
                     setLogoAssetId(asset.id);
                     setIncludeLogo(true);
-                    setShowLogoPicker(false);
+                    setAdditionalLogoAssetIds((current) => current.filter((assetId) => assetId !== asset.id));
                   }}
                   title={asset.label}
                   type="button"
@@ -682,6 +742,31 @@ export default function CreateV3Page() {
                 <p className="create-v3-picker-empty">No logo assets uploaded for this brand.</p>
               )}
             </div>
+            {logoAssets.length > 1 || !includeLogo ? (
+              <>
+                <div className="create-v3-logo-picker-section">
+                  <span>Extra logos</span>
+                  <strong>{selectedAdditionalLogoAssets.length} selected</strong>
+                </div>
+                <div className="create-v3-logo-picker create-v3-logo-picker-extra">
+                  {logoAssets.filter((asset) => !includeLogo || asset.id !== logoAssetId).map((asset) => (
+                    <button
+                      aria-label={`Toggle extra logo ${asset.label}`}
+                      className={additionalLogoAssetIds.includes(asset.id) ? "is-selected" : ""}
+                      key={asset.id}
+                      onClick={() => toggleAdditionalLogo(asset.id)}
+                      title={asset.label}
+                      type="button"
+                    >
+                      {asset.thumbnailUrl || asset.previewUrl ? <img src={asset.thumbnailUrl ?? asset.previewUrl} alt="" /> : <span>{asset.label.slice(0, 2)}</span>}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+            <button className="create-v3-logo-picker-done" onClick={() => setShowLogoPicker(false)} type="button">
+              Done
+            </button>
           </div>
         ) : null}
 
@@ -735,6 +820,17 @@ export default function CreateV3Page() {
                 onChange={setCopyLanguage}
                 options={copyLanguageOptions.map((option) => ({ value: option.value, label: option.label }))}
                 value={copyLanguage}
+              />
+            </label>
+            <label className="create-v3-field">
+              <span className="create-v3-label-with-help">
+                Creative direction
+                <CreativeModeHelpTooltip />
+              </span>
+              <CreateV3Dropdown
+                onChange={(value) => setCreativeMode(value as CreativeMode)}
+                options={creativeModeOptions}
+                value={creativeMode}
               />
             </label>
             <div className="create-v3-advanced-row">
@@ -1391,11 +1487,18 @@ function RatioIcon({ ratio }: { ratio: string }) {
 function summarizePreset(preset: CreativeV3BrandPreset) {
   const json = preset.preset_json as Record<string, any>;
   const parts: string[] = [];
-  if (json.logo?.required || json.logo_layer?.required) {
-    parts.push(`Logo ${formatPresetPosition(json.logo?.position ?? json.logo_layer?.position)}`);
-  }
-  if (json.secondary_logo?.required || json.secondary_logo_layer?.required) {
-    parts.push(`Second logo ${formatPresetPosition(json.secondary_logo?.position ?? json.secondary_logo_layer?.position)}`);
+  const primaryLogo = json.logo?.required || json.logo_layer?.required
+    ? (json.logo ?? json.logo_layer)
+    : null;
+  const additionalLogos = collectPresetAdditionalLogos(json);
+  const requiredAdditionalLogos = additionalLogos.filter((item) => item.required || item.include_if_available || item.asset_id);
+  if (primaryLogo || requiredAdditionalLogos.length > 0) {
+    const logoCount = (primaryLogo ? 1 : 0) + requiredAdditionalLogos.length;
+    const positions = [
+      primaryLogo?.position,
+      ...requiredAdditionalLogos.map((item) => item.position)
+    ].filter(Boolean).map(formatPresetPosition);
+    parts.push(logoCount > 1 ? `${logoCount} logos ${positions.slice(0, 3).join(", ")}` : `Logo ${positions[0] ?? ""}`.trim());
   }
   if (json.rera_qr?.required || json.rera_qr_layer?.required) {
     parts.push(`RERA ${formatPresetPosition(json.rera_qr?.position ?? json.rera_qr_layer?.position)}`);
@@ -1407,6 +1510,24 @@ function summarizePreset(preset: CreativeV3BrandPreset) {
     parts.push(`Location ${formatPresetPosition(json.location?.position ?? json.location_layer?.position)}`);
   }
   return parts.length > 0 ? parts.join(" · ") : preset.description ?? "Brand rule preset";
+}
+
+function collectPresetAdditionalLogos(json: Record<string, any>) {
+  const secondaryLogo = json.secondary_logo ?? json.secondary_logo_layer;
+  const logos = secondaryLogo && typeof secondaryLogo === "object" && !Array.isArray(secondaryLogo)
+    ? [secondaryLogo]
+    : [];
+  for (const key of ["additional_logos", "additional_logo_layers", "logo_layers"]) {
+    const value = json[key];
+    if (!Array.isArray(value)) continue;
+    for (const item of value) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const role = String(item.role ?? item.slot ?? item.kind ?? "").trim().toLowerCase();
+      if (["primary", "primary_logo", "main_logo", "logo"].includes(role) || item.primary === true) continue;
+      logos.push(item);
+    }
+  }
+  return logos;
 }
 
 function summarizeVisualTemplate(template: CreativeV3VisualTemplate | null) {
@@ -1424,6 +1545,120 @@ function templatePickerKicker(template: CreativeV3VisualTemplate) {
   const formatLabel = template.formats?.[0] ? formatPresetPosition(template.formats[0]) : "Template";
   const jobLabel = template.content_job_id ? formatPresetPosition(template.content_job_id) : "Layout";
   return clampPickerText(`${jobLabel} · ${formatLabel}`, 32);
+}
+
+function buildCreativeModeOptions({
+  hasTemplate,
+  hasReference,
+  postTypeCode
+}: {
+  hasTemplate: boolean;
+  hasReference: boolean;
+  postTypeCode: string | null;
+}): Array<{ value: CreativeMode; label: string }> {
+  const preferred = new Set<CreativeMode>(["auto"]);
+  if (hasTemplate) preferred.add("template_led");
+  if (hasReference) preferred.add("asset_led");
+  if (postTypeCode === "ad" || postTypeCode === "offer") preferred.add("offer_led");
+  if (postTypeCode === "location-advantage" || postTypeCode === "construction-update") preferred.add("proof_led");
+  if (postTypeCode === "amenity-spotlight") preferred.add("lifestyle_led");
+  if (postTypeCode === "festive-greeting") preferred.add("brand_led");
+  preferred.add("image_led");
+  preferred.add("copy_led");
+  preferred.add("graphic_led");
+
+  const byValue = new Map(creativeModeHelp.map((item) => [item.value, item.label]));
+  return [...preferred].map((value) => ({
+    value,
+    label: value === "auto" ? autoCreativeModeLabel({ hasTemplate, hasReference, postTypeCode }) : byValue.get(value) ?? value
+  }));
+}
+
+function autoCreativeModeLabel({
+  hasTemplate,
+  hasReference,
+  postTypeCode
+}: {
+  hasTemplate: boolean;
+  hasReference: boolean;
+  postTypeCode: string | null;
+}) {
+  const signals = [
+    hasTemplate ? "template" : null,
+    hasReference ? "reference" : null,
+    postTypeCode === "ad" || postTypeCode === "offer" ? "offer" : null,
+    postTypeCode === "location-advantage" || postTypeCode === "construction-update" ? "proof" : null,
+    postTypeCode === "amenity-spotlight" ? "lifestyle" : null,
+    postTypeCode === "festive-greeting" ? "brand" : null
+  ].filter(Boolean);
+  return signals.length > 0 ? `Auto (${signals.join(" + ")})` : "Auto";
+}
+
+function CreativeModeHelpTooltip() {
+  const [open, setOpen] = useState(false);
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  function computePosition() {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const panelWidth = 300;
+    const panelMaxHeight = 380;
+    const spaceBelow = window.innerHeight - rect.bottom - 12;
+    const top = spaceBelow >= panelMaxHeight
+      ? rect.bottom + 8
+      : Math.max(12, rect.top - panelMaxHeight - 8);
+    // Prefer opening to the right of the button, but clamp to viewport
+    const leftIdeal = rect.left;
+    const left = Math.min(leftIdeal, window.innerWidth - panelWidth - 12);
+    setPanelStyle({
+      position: "fixed",
+      top,
+      left: Math.max(12, left),
+      width: panelWidth,
+      maxHeight: panelMaxHeight
+    });
+  }
+
+  function handleOpen(next: boolean) {
+    if (next) computePosition();
+    setOpen(next);
+  }
+
+  return (
+    <div
+      className={`create-v3-help-tooltip ${open ? "is-open" : ""}`}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        aria-expanded={open}
+        aria-label="Explain creative direction"
+        onClick={() => handleOpen(!open)}
+        ref={triggerRef}
+        type="button"
+      >
+        ?
+      </button>
+      {open ? (
+      <div
+        className="create-v3-help-tooltip-panel"
+        role="tooltip"
+        style={panelStyle}
+      >
+        {creativeModeHelp.map((item) => (
+          <div className="create-v3-help-tooltip-row" key={item.value}>
+            <strong>{item.label}</strong>
+            <span>{item.description}</span>
+          </div>
+        ))}
+      </div>
+      ) : null}
+    </div>
+  );
 }
 
 function formatPresetPosition(value: unknown) {

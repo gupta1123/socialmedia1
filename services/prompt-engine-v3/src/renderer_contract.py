@@ -13,6 +13,7 @@ def build_asset_role_plan(
     secondary_logo_asset_id: Optional[str],
     include_rera_qr: bool,
     rera_qr_asset_id: Optional[str],
+    additional_logo_asset_ids: Optional[List[str]] = None,
 ) -> AssetRolePlan:
     project_assets: List[AssetRoleEntry] = []
     if asset.get("asset_id"):
@@ -28,6 +29,10 @@ def build_asset_role_plan(
         project_assets=project_assets,
         logo_asset=AssetRoleEntry(asset_id=logo_asset_id, usage="exact_logo_layer") if include_logo and logo_asset_id else None,
         secondary_logo_asset=AssetRoleEntry(asset_id=secondary_logo_asset_id, usage="exact_secondary_logo_layer") if secondary_logo_asset_id else None,
+        additional_logo_assets=[
+            AssetRoleEntry(asset_id=asset_id, usage="exact_additional_logo_layer")
+            for asset_id in additional_logo_ids_after_secondary(additional_logo_asset_ids or [], secondary_logo_asset_id)
+        ],
         rera_qr_asset=AssetRoleEntry(asset_id=rera_qr_asset_id, usage="exact_rera_compliance_block") if include_rera_qr and rera_qr_asset_id else None,
         reference_images=[],
         fallback_visuals=[],
@@ -48,6 +53,7 @@ def build_render_package(
     session_facts: List[SessionFactOverride],
     secondary_logo_asset_id: Optional[str] = None,
     secondary_logo_rules: Optional[Dict[str, Any]] = None,
+    additional_logo_rules: Optional[List[Dict[str, Any]]] = None,
     logo_position: str = "top_left",
     logo_rules_extra: Optional[Dict[str, Any]] = None,
     rera_position: str = "top_right",
@@ -71,6 +77,13 @@ def build_render_package(
         logo_rules["source"] = "exact_asset_only"
         logo_rules["position"] = logo_position
 
+    normalized_additional_logo_rules = normalize_additional_logo_rules(additional_logo_rules, secondary_logo_asset_id, secondary_logo_rules)
+    additional_logo_asset_ids = [
+        str(rule.get("asset_id"))
+        for rule in normalized_additional_logo_rules
+        if isinstance(rule.get("asset_id"), str) and str(rule.get("asset_id")).strip()
+    ]
+
     provider_references = []
     if asset.get("asset_id"):
         provider_references.append({"asset_id": asset.get("asset_id"), "role": "primary_truth_anchor", "sent_to_model": True, "composited_after": False})
@@ -78,6 +91,8 @@ def build_render_package(
         provider_references.append({"asset_id": logo_asset_id, "role": "exact_logo_layer", "sent_to_model": True, "composited_after": False})
     if secondary_logo_asset_id:
         provider_references.append({"asset_id": secondary_logo_asset_id, "role": "exact_secondary_logo_layer", "sent_to_model": True, "composited_after": False})
+    for asset_id in additional_logo_ids_after_secondary(additional_logo_asset_ids, secondary_logo_asset_id):
+        provider_references.append({"asset_id": asset_id, "role": "exact_additional_logo_layer", "sent_to_model": True, "composited_after": False})
     if include_rera_qr and rera_qr_asset_id:
         provider_references.append({"asset_id": rera_qr_asset_id, "role": "exact_rera_qr_layer", "sent_to_model": False, "composited_after": True})
 
@@ -85,6 +100,7 @@ def build_render_package(
         project_asset_ids=[asset.get("asset_id")] if asset.get("asset_id") else [],
         logo_asset_id=logo_asset_id if include_logo else None,
         secondary_logo_asset_id=secondary_logo_asset_id,
+        additional_logo_asset_ids=additional_logo_asset_ids,
         rera_qr_asset_id=rera_qr_asset_id if include_rera_qr else None,
         reference_image_ids=[ref["asset_id"] for ref in provider_references if ref.get("sent_to_model") and ref.get("asset_id")],
         provider_references=provider_references,
@@ -100,6 +116,7 @@ def build_render_package(
         exact_text_layers={} if text_treatment == "reserve_space" else copy,
         logo_rules=logo_rules,
         secondary_logo_rules=secondary_logo_rules or {"required": False},
+        additional_logo_rules=normalized_additional_logo_rules,
         rera_qr_rules={
             "required": include_rera_qr,
             "max_instances": 1,
@@ -119,7 +136,7 @@ def build_render_package(
             "preserve_source_geometry": True,
             "no_facade_text_added": True,
             "no_unseen_surroundings": True,
-            "no_generated_logo_or_qr": not (include_logo or bool(secondary_logo_asset_id)),
+            "no_generated_logo_or_qr": not (include_logo or bool(secondary_logo_asset_id) or bool(additional_logo_asset_ids)),
             "no_fake_logo": True,
             "no_generated_qr": True,
         },
@@ -142,6 +159,28 @@ def build_render_package(
         ],
         renderer_policy="Provider prompt is final art direction; exact assets/data must stay grounded and must not be invented.",
     )
+
+
+def normalize_additional_logo_rules(
+    additional_logo_rules: Optional[List[Dict[str, Any]]],
+    secondary_logo_asset_id: Optional[str],
+    secondary_logo_rules: Optional[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    rules = [dict(rule) for rule in additional_logo_rules or [] if isinstance(rule, dict)]
+    if secondary_logo_asset_id and not any(rule.get("asset_id") == secondary_logo_asset_id for rule in rules):
+        rules.insert(0, {**(secondary_logo_rules or {}), "asset_id": secondary_logo_asset_id, "role": "secondary_logo"})
+    return rules
+
+
+def additional_logo_ids_after_secondary(additional_logo_asset_ids: List[str], secondary_logo_asset_id: Optional[str]) -> List[str]:
+    ids: List[str] = []
+    seen = {secondary_logo_asset_id} if secondary_logo_asset_id else set()
+    for asset_id in additional_logo_asset_ids:
+        if not asset_id or asset_id in seen:
+            continue
+        ids.append(asset_id)
+        seen.add(asset_id)
+    return ids
 
 
 def asset_visual_summary(asset: Dict[str, Any]) -> Dict[str, Any]:

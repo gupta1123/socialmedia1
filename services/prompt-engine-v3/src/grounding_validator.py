@@ -25,8 +25,11 @@ def validate_full_variant(
             errors.append("Logo is required but no logo asset is resolved.")
         if production.include_rera_qr and not production.rera_qr_asset_id:
             errors.append("RERA QR is required but no RERA QR asset is resolved.")
-        if production.secondary_logo.required and not production.secondary_logo.asset_id:
-            errors.append("Secondary logo is required but no secondary logo asset is resolved.")
+        logo_layers = production.additional_logos or ([production.secondary_logo] if production.secondary_logo.required else [])
+        for index, logo_layer in enumerate(logo_layers):
+            if logo_layer.required and not logo_layer.asset_id:
+                label = "Secondary logo" if index == 0 else "Additional logo %s" % (index + 1)
+                errors.append("%s is required but no logo asset is resolved." % label)
         if production.location_plan.required and not production.location_plan.value:
             errors.append("Location label is required but no project location value is resolved.")
         if production.contact_plan.missing:

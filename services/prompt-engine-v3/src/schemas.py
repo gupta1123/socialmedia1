@@ -87,6 +87,7 @@ class CompileRequest(BaseModel):
     selected_asset_ids: List[str] = Field(default_factory=list)
     include_logo: bool = False
     logo_asset_id: Optional[str] = None
+    additional_logo_asset_ids: List[str] = Field(default_factory=list)
     include_rera_qr: bool = False
     rera_qr_asset_id: Optional[str] = None
     contact_items: List[str] = Field(default_factory=list)
@@ -122,6 +123,7 @@ class AssetRolePlan(BaseModel):
     project_assets: List[AssetRoleEntry] = Field(default_factory=list)
     logo_asset: Optional[AssetRoleEntry] = None
     secondary_logo_asset: Optional[AssetRoleEntry] = None
+    additional_logo_assets: List[AssetRoleEntry] = Field(default_factory=list)
     rera_qr_asset: Optional[AssetRoleEntry] = None
     reference_images: List[AssetRoleEntry] = Field(default_factory=list)
     fallback_visuals: List[AssetRoleEntry] = Field(default_factory=list)
@@ -139,6 +141,7 @@ class RenderPackage(BaseModel):
     project_asset_ids: List[str] = Field(default_factory=list)
     logo_asset_id: Optional[str] = None
     secondary_logo_asset_id: Optional[str] = None
+    additional_logo_asset_ids: List[str] = Field(default_factory=list)
     rera_qr_asset_id: Optional[str] = None
     reference_image_ids: List[str] = Field(default_factory=list)
     image_model_mode: str = "asset_reference_generation"
@@ -152,6 +155,7 @@ class RenderPackage(BaseModel):
     exact_text_layers: Dict[str, Any] = Field(default_factory=dict)
     logo_rules: Dict[str, Any] = Field(default_factory=dict)
     secondary_logo_rules: Dict[str, Any] = Field(default_factory=dict)
+    additional_logo_rules: List[Dict[str, Any]] = Field(default_factory=list)
     rera_qr_rules: Dict[str, Any] = Field(default_factory=dict)
     contact_rules: Dict[str, Any] = Field(default_factory=dict)
     location_rules: Dict[str, Any] = Field(default_factory=dict)

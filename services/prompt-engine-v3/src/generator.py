@@ -515,6 +515,7 @@ def build_variant_output(
         production.secondary_logo.asset_id,
         production.include_rera_qr,
         production.rera_qr_asset_id,
+        [logo.asset_id for logo in production.additional_logos if logo.asset_id],
     )
     contact_rules = {
         "required": bool(production.contact_plan.items),
@@ -547,6 +548,20 @@ def build_variant_output(
             "source": "exact_asset_only",
             "max_instances": 1,
         },
+        additional_logo_rules=[
+            {
+                **logo.rules_extra,
+                "required": logo.required,
+                "asset_id": logo.asset_id,
+                "position": logo.position,
+                "source": "exact_asset_only",
+                "max_instances": 1,
+                "missing": logo.missing,
+                "role": logo.role,
+                **({"label": logo.label} if logo.label else {}),
+            }
+            for logo in production.additional_logos
+        ],
         logo_position=production.logo_position,
         logo_rules_extra=production.logo_rules_extra,
         rera_position=production.rera_position,
@@ -634,6 +649,20 @@ def build_variant_output(
                 "position": production.secondary_logo.position,
                 "missing": production.secondary_logo.missing,
             },
+            "additional_logo_layers": [
+                {
+                    **logo.rules_extra,
+                    "required": logo.required,
+                    "asset_id": logo.asset_id,
+                    "max_instances": 1,
+                    "source": "exact_asset_only",
+                    "position": logo.position,
+                    "missing": logo.missing,
+                    "role": logo.role,
+                    **({"label": logo.label} if logo.label else {}),
+                }
+                for logo in production.additional_logos
+            ],
             "rera_qr_layer": {
                 "required": production.include_rera_qr,
                 "asset_id": production.rera_qr_asset_id if production.include_rera_qr else None,

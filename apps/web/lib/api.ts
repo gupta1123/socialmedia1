@@ -140,6 +140,17 @@ export type CreativeV3CompilePayload = {
   variantCount?: number;
   variationStrategy?: string;
   assetVariation?: boolean;
+  creativeMode?:
+    | "auto"
+    | "image_led"
+    | "copy_led"
+    | "asset_led"
+    | "template_led"
+    | "proof_led"
+    | "offer_led"
+    | "lifestyle_led"
+    | "brand_led"
+    | "graphic_led";
   copyMode?: "auto" | "manual";
   copyLanguage?: string;
   copy?: {
@@ -153,6 +164,7 @@ export type CreativeV3CompilePayload = {
   selectedAssetIds?: string[];
   includeLogo?: boolean;
   logoAssetId?: string | null;
+  additionalLogoAssetIds?: string[];
   includeReraQr?: boolean;
   reraQrAssetId?: string | null;
   contactItems?: Array<"phone" | "email" | "website" | "whatsapp">;

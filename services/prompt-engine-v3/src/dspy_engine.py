@@ -312,6 +312,7 @@ def _request_for_model(request: CompileRequest) -> Dict[str, Any]:
         "selected_asset_ids": request.selected_asset_ids,
         "include_logo": request.include_logo,
         "logo_asset_id": request.logo_asset_id,
+        "additional_logo_asset_ids": request.additional_logo_asset_ids,
         "include_rera_qr": request.include_rera_qr,
         "rera_qr_asset_id": request.rera_qr_asset_id,
         "contact_items": request.contact_items,

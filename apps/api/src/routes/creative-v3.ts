@@ -80,6 +80,7 @@ const CreativeV3CompileRequestSchema = z.object({
   selectedAssetIds: z.array(z.string().uuid()).default([]),
   includeLogo: z.boolean().default(false),
   logoAssetId: z.string().uuid().optional().nullable(),
+  additionalLogoAssetIds: z.array(z.string().uuid()).default([]),
   includeReraQr: z.boolean().default(false),
   reraQrAssetId: z.string().uuid().optional().nullable(),
   contactItems: z.array(z.enum(["phone", "email", "website", "whatsapp"])).default([]),
@@ -377,6 +378,155 @@ function slugifyPresetKey(value: string) {
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
     .slice(0, 80) || `preset_${Date.now()}`;
+}
+
+const CREATIVE_V3_PRESET_CONTACT_ITEMS = new Set(["phone", "email", "website", "whatsapp"]);
+const CREATIVE_V3_PRESET_POSITIONS = new Set([
+  "top_left",
+  "top_right",
+  "top_center",
+  "top_left_near_primary",
+  "bottom_left",
+  "bottom_right",
+  "bottom_center",
+  "bottom_footer",
+  "center",
+  "left",
+  "right"
+]);
+
+function validateCreativeV3BrandPresetConfig(params: {
+  presetKey: string;
+  name: string;
+  description?: string | null;
+  presetJson: Record<string, unknown>;
+}) {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const json = params.presetJson;
+  const logo = pickPresetSection(json, "logo", "logo_layer");
+  const secondaryLogo = pickPresetSection(json, "secondary_logo", "secondary_logo_layer");
+  const additionalLogos = collectPresetAdditionalLogoSections(json);
+  const contact = pickPresetSection(json, "contact", "contact_layer");
+  const location = pickPresetSection(json, "location", "location_layer");
+  const clientRules = Array.isArray(json.client_rules) ? json.client_rules.map(String) : [];
+  const text = [params.presetKey, params.name, params.description ?? "", ...clientRules].join("\n").toLowerCase();
+
+  if (logo?.required && !logo.position) {
+    errors.push("Required primary logo is missing a position.");
+  }
+  validatePresetPosition(errors, warnings, "logo.position", logo?.position);
+
+  if (secondaryLogo?.required) {
+    if (!secondaryLogo.position) errors.push("Required secondary logo is missing a position.");
+    if (!secondaryLogo.brand_mark) warnings.push("Required secondary logo has no brand_mark; asset matching may be ambiguous.");
+  }
+  validatePresetPosition(errors, warnings, "secondary_logo.position", secondaryLogo?.position);
+
+  additionalLogos.forEach((additionalLogo, index) => {
+    const label = `additional_logos[${index}].position`;
+    if (additionalLogo.required) {
+      if (!additionalLogo.position) errors.push(`Required additional logo ${index + 1} is missing a position.`);
+      if (!additionalLogo.brand_mark && !additionalLogo.brandMark && !additionalLogo.asset_id) {
+        warnings.push(`Required additional logo ${index + 1} has no brand_mark or asset_id; asset matching may be ambiguous.`);
+      }
+    }
+    validatePresetPosition(errors, warnings, label, additionalLogo.position);
+  });
+
+  if (location?.required && !location.position) {
+    errors.push("Required location layer is missing a position.");
+  }
+  validatePresetPosition(errors, warnings, "location.position", location?.position);
+  validatePresetPosition(errors, warnings, "location.fallback_position_without_contact", location?.fallback_position_without_contact);
+
+  if (contact) {
+    validatePresetPosition(errors, warnings, "contact.position", contact.position);
+    if (Array.isArray(contact.items)) {
+      for (const item of contact.items) {
+        if (!CREATIVE_V3_PRESET_CONTACT_ITEMS.has(String(item))) {
+          errors.push(`Unsupported contact item "${String(item)}".`);
+        }
+      }
+    } else if (contact.required || contact.include_if_grounded) {
+      warnings.push("Contact layer is enabled but contact.items is not an array.");
+    }
+  }
+
+  if (logo?.position && secondaryLogo?.position && logo.position === secondaryLogo.position) {
+    warnings.push(`Primary and secondary logos share the same exact position "${String(logo.position)}".`);
+  }
+  for (const [index, additionalLogo] of additionalLogos.entries()) {
+    if (logo?.position && additionalLogo.position && logo.position === additionalLogo.position) {
+      warnings.push(`Primary logo and additional logo ${index + 1} share the same exact position "${String(logo.position)}".`);
+    }
+  }
+
+  expectPresetPositionFromText(errors, text, logo, "logo", "top-right", "top_right");
+  expectPresetPositionFromText(errors, text, logo, "logo", "top-left", "top_left");
+  expectPresetPositionFromText(errors, text, secondaryLogo, "secondary logo", "top-left", "top_left");
+  expectPresetPositionFromText(errors, text, location, "location", "bottom-left", "bottom_left");
+  expectPresetPositionFromText(errors, text, location, "location", "bottom-center", "bottom_center");
+  expectPresetPositionFromText(errors, text, contact, "contact", "bottom-right", "bottom_right");
+  expectPresetPositionFromText(errors, text, contact, "contact number", "bottom-right", "bottom_right");
+
+  return { errors, warnings };
+}
+
+function pickPresetSection(json: Record<string, unknown>, key: string, fallbackKey: string) {
+  const value = json[key];
+  if (isPlainRecord(value)) return value;
+  const fallback = json[fallbackKey];
+  return isPlainRecord(fallback) ? fallback : null;
+}
+
+function collectPresetAdditionalLogoSections(json: Record<string, unknown>) {
+  return ["additional_logos", "additional_logo_layers", "logo_layers"].flatMap((key) => {
+    const value = json[key];
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is Record<string, unknown> => {
+      if (!isPlainRecord(item)) return false;
+      const role = String(item.role ?? item.slot ?? item.kind ?? "").trim().toLowerCase();
+      return role !== "primary" && role !== "primary_logo" && role !== "main_logo" && role !== "logo" && item.primary !== true;
+    });
+  });
+}
+
+function validatePresetPosition(errors: string[], warnings: string[], field: string, value: unknown) {
+  if (!value) return;
+  if (!CREATIVE_V3_PRESET_POSITIONS.has(String(value))) {
+    warnings.push(`${field} uses non-standard position "${String(value)}".`);
+  }
+}
+
+function expectPresetPositionFromText(
+  errors: string[],
+  text: string,
+  rules: Record<string, unknown> | null,
+  subject: string,
+  phrase: string,
+  expected: string
+) {
+  if (!rules || !textSaysPresetSubjectPosition(text, subject, phrase)) return;
+  const position = typeof rules.position === "string" ? rules.position : null;
+  if (position && !presetPositionMatches(position, expected)) {
+    errors.push(`Text says ${subject} should be ${phrase}, but JSON has position "${position}".`);
+  }
+}
+
+function textSaysPresetSubjectPosition(text: string, subject: string, phrase: string) {
+  const escapedSubject = escapeRegExp(subject).replaceAll("\\ ", "\\s+");
+  const escapedPhrase = escapeRegExp(phrase).replaceAll("\\-", "[-\\s]");
+  return new RegExp(`${escapedSubject}[^.\\n]{0,90}${escapedPhrase}`, "i").test(text);
+}
+
+function presetPositionMatches(actual: string, expected: string) {
+  if (actual === expected) return true;
+  return expected === "top_left" && actual.startsWith("top_left");
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function presetReraTriggerApplies(
@@ -757,11 +907,16 @@ async function runCreativeV3Compile(params: {
   });
   const effectiveIncludeLogo = body.includeLogo || Boolean(body.logoAssetId) || presetRequiresLogo;
   const effectiveIncludeReraQr = body.includeReraQr || Boolean(body.reraQrAssetId) || presetRequiresReraQr || presetTriggersReraQr;
+  const additionalLogoAssetIds = Array.from(new Set(body.additionalLogoAssetIds.filter((assetId) => assetId !== logoAssetId)));
   const presetContactItems = Array.isArray(selectedPresetJson.contact?.items)
     ? selectedPresetJson.contact.items.map(String).filter(Boolean)
     : [];
   const effectiveContactItems = body.contactItems.length > 0 ? body.contactItems : presetContactItems;
-  const explicitlyRequestedLayerIds = new Set([logoAssetId, reraQrAssetId].filter((value): value is string => typeof value === "string" && value.length > 0));
+  const explicitlyRequestedLayerIds = new Set([
+    logoAssetId,
+    ...additionalLogoAssetIds,
+    reraQrAssetId
+  ].filter((value): value is string => typeof value === "string" && value.length > 0));
   const engineAssets = assets.filter((asset) => {
     if (selectedAssetIds.includes(asset.id)) return true;
     if (explicitlyRequestedLayerIds.has(asset.id)) return true;
@@ -808,6 +963,7 @@ async function runCreativeV3Compile(params: {
     selected_asset_ids: selectedAssetIds,
     include_logo: effectiveIncludeLogo,
     logo_asset_id: effectiveIncludeLogo ? logoAssetId : null,
+    additional_logo_asset_ids: additionalLogoAssetIds,
     include_rera_qr: effectiveIncludeReraQr,
     rera_qr_asset_id: effectiveIncludeReraQr ? reraQrAssetId : null,
     contact_items: effectiveContactItems,
@@ -883,13 +1039,18 @@ async function runCreativeV3Compile(params: {
   };
 
   const rawEngineResponse = await callPromptEngineV3(enginePayload);
-  const engineResponse = await localizeCreativeV3EngineResponse({
+  const localizedEngineResponse = await localizeCreativeV3EngineResponse({
     engineResponse: rawEngineResponse,
     body,
     brandName: brand.name,
     projectName: project?.name ?? null,
     log: params.log
   }) as Record<string, any>;
+  const engineResponse = applyManualAdditionalLogoFallback({
+    engineResponse: localizedEngineResponse,
+    additionalLogoAssetIds,
+    primaryLogoAssetId: effectiveIncludeLogo ? logoAssetId : null
+  });
   const status = engineResponse && typeof engineResponse === "object" && "status" in engineResponse
     ? String((engineResponse as { status?: unknown }).status)
     : "failed";
@@ -913,6 +1074,154 @@ async function runCreativeV3Compile(params: {
       result: engineResponse
     }
   };
+}
+
+function applyManualAdditionalLogoFallback(params: {
+  engineResponse: Record<string, any>;
+  additionalLogoAssetIds: string[];
+  primaryLogoAssetId: string | null;
+}) {
+  if (params.additionalLogoAssetIds.length === 0) {
+    return params.engineResponse;
+  }
+  const variants = Array.isArray(params.engineResponse?.variants) ? params.engineResponse.variants : [];
+  if (variants.length === 0) {
+    return params.engineResponse;
+  }
+  const patchedVariants = variants.map((variant) => patchVariantManualAdditionalLogos({
+    variant: isPlainRecord(variant) ? variant : {},
+    additionalLogoAssetIds: params.additionalLogoAssetIds,
+    primaryLogoAssetId: params.primaryLogoAssetId
+  }));
+  return {
+    ...params.engineResponse,
+    variants: patchedVariants
+  };
+}
+
+function patchVariantManualAdditionalLogos(params: {
+  variant: Record<string, any>;
+  additionalLogoAssetIds: string[];
+  primaryLogoAssetId: string | null;
+}) {
+  const renderPackage = isPlainRecord(params.variant.render_package) ? params.variant.render_package : {};
+  const logoAssetId = typeof renderPackage.logo_asset_id === "string" ? renderPackage.logo_asset_id : params.primaryLogoAssetId;
+  const existingAdditionalLogoAssetIds = readStringArray(renderPackage.additional_logo_asset_ids);
+  const existingProviderReferences = readRecordArray(renderPackage.provider_references);
+  const existingProviderReferenceIds = new Set(existingProviderReferences.map((item) => item.asset_id).filter((value): value is string => typeof value === "string"));
+  const existingLogoIds = new Set([
+    logoAssetId,
+    typeof renderPackage.secondary_logo_asset_id === "string" ? renderPackage.secondary_logo_asset_id : null,
+    ...existingAdditionalLogoAssetIds
+  ].filter((value): value is string => typeof value === "string" && value.length > 0));
+  const missingAdditionalLogoAssetIds = params.additionalLogoAssetIds.filter((assetId) => assetId && !existingLogoIds.has(assetId));
+
+  if (missingAdditionalLogoAssetIds.length === 0) {
+    return params.variant;
+  }
+
+  const logoPosition = isPlainRecord(renderPackage.logo_rules) && typeof renderPackage.logo_rules.position === "string"
+    ? renderPackage.logo_rules.position
+    : "top_left";
+  const fallbackPositions = manualAdditionalLogoPositions(logoPosition);
+  const secondaryLogoAssetId = typeof renderPackage.secondary_logo_asset_id === "string"
+    ? renderPackage.secondary_logo_asset_id
+    : missingAdditionalLogoAssetIds[0] ?? null;
+  const addedRules = missingAdditionalLogoAssetIds.map((assetId, index) => ({
+    required: true,
+    asset_id: assetId,
+    position: fallbackPositions[Math.min(existingAdditionalLogoAssetIds.length + index, fallbackPositions.length - 1)],
+    source: "exact_asset_only",
+    max_instances: 1,
+    role: assetId === secondaryLogoAssetId ? "manual_secondary_logo" : `manual_additional_logo_${index + 1}`
+  }));
+  const providerReferences = [
+    ...existingProviderReferences,
+    ...missingAdditionalLogoAssetIds
+      .filter((assetId) => !existingProviderReferenceIds.has(assetId))
+      .map((assetId) => ({
+        asset_id: assetId,
+        role: assetId === secondaryLogoAssetId ? "exact_secondary_logo_layer" : "exact_additional_logo_layer",
+        sent_to_model: true,
+        composited_after: false
+      }))
+  ];
+  const additionalLogoAssetIds = Array.from(new Set([...existingAdditionalLogoAssetIds, ...missingAdditionalLogoAssetIds]));
+  const additionalLogoRules = [
+    ...readRecordArray(renderPackage.additional_logo_rules),
+    ...addedRules
+  ];
+  const secondaryLogoRules = isPlainRecord(renderPackage.secondary_logo_rules)
+    ? renderPackage.secondary_logo_rules
+    : addedRules.find((rule) => rule.asset_id === secondaryLogoAssetId) ?? { required: false };
+  const patchedRenderPackage = {
+    ...renderPackage,
+    secondary_logo_asset_id: secondaryLogoAssetId,
+    additional_logo_asset_ids: additionalLogoAssetIds,
+    additional_logo_rules: additionalLogoRules,
+    secondary_logo_rules: secondaryLogoRules,
+    provider_references: providerReferences,
+    reference_image_ids: Array.from(new Set([
+      ...readStringArray(renderPackage.reference_image_ids),
+      ...missingAdditionalLogoAssetIds
+    ]))
+  };
+  const layoutContract = isPlainRecord(params.variant.layout_contract) ? params.variant.layout_contract : {};
+  const existingLayoutAdditionalLogos = Array.isArray(layoutContract.additional_logo_layers)
+    ? layoutContract.additional_logo_layers.filter((item: unknown): item is Record<string, unknown> => isPlainRecord(item))
+    : [];
+  return {
+    ...params.variant,
+    render_package: patchedRenderPackage,
+    layout_contract: {
+      ...layoutContract,
+      secondary_logo_layer: isPlainRecord(layoutContract.secondary_logo_layer)
+        ? {
+            ...layoutContract.secondary_logo_layer,
+            required: true,
+            asset_id: secondaryLogoAssetId,
+            source: "exact_asset_only",
+            max_instances: 1,
+            position: typeof secondaryLogoRules.position === "string" ? secondaryLogoRules.position : fallbackPositions[0]
+          }
+        : {
+            required: true,
+            asset_id: secondaryLogoAssetId,
+            source: "exact_asset_only",
+            max_instances: 1,
+            position: typeof secondaryLogoRules.position === "string" ? secondaryLogoRules.position : fallbackPositions[0]
+          },
+      additional_logo_layers: [
+        ...existingLayoutAdditionalLogos,
+        ...addedRules.map((rule) => ({
+          required: true,
+          asset_id: rule.asset_id,
+          source: "exact_asset_only",
+          max_instances: 1,
+          position: rule.position,
+          role: rule.role,
+          missing: false
+        }))
+      ],
+      prompt_audit: {
+        ...(isPlainRecord(layoutContract.prompt_audit) ? layoutContract.prompt_audit : {}),
+        manual_additional_logo_fallback: {
+          applied: true,
+          asset_ids: missingAdditionalLogoAssetIds
+        }
+      }
+    }
+  };
+}
+
+function manualAdditionalLogoPositions(primaryLogoPosition: string) {
+  if (primaryLogoPosition === "top_left") {
+    return ["top_right", "bottom_left", "bottom_right", "top_center"];
+  }
+  if (primaryLogoPosition === "top_right") {
+    return ["top_left", "bottom_right", "bottom_left", "top_center"];
+  }
+  return ["top_right", "top_left", "bottom_left", "bottom_right"];
 }
 
 async function renderCreativeV3Variant(params: {
@@ -966,12 +1275,19 @@ async function renderCreativeV3Variant(params: {
     .filter((item) => item.sent_to_model !== false)
     .map((item) => item.asset_id)
     .filter((value): value is string => typeof value === "string" && value.length > 0);
-  const layerAssetIds = [renderPackage.logo_asset_id, renderPackage.secondary_logo_asset_id, renderPackage.rera_qr_asset_id]
+  const additionalLogoAssetIds = readStringArray(renderPackage.additional_logo_asset_ids);
+  const layerAssetIds = [
+    renderPackage.logo_asset_id,
+    renderPackage.secondary_logo_asset_id,
+    ...additionalLogoAssetIds,
+    renderPackage.rera_qr_asset_id
+  ]
     .filter((value): value is string => typeof value === "string" && value.length > 0);
   const requestedAssetIds = Array.from(new Set([
     ...(Array.isArray(renderPackage.project_asset_ids) ? renderPackage.project_asset_ids : []),
     ...(Array.isArray(renderPackage.reference_image_ids) ? renderPackage.reference_image_ids : []),
-    ...modelReferenceAssetIds
+    ...modelReferenceAssetIds,
+    ...layerAssetIds
   ].filter((value): value is string => typeof value === "string" && value.length > 0)));
 
   const [brandAssets, reraRegistrations] = await Promise.all([
@@ -1022,14 +1338,28 @@ async function renderCreativeV3Variant(params: {
     typeof item.asset_id === "string" &&
     item.asset_id === renderPackage.secondary_logo_asset_id
   );
+  const hasModelReferenceForAsset = (assetId: string) => providerReferences.some((item) =>
+    item.sent_to_model !== false &&
+    item.asset_id === assetId
+  );
+  const additionalLogoRulesByAssetId = new Map(
+    readRecordArray(renderPackage.additional_logo_rules)
+      .map((item) => [typeof item.asset_id === "string" ? item.asset_id : "", item] as const)
+      .filter(([assetId]) => assetId.length > 0)
+  );
+  const additionalLogoRules = Array.from(new Set(additionalLogoAssetIds))
+    .filter((assetId) => assetId !== renderPackage.secondary_logo_asset_id && hasModelReferenceForAsset(assetId))
+    .map((assetId) => additionalLogoRulesByAssetId.get(assetId) ?? { asset_id: assetId });
   const renderPrompt = buildCreativeV3RendererPrompt({
     prompt,
     hasProjectReference: Array.isArray(renderPackage.project_asset_ids) && renderPackage.project_asset_ids.length > 0,
     hasLogoReference,
     hasSecondaryLogoReference,
+    hasAdditionalLogoReferences: additionalLogoRules.length > 0,
     hasReraReference,
     logoRules: isPlainRecord(renderPackage.logo_rules) ? renderPackage.logo_rules : null,
     secondaryLogoRules: isPlainRecord(renderPackage.secondary_logo_rules) ? renderPackage.secondary_logo_rules : null,
+    additionalLogoRules,
   });
 
   const result = await generateOpenAiImages({
@@ -1064,9 +1394,11 @@ function buildCreativeV3RendererPrompt(params: {
   hasProjectReference: boolean;
   hasLogoReference: boolean;
   hasSecondaryLogoReference: boolean;
+  hasAdditionalLogoReferences: boolean;
   hasReraReference: boolean;
   logoRules?: Record<string, unknown> | null;
   secondaryLogoRules?: Record<string, unknown> | null;
+  additionalLogoRules?: Array<Record<string, unknown>>;
 }) {
   const roleNotes = ["Use the following provider prompt as the final art direction. Do not add contradictory text, logo, QR, contact, or factual claims beyond it."];
   if (params.hasLogoReference) {
@@ -1075,10 +1407,33 @@ function buildCreativeV3RendererPrompt(params: {
   if (params.hasSecondaryLogoReference) {
     roleNotes.push(compileSecondaryLogoRenderInstruction(params.secondaryLogoRules));
   }
+  if (params.hasAdditionalLogoReferences) {
+    roleNotes.push(compileAdditionalLogoRenderInstruction(params.additionalLogoRules ?? []));
+  }
   if (params.hasReraReference) {
     roleNotes.push("Leave a clean compact RERA compliance safe zone if requested; the exact RERA block is composited after generation. Never invent, redraw, or stylize a QR code.");
   }
   return `${roleNotes.join("\n")}\n\n${params.prompt}`;
+}
+
+function compileAdditionalLogoRenderInstruction(additionalLogoRules: Array<Record<string, unknown>>) {
+  const placements = additionalLogoRules
+    .map((rules, index) => {
+      const position = typeof rules.position === "string" ? formatLogoPosition(rules.position) : "the preset-defined logo zone";
+      const label = typeof rules.label === "string" && rules.label.trim()
+        ? rules.label.trim()
+        : typeof rules.role === "string" && rules.role.trim()
+          ? formatLogoPosition(rules.role.trim())
+          : `additional logo ${index + 2}`;
+      return `${label} at ${position}`;
+    })
+    .join("; ");
+  return [
+    "Use each supplied additional logo reference exactly once as a separate flat brand mark layer.",
+    placements ? `Additional logo placements: ${placements}.` : "",
+    "Keep all additional logos smaller than the primary logo, clearly spaced from RERA/contact/headline areas, and never merged into one mark.",
+    "Do not redraw, recolor, crop, stylize, distort, or place any additional logo on the building facade."
+  ].filter(Boolean).join(" ");
 }
 
 function compileLogoRenderInstruction(logoRules?: Record<string, unknown> | null) {
@@ -1152,6 +1507,16 @@ function formatLogoMargins(
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
+}
+
+function readRecordArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => isPlainRecord(item))
+    : [];
 }
 
 async function persistCreativeV3Outputs(params: {
@@ -1532,6 +1897,7 @@ function collectReferenceAssetIds(variants: Array<Record<string, unknown>>) {
       ...(Array.isArray(renderPackage.project_asset_ids) ? renderPackage.project_asset_ids : []),
       renderPackage.logo_asset_id,
       renderPackage.secondary_logo_asset_id,
+      ...(Array.isArray(renderPackage.additional_logo_asset_ids) ? renderPackage.additional_logo_asset_ids : []),
       renderPackage.rera_qr_asset_id,
       ...(Array.isArray(renderPackage.reference_image_ids) ? renderPackage.reference_image_ids : [])
     ]) {
@@ -1857,6 +2223,18 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
       payload: body
     });
     const presetKey = body.presetKey ?? slugifyPresetKey(body.name);
+    const validation = validateCreativeV3BrandPresetConfig({
+      presetKey,
+      name: body.name,
+      description: body.description ?? null,
+      presetJson: body.presetJson
+    });
+    if (validation.errors.length > 0) {
+      return reply.badRequest(`Invalid preset configuration: ${validation.errors.join(" ")}`);
+    }
+    if (validation.warnings.length > 0) {
+      request.log.warn({ warnings: validation.warnings, presetKey }, "creative v3 brand preset validation warnings");
+    }
     const { data, error } = await supabaseAdmin
       .from("creative_v3_brand_presets")
       .insert({
@@ -1909,6 +2287,18 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
       }
     });
 
+    const { data: existingPreset, error: existingPresetError } = await supabaseAdmin
+      .from("creative_v3_brand_presets")
+      .select("preset_key, name, description, preset_json")
+      .eq("id", params.presetId)
+      .eq("workspace_id", brand.workspaceId)
+      .eq("brand_id", brand.id)
+      .single();
+
+    if (existingPresetError) {
+      throw existingPresetError;
+    }
+
     const updates: Record<string, unknown> = {};
     if (typeof body.projectId !== "undefined") updates.project_id = body.projectId ?? null;
     if (typeof body.presetKey === "string") updates.preset_key = body.presetKey;
@@ -1916,6 +2306,19 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
     if (typeof body.description !== "undefined") updates.description = body.description ?? null;
     if (typeof body.presetJson !== "undefined") updates.preset_json = body.presetJson;
     if (typeof body.active === "boolean") updates.active = body.active;
+
+    const validation = validateCreativeV3BrandPresetConfig({
+      presetKey: typeof body.presetKey === "string" ? body.presetKey : existingPreset.preset_key,
+      name: typeof body.name === "string" ? body.name : existingPreset.name,
+      description: typeof body.description !== "undefined" ? body.description ?? null : existingPreset.description,
+      presetJson: typeof body.presetJson !== "undefined" ? body.presetJson : existingPreset.preset_json ?? {}
+    });
+    if (validation.errors.length > 0) {
+      return reply.badRequest(`Invalid preset configuration: ${validation.errors.join(" ")}`);
+    }
+    if (validation.warnings.length > 0) {
+      request.log.warn({ warnings: validation.warnings, presetId: params.presetId }, "creative v3 brand preset validation warnings");
+    }
 
     const { data, error } = await supabaseAdmin
       .from("creative_v3_brand_presets")

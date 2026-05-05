@@ -208,11 +208,15 @@ def _production_section(production: ProductionPlan) -> str:
     if production.include_logo and production.logo_asset_id:
         parts.append(f"Use the supplied logo asset exactly once as a separate flat brand mark layer at {_format_position(production.logo_position)}; never redraw, recolor, duplicate, distort, or place it on a building facade.")
     else:
-        parts.append("Do not generate, imply, draw, or place any logo or brand mark.")
-    if production.secondary_logo.required and production.secondary_logo.asset_id:
-        parts.append(f"Use the supplied secondary logo asset exactly once as a second flat brand mark at {_format_position(production.secondary_logo.position)}; keep it visually subordinate and do not merge it with the primary logo.")
-    elif production.secondary_logo.required:
-        parts.append("Reserve clean space for the required secondary logo; do not invent, redraw, or fake the missing secondary brand mark.")
+        parts.append("Do not generate, imply, draw, or place any unsupplied logo or brand mark.")
+    logo_layers = production.additional_logos or ([production.secondary_logo] if production.secondary_logo.required else [])
+    for index, logo_layer in enumerate(logo_layers):
+        name = "secondary logo" if index == 0 else f"additional logo {index + 1}"
+        label = f" ({logo_layer.label})" if logo_layer.label else ""
+        if logo_layer.asset_id:
+            parts.append(f"Use the supplied {name}{label} asset exactly once as a separate flat brand mark at {_format_position(logo_layer.position)}; keep it visually subordinate and do not merge it with the primary logo.")
+        elif logo_layer.required:
+            parts.append(f"Reserve clean space for the required {name}{label}; do not invent, redraw, or fake the missing brand mark.")
     if production.include_rera_qr and production.rera_qr_asset_id:
         parts.append(f"Leave a compact RERA compliance zone at {_format_position(production.rera_position)}; the exact QR/compliance block must be used once and never invented or redrawn.")
     else:

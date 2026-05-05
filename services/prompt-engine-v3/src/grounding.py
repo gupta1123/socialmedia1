@@ -51,6 +51,9 @@ def deterministic_gate(request: CompileRequest, context: Dict[str, Any]) -> Vali
         # that is outside the current project scope but still belongs to the same brand; do
         # not block prompt planning here. The renderer/backend will resolve the actual asset.
         warnings.append("Requested logo_asset_id was not present in engine context; it will be used if the backend can resolve it: %s" % request.logo_asset_id)
+    missing_additional_logos = [asset_id for asset_id in request.additional_logo_asset_ids if asset_id not in asset_ids]
+    if missing_additional_logos:
+        warnings.append("Requested additional logo asset IDs were not present in engine context; they will be used if the backend can resolve them: %s" % ", ".join(missing_additional_logos))
     if request.include_rera_qr and request.rera_qr_asset_id and request.rera_qr_asset_id not in asset_ids:
         errors.append("Requested rera_qr_asset_id was not found: %s" % request.rera_qr_asset_id)
     template_ids = {str(template.get("template_id")) for template in context.get("visual_templates", []) if isinstance(template, dict)}

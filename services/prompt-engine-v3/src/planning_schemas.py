@@ -108,12 +108,18 @@ class ResolvedLocationPlan(BaseModel):
     rules_extra: Dict[str, Any] = Field(default_factory=dict)
 
 
-class SecondaryLogoPlan(BaseModel):
+class LogoLayerPlan(BaseModel):
     required: bool = False
     asset_id: Optional[str] = None
     position: str = "top_left"
     rules_extra: Dict[str, Any] = Field(default_factory=dict)
     missing: bool = False
+    role: str = "additional_logo"
+    label: Optional[str] = None
+
+
+class SecondaryLogoPlan(LogoLayerPlan):
+    role: str = "secondary_logo"
 
 
 class ProductionPlan(BaseModel):
@@ -122,6 +128,7 @@ class ProductionPlan(BaseModel):
     logo_position: str = "top_left"
     logo_rules_extra: Dict[str, Any] = Field(default_factory=dict)
     secondary_logo: SecondaryLogoPlan = Field(default_factory=SecondaryLogoPlan)
+    additional_logos: List[LogoLayerPlan] = Field(default_factory=list)
     include_rera_qr: bool = False
     rera_qr_asset_id: Optional[str] = None
     rera_position: str = "top_right"

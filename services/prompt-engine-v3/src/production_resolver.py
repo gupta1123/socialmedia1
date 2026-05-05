@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, List, Optional
 
 from .contact_resolver import resolve_contact_plan
 from .grounding import wants_rera_qr
-from .planning_schemas import CreativeIntent, GroundedFactStore, ProductionPlan, ResolvedLocationPlan, SecondaryLogoPlan
+from .planning_schemas import CreativeIntent, GroundedFactStore, LogoLayerPlan, ProductionPlan, ResolvedLocationPlan, SecondaryLogoPlan
 from .presets import (
+    preset_additional_logo_rules,
     preset_contact_items,
     preset_contact_position,
     preset_location_rules,
@@ -16,9 +17,6 @@ from .presets import (
     preset_rera_trigger_fact_types,
     preset_requires_logo,
     preset_requires_rera_qr,
-    preset_requires_secondary_logo,
-    preset_secondary_logo_position,
-    preset_secondary_logo_rules,
     selected_preset,
 )
 from .schemas import CompileRequest
@@ -35,22 +33,20 @@ def resolve_production_plan(
     # A user-provided logo is an explicit flat brand mark asset, not a project truth anchor.
     # Honor it even for brand-only/festival flows; if no explicit logo is provided, fall back
     # to the best logo available in the current context.
-    logo_asset_id = request.logo_asset_id or _find_asset_id(context, "logo", preferred_project_id=request.project_id)
-    rera_qr_asset_id = request.rera_qr_asset_id or _find_asset_id(context, "rera_qr", preferred_project_id=request.project_id)
-    secondary_logo_rules = preset_secondary_logo_rules(preset)
-    secondary_logo_required = preset_requires_secondary_logo(preset)
-    secondary_logo_asset_id = (
-        _find_asset_id(
-            context,
-            "logo",
-            rules=secondary_logo_rules,
-            exclude_asset_ids={logo_asset_id} if logo_asset_id else set(),
-        )
-        if secondary_logo_required
-        else None
-    )
-    rera_triggered_by_preset = _preset_triggers_rera_qr(preset, request, intent, fact_store)
     include_logo = bool(request.include_logo or request.logo_asset_id or preset_requires_logo(preset)) and "logo" not in intent.negative_requests
+    logo_asset_id = (request.logo_asset_id or _find_asset_id(context, "logo", preferred_project_id=request.project_id)) if include_logo else None
+    rera_qr_asset_id = request.rera_qr_asset_id or _find_asset_id(context, "rera_qr", preferred_project_id=request.project_id)
+    logo_position = preset_logo_position(preset)
+    additional_logos = _resolve_additional_logo_layers(
+        context,
+        _dedupe_logo_rules([
+            *preset_additional_logo_rules(preset),
+            *_manual_additional_logo_rules(request.additional_logo_asset_ids, logo_position=logo_position),
+        ]),
+        used_asset_ids={logo_asset_id} if include_logo and logo_asset_id else set(),
+    )
+    secondary_logo_plan = _secondary_logo_from_additional(additional_logos)
+    rera_triggered_by_preset = _preset_triggers_rera_qr(preset, request, intent, fact_store)
     include_rera = bool(request.include_rera_qr or wants_rera_qr(request) or preset_requires_rera_qr(preset) or rera_triggered_by_preset) and "qr" not in intent.negative_requests and "rera" not in intent.negative_requests
     contact_plan = resolve_contact_plan(
         intent=intent,
@@ -65,8 +61,9 @@ def resolve_production_plan(
     missing = []
     if include_logo and not logo_asset_id:
         missing.append("logo_asset_id")
-    if secondary_logo_required and not secondary_logo_asset_id:
-        missing.append("secondary_logo_asset_id")
+    for index, logo_layer in enumerate(additional_logos):
+        if logo_layer.required and not logo_layer.asset_id:
+            missing.append("secondary_logo_asset_id" if index == 0 else "additional_logo_asset_id_%s" % (index + 1))
     if include_rera and not rera_qr_asset_id:
         missing.append("rera_qr_asset_id")
     if location_plan.required and not location_plan.value:
@@ -74,15 +71,10 @@ def resolve_production_plan(
     return ProductionPlan(
         include_logo=include_logo,
         logo_asset_id=logo_asset_id if include_logo else None,
-        logo_position=preset_logo_position(preset),
+        logo_position=logo_position,
         logo_rules_extra=preset_logo_rules(preset),
-        secondary_logo=SecondaryLogoPlan(
-            required=secondary_logo_required,
-            asset_id=secondary_logo_asset_id,
-            position=preset_secondary_logo_position(preset),
-            rules_extra=secondary_logo_rules,
-            missing=secondary_logo_required and not bool(secondary_logo_asset_id),
-        ),
+        secondary_logo=secondary_logo_plan,
+        additional_logos=additional_logos,
         include_rera_qr=include_rera,
         rera_qr_asset_id=rera_qr_asset_id if include_rera else None,
         rera_position=preset_rera_position(preset),
@@ -95,6 +87,101 @@ def resolve_production_plan(
         missing_requirements=missing,
         preset_id=preset.get("preset_id") if isinstance(preset, dict) else None,
         preset_name=preset.get("name") if isinstance(preset, dict) else None,
+    )
+
+
+def _resolve_additional_logo_layers(
+    context: Dict[str, Any],
+    rules_list: List[Dict[str, Any]],
+    *,
+    used_asset_ids: set[str],
+) -> List[LogoLayerPlan]:
+    layers: List[LogoLayerPlan] = []
+    used = {asset_id for asset_id in used_asset_ids if asset_id}
+    for index, rules in enumerate(rules_list):
+        required = bool(rules.get("required"))
+        include_if_available = bool(rules.get("include_if_available") or rules.get("optional"))
+        explicit_asset_id = str(rules.get("asset_id") or "").strip() or None
+        if explicit_asset_id and explicit_asset_id in used:
+            continue
+        asset_id = explicit_asset_id if explicit_asset_id and explicit_asset_id not in used else None
+        if not asset_id and (required or include_if_available):
+            asset_id = _find_asset_id(context, "logo", rules=rules, exclude_asset_ids=used)
+        if asset_id:
+            used.add(asset_id)
+        if not (required or include_if_available or asset_id):
+            continue
+        layers.append(
+            LogoLayerPlan(
+                required=required,
+                asset_id=asset_id,
+                position=str(rules.get("position") or "top_left"),
+                rules_extra=rules,
+                missing=required and not bool(asset_id),
+                role=str(rules.get("role") or ("secondary_logo" if index == 0 else "additional_logo_%s" % (index + 1))),
+                label=str(rules.get("label") or rules.get("name") or "") or None,
+            )
+        )
+    return layers
+
+
+def _manual_additional_logo_rules(asset_ids: List[str], *, logo_position: str) -> List[Dict[str, Any]]:
+    positions = _manual_additional_logo_positions(logo_position)
+    rules: List[Dict[str, Any]] = []
+    seen = set()
+    for index, asset_id in enumerate(asset_ids):
+        clean_asset_id = str(asset_id or "").strip()
+        if not clean_asset_id or clean_asset_id in seen:
+            continue
+        rules.append(
+            {
+                "required": True,
+                "asset_id": clean_asset_id,
+                "position": positions[min(index, len(positions) - 1)],
+                "source": "exact_asset_only",
+                "role": "manual_additional_logo_%s" % (index + 1),
+            }
+        )
+        seen.add(clean_asset_id)
+    return rules
+
+
+def _manual_additional_logo_positions(logo_position: str) -> List[str]:
+    if logo_position == "top_left":
+        return ["top_right", "bottom_left", "bottom_right", "top_center"]
+    if logo_position == "top_right":
+        return ["top_left", "bottom_right", "bottom_left", "top_center"]
+    return ["top_right", "top_left", "bottom_left", "bottom_right"]
+
+
+def _dedupe_logo_rules(rules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    deduped: List[Dict[str, Any]] = []
+    seen = set()
+    for rule in rules:
+        fingerprint = (
+            str(rule.get("asset_id") or "").strip().lower(),
+            str(rule.get("brand_mark") or rule.get("brandMark") or "").strip().lower(),
+            str(rule.get("position") or "").strip().lower(),
+            str(rule.get("role") or rule.get("label") or "").strip().lower(),
+        )
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        deduped.append(rule)
+    return deduped
+
+
+def _secondary_logo_from_additional(layers: List[LogoLayerPlan]) -> SecondaryLogoPlan:
+    if not layers:
+        return SecondaryLogoPlan()
+    first = layers[0]
+    return SecondaryLogoPlan(
+        required=first.required,
+        asset_id=first.asset_id,
+        position=first.position,
+        rules_extra=first.rules_extra,
+        missing=first.missing,
+        label=first.label,
     )
 
 

@@ -143,6 +143,103 @@ def test_preset_rules_drive_location_contact_secondary_logo_and_rera_trigger():
     assert "secondary logo" in prompt
 
 
+def test_preset_can_require_multiple_additional_logo_layers():
+    preset = {
+        "preset_id": "multi_logo",
+        "name": "Multi Logo",
+        "preset_json": {
+            "logo": {"required": True, "position": "top_right", "brand_mark": "pwc_logo"},
+            "secondary_logo": {"required": True, "position": "top_left", "brand_mark": "pride_group_logo"},
+            "additional_logos": [
+                {"required": True, "position": "bottom_left", "brand_mark": "partner_logo", "label": "Partner logo"}
+            ],
+        },
+    }
+    base = payload(
+        brand_preset_id=preset["preset_id"],
+        context={
+            **payload()["context"],
+            "brand_presets": [preset],
+            "assets": [
+                *payload()["context"]["assets"],
+                {
+                    "asset_id": "pwc-logo",
+                    "label": "PWC logo",
+                    "role": "logo",
+                    "storage_path": "pwc-logo.png",
+                    "metadata": {"assetClass": "project_logo", "brandMark": "pwc_logo"},
+                },
+                {
+                    "asset_id": "pride-logo",
+                    "label": "Pride Group logo",
+                    "role": "logo",
+                    "storage_path": "pride-logo.png",
+                    "metadata": {"assetClass": "brand_logo", "brandMark": "pride_group_logo"},
+                },
+                {
+                    "asset_id": "partner-logo",
+                    "label": "Partner logo",
+                    "role": "logo",
+                    "storage_path": "partner-logo.png",
+                    "metadata": {"assetClass": "brand_logo", "brandMark": "partner_logo"},
+                },
+            ],
+        },
+    )
+    response = compile_prompt(CompileRequest(**base))
+    assert response.status in {"ready", "ready_with_warnings"}
+    variant = response.variants[0]
+    assert variant.render_package.secondary_logo_asset_id == "pride-logo"
+    assert variant.render_package.additional_logo_asset_ids == ["pride-logo", "partner-logo"]
+    assert variant.layout_contract["additional_logo_layers"][1]["asset_id"] == "partner-logo"
+    assert any(ref.asset_id == "partner-logo" and ref.role == "exact_additional_logo_layer" for ref in variant.render_package.provider_references)
+    assert "additional logo instruction" in variant.compiled_prompt.lower()
+
+
+def test_manual_additional_logo_ids_work_without_preset():
+    base = payload(
+        include_logo=True,
+        logo_asset_id="project-logo",
+        additional_logo_asset_ids=["developer-logo", "partner-logo"],
+        context={
+            **payload()["context"],
+            "assets": [
+                *payload()["context"]["assets"],
+                {
+                    "asset_id": "project-logo",
+                    "label": "Project logo",
+                    "role": "logo",
+                    "storage_path": "project-logo.png",
+                    "metadata": {"assetClass": "project_logo"},
+                },
+                {
+                    "asset_id": "developer-logo",
+                    "label": "Developer logo",
+                    "role": "logo",
+                    "storage_path": "developer-logo.png",
+                    "metadata": {"assetClass": "brand_logo"},
+                },
+                {
+                    "asset_id": "partner-logo",
+                    "label": "Partner logo",
+                    "role": "logo",
+                    "storage_path": "partner-logo.png",
+                    "metadata": {"assetClass": "brand_logo"},
+                },
+            ],
+        },
+    )
+    response = compile_prompt(CompileRequest(**base))
+    assert response.status in {"ready", "ready_with_warnings"}
+    variant = response.variants[0]
+    assert variant.render_package.logo_asset_id == "project-logo"
+    assert variant.render_package.additional_logo_asset_ids == ["developer-logo", "partner-logo"]
+    assert variant.layout_contract["additional_logo_layers"][0]["position"] == "top_right"
+    assert variant.layout_contract["additional_logo_layers"][1]["position"] == "bottom_left"
+    assert any(ref.asset_id == "developer-logo" and ref.role == "exact_secondary_logo_layer" for ref in variant.render_package.provider_references)
+    assert any(ref.asset_id == "partner-logo" and ref.role == "exact_additional_logo_layer" for ref in variant.render_package.provider_references)
+
+
 def test_no_text_visual_only_creates_reserved_text_policy():
     response = compile_prompt(CompileRequest(**payload(brief="Create a launch key visual with no text, background only.")))
     assert response.status in {"ready", "ready_with_warnings"}

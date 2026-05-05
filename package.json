@@ -15,6 +15,7 @@
     "check:runtime-ownership": "node scripts/ops/check-runtime-ownership.mjs",
     "test": "node scripts/ops/run-pnpm.mjs --filter @image-lab/api test && node scripts/ops/run-pnpm.mjs --filter @image-lab/web test",
     "typecheck": "node scripts/ops/run-pnpm.mjs --filter @image-lab/contracts typecheck && node scripts/ops/run-pnpm.mjs --filter @image-lab/api typecheck && node scripts/ops/run-pnpm.mjs --filter @image-lab/web typecheck",
+    "validate:v3-presets": "node scripts/ops/validate-creative-v3-presets.mjs",
     "heroku-postbuild": "node scripts/ops/run-pnpm.mjs --filter @image-lab/contracts build && node scripts/ops/run-pnpm.mjs --filter @image-lab/api build",
     "start": "node scripts/ops/run-pnpm.mjs --filter @image-lab/api start",
     "supabase:start": "supabase start",

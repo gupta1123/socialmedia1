@@ -45,6 +45,35 @@ def preset_secondary_logo_rules(preset: Dict[str, Any]) -> Dict[str, Any]:
     return dict(logo) if isinstance(logo, dict) else {}
 
 
+def preset_additional_logo_rules(preset: Dict[str, Any]) -> List[Dict[str, Any]]:
+    json = preset_json(preset)
+    rules: List[Dict[str, Any]] = []
+    seen = set()
+
+    secondary = preset_secondary_logo_rules(preset)
+    if secondary:
+        secondary = {**secondary, "role": secondary.get("role") or "secondary_logo"}
+        rules.append(secondary)
+        seen.add(_logo_rule_fingerprint(secondary))
+
+    for key in ["additional_logos", "additional_logo_layers", "logo_layers"]:
+        value = json.get(key)
+        if not isinstance(value, list):
+            continue
+        for index, item in enumerate(value):
+            if not isinstance(item, dict) or _is_primary_logo_rule(item):
+                continue
+            rule = dict(item)
+            rule.setdefault("role", "additional_logo_%s" % (index + 1))
+            fingerprint = _logo_rule_fingerprint(rule)
+            if fingerprint in seen:
+                continue
+            rules.append(rule)
+            seen.add(fingerprint)
+
+    return rules
+
+
 def preset_requires_secondary_logo(preset: Dict[str, Any]) -> bool:
     logo = preset_secondary_logo_rules(preset)
     return bool(logo.get("required"))
@@ -53,6 +82,20 @@ def preset_requires_secondary_logo(preset: Dict[str, Any]) -> bool:
 def preset_secondary_logo_position(preset: Dict[str, Any]) -> str:
     logo = preset_secondary_logo_rules(preset)
     return str(logo.get("position") or "top_left") if logo else "top_left"
+
+
+def _is_primary_logo_rule(rule: Dict[str, Any]) -> bool:
+    role = str(rule.get("role") or rule.get("slot") or rule.get("kind") or "").strip().lower()
+    return role in {"primary", "primary_logo", "main_logo", "logo"} or bool(rule.get("primary"))
+
+
+def _logo_rule_fingerprint(rule: Dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(rule.get("asset_id") or "").strip().lower(),
+        str(rule.get("brand_mark") or rule.get("brandMark") or "").strip().lower(),
+        str(rule.get("position") or "").strip().lower(),
+        str(rule.get("label") or rule.get("name") or rule.get("role") or "").strip().lower(),
+    )
 
 
 def preset_rera_position(preset: Dict[str, Any]) -> str:

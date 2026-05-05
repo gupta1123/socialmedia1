@@ -198,6 +198,12 @@ def deterministic_repair(
         if text != before:
             changes.append("Inserted secondary logo placement instruction.")
 
+    if len(production.additional_logos) > 1:
+        before = text
+        text = _additional_logo_instruction(text, production)
+        if text != before:
+            changes.append("Inserted additional logo placement instructions.")
+
     if production.include_rera_qr:
         before = text
         text = _composited_rera_instruction(text, production)
@@ -396,6 +402,26 @@ def _secondary_logo_instruction(text: str, production: ProductionPlan) -> str:
             "Keep it as a separate, smaller flat brand mark; do not merge, redraw, recolor, crop, or place it on architecture."
         )
     if "secondary logo instruction:" not in text.lower():
+        text += " " + guard
+    return text
+
+
+def _additional_logo_instruction(text: str, production: ProductionPlan) -> str:
+    details = []
+    for index, logo_layer in enumerate(production.additional_logos[1:], start=2):
+        name = logo_layer.label or f"logo {index}"
+        if logo_layer.asset_id:
+            details.append(f"{name}: use the supplied reference exactly once at {_format_position(logo_layer.position)}")
+        elif logo_layer.required:
+            details.append(f"{name}: reserve clean space at {_format_position(logo_layer.position)} and do not invent the missing mark")
+    if not details:
+        return text
+    guard = (
+        "Additional logo instruction: "
+        + "; ".join(details)
+        + ". Keep every logo as a separate flat brand mark; do not merge, redraw, recolor, crop, distort, or place logos on architecture."
+    )
+    if "additional logo instruction:" not in text.lower():
         text += " " + guard
     return text
 
