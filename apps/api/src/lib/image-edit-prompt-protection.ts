@@ -14,6 +14,8 @@ const BRAND_MARK_TARGET_PATTERN =
   /\b(?:brand|brandmark|emblem|logo|mark|monogram|watermark|wordmark)\b/i;
 const TEXT_AND_COMPLIANCE_TARGET_PATTERN =
   /\b(?:address|caption|compliance|contact|copy|cta|disclaimer|email|headline|phone|qr|rera|registration|tagline|text|url|website)\b/i;
+const GLOBAL_LAYOUT_TARGET_PATTERN =
+  /\b(?:composition|crop|layout|margin|negative space|position|reframe|resize|room|scale|space|spacing|zoom)\b/i;
 
 export function detectProtectedImageEditPermissions(prompt: string): ProtectedImageEditPermissions {
   return {
@@ -32,17 +34,23 @@ export function buildProtectedImageEditPrompt(prompt: string) {
     normalizedPrompt,
     "",
     "Protected edit rules:",
-    "Treat the input image as the source of truth. Apply only the requested edit; do not add optional beautification, redesign, cleanup, layout changes, or extra creative interpretation.",
+    "Treat the input image as a locked source document, not a loose inspiration reference. Apply only the requested edit as a localized in-place change.",
+    "Do not add optional beautification, redesign, cleanup, layout changes, camera changes, perspective changes, crop changes, zoom changes, or extra creative interpretation.",
+    "Canvas and composition lock: preserve the exact canvas size, aspect ratio, framing, camera viewpoint, subject scale, object positions, and empty-space distribution unless the user explicitly requests one of those exact layout changes.",
     permissions.buildingTruth
       ? "Building/elevation truth: the user requested a building-related change. Change only the exact building, elevation, facade, construction, or site detail named in the request; preserve all other architecture, floor count, windows, balconies, construction progress, materials, paint color, skyline, and site context."
-      : "Building/elevation truth: not requested. Do not change the building architecture, elevation, facade, floor count, windows, balconies, construction progress, cranes, scaffolding, materials, paint color, skyline, or site context.",
+      : "Building/elevation truth: not requested. Do not change, redraw, replace, upscale, downscale, stretch, compress, straighten, complete, beautify, modernize, re-angle, reframe, or relocate the building. Preserve architecture, elevation, facade, floor count, windows, balconies, construction progress, cranes, scaffolding, materials, paint color, skyline, shadows, and site context exactly.",
     permissions.brandMarks
       ? "Logo/brand marks: the user requested a brand-related change. Change only the exact logo or brand mark detail named in the request; preserve all other logos, wordmarks, watermarks, brand typography, placement, shape, and color."
       : "Logo/brand marks: not requested. Do not remove, replace, redraw, distort, recolor, move, upscale, or simplify any logo, wordmark, watermark, brand mark, or brand typography.",
     permissions.textAndCompliance
       ? "Text/compliance: the user requested a text or compliance change. Change only the exact text, RERA, QR, compliance, contact, CTA, or disclaimer item named in the request; preserve all other readable text exactly."
       : "Text/compliance: not requested. Do not change, remove, redraw, translate, hallucinate, or distort RERA details, QR codes, compliance blocks, disclaimers, phone numbers, emails, websites, CTAs, headlines, captions, or any existing readable text.",
-    "If the user request is ambiguous, keep protected building truth, logos, and compliance/text unchanged. Never invent a more complete, premium, fantasy, or different building."
+    GLOBAL_LAYOUT_TARGET_PATTERN.test(normalizedPrompt)
+      ? "Layout-related request: if the user asked for spacing, size, crop, position, or layout changes, apply that change only to the explicitly named editable non-building element. Do not resize, move, crop, reframe, or distort the building to make room."
+      : "Layout-related request: not requested. Do not move, resize, crop, reframe, or rescale any major subject to accommodate the edit.",
+    "If the edit cannot be done without changing protected building truth, logos, compliance/text, or global composition, leave those protected areas unchanged and apply only the safe portion of the request.",
+    "If the user request is ambiguous, keep protected building truth, logos, and compliance/text unchanged. Never invent a more complete, premium, fantasy, cleaner, taller, shorter, wider, narrower, or different building."
   ].join("\n");
 }
 

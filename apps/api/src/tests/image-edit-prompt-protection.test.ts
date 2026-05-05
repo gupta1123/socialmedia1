@@ -19,7 +19,9 @@ describe("image edit prompt protection", () => {
     expect(prompt).toContain("Building/elevation truth: not requested.");
     expect(prompt).toContain("Logo/brand marks: not requested.");
     expect(prompt).toContain("Text/compliance: not requested.");
-    expect(prompt).toContain("Never invent a more complete, premium, fantasy, or different building.");
+    expect(prompt).toContain("Canvas and composition lock:");
+    expect(prompt).toContain("Do not move, resize, crop, reframe, or rescale any major subject to accommodate the edit.");
+    expect(prompt).toContain("Never invent a more complete, premium, fantasy, cleaner, taller, shorter, wider, narrower, or different building.");
   });
 
   it("only unlocks a protected area when the user explicitly asks", () => {
@@ -46,5 +48,14 @@ describe("image edit prompt protection", () => {
       brandMarks: false,
       textAndCompliance: false
     });
+  });
+
+  it("does not allow layout changes to resize the building unless building truth is explicitly requested", () => {
+    const userPrompt = "Make more space for the headline at the top.";
+    const prompt = buildProtectedImageEditPrompt(userPrompt);
+
+    expect(detectProtectedImageEditPermissions(userPrompt).buildingTruth).toBe(false);
+    expect(prompt).toContain("Do not resize, move, crop, reframe, or distort the building to make room.");
+    expect(prompt).toContain("Do not change, redraw, replace, upscale, downscale, stretch, compress");
   });
 });

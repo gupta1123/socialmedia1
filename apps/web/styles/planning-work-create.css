@@ -3412,6 +3412,43 @@
   -webkit-box-orient: vertical;
 }
 
+.output-detail-brief-block {
+  display: grid;
+  gap: 7px;
+}
+
+.output-detail-brief-block > span {
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.output-detail-edit-brief-list {
+  display: grid;
+  gap: 8px;
+}
+
+.output-detail-edit-brief {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper-soft);
+}
+
+.output-detail-edit-brief strong {
+  color: var(--ink);
+  font-size: 0.74rem;
+  font-weight: 720;
+}
+
+.output-detail-edit-brief p {
+  white-space: pre-line;
+}
+
 .output-detail-brief-text.is-expanded {
   display: block;
   overflow: visible;

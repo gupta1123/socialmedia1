@@ -59,6 +59,29 @@ const EditorSaveFieldsSchema = z.object({
   sourceOutputId: z.string().uuid().optional()
 });
 
+const AiEditSaveMetadataSchema = z
+  .object({
+    source: z.literal("ai-edit"),
+    promptMode: z.enum(["normal", "list"]),
+    exactInput: z
+      .object({
+        prompt: z.string().max(5000).optional(),
+        items: z.array(z.string().max(1000)).max(20).optional(),
+        normalizedItems: z.array(z.string().max(500)).max(20).optional()
+      })
+      .passthrough()
+      .optional(),
+    submittedPrompt: z.string().max(2000).optional(),
+    jobId: z.string().uuid().optional(),
+    editPreset: z.enum(["v1_low", "v1_high", "v2_low", "v2_medium", "v2_high"]).optional(),
+    resultModel: z.string().max(200).optional(),
+    resultWidth: z.number().int().positive().optional(),
+    resultHeight: z.number().int().positive().optional(),
+    mergedLayerCount: z.number().int().min(0).max(1000).optional(),
+    preservedLayerCount: z.number().int().min(0).max(1000).optional()
+  })
+  .passthrough();
+
 type UploadedImagePart = {
   filename: string;
   mimetype: string;
@@ -90,6 +113,7 @@ type EditorSourceOutputRow = {
   latest_feedback_verdict: "approved" | "close" | "off-brand" | "wrong-layout" | "wrong-text" | null;
   reviewed_at: string | null;
   created_by: string | null;
+  metadata_json: Record<string, unknown> | null;
 };
 
 type ImageEditJobInput = z.infer<typeof AsyncImageEditJobInputSchema>;
@@ -398,15 +422,20 @@ async function createEditorSaveArtifacts(params: {
   createdBy: string;
   fileName: string;
   saveMode: "new" | "version" | "replace";
+  aiEditMetadata?: Record<string, unknown> | null;
 }) {
   const brandProfileVersion = await getActiveBrandProfile(params.brandId);
   const creativeRequestId = randomId();
   const promptPackageId = randomId();
   const jobId = randomId();
   const format = inferFormatFromDimensions(params.width, params.height);
-  const promptSummary = params.sourceOutputId
+  const aiEditPromptText = extractAiEditPromptText(params.aiEditMetadata);
+  const promptSummary = aiEditPromptText
+    ? `AI edit: ${truncateText(aiEditPromptText, 160)}`
+    : params.sourceOutputId
     ? `Editor save from output ${params.sourceOutputId}`
     : "Editor save";
+  const editorSavePrompt = aiEditPromptText ?? "Persist the current editor composition as a saved output.";
 
   await supabaseAdmin.from("creative_requests").insert({
     id: creativeRequestId,
@@ -429,7 +458,7 @@ async function createEditorSaveArtifacts(params: {
       channel: "instagram-feed",
       format,
       goal: "Save edited output from editor",
-      prompt: "Persist the current editor composition as a saved output.",
+      prompt: editorSavePrompt,
       copyMode: "manual",
       referenceAssetIds: [],
       includeBrandLogo: false,
@@ -451,8 +480,8 @@ async function createEditorSaveArtifacts(params: {
     creative_request_id: creativeRequestId,
     brand_profile_version_id: brandProfileVersion.id,
     prompt_summary: promptSummary,
-    seed_prompt: promptSummary,
-    final_prompt: promptSummary,
+    seed_prompt: editorSavePrompt,
+    final_prompt: editorSavePrompt,
     aspect_ratio: deriveAspectRatio(format),
     chosen_model: "editor-save",
     template_type: null,
@@ -462,11 +491,13 @@ async function createEditorSaveArtifacts(params: {
     resolved_constraints: {
       source: "editor-save",
       saveMode: params.saveMode,
-      sourceOutputId: params.sourceOutputId ?? null
+      sourceOutputId: params.sourceOutputId ?? null,
+      aiEditJobId: typeof params.aiEditMetadata?.jobId === "string" ? params.aiEditMetadata.jobId : null
     },
     compiler_trace: {
       pipeline: "editor-save",
-      createdByRoute: "/api/creative/editor-save"
+      createdByRoute: "/api/creative/editor-save",
+      ...(params.aiEditMetadata ? { aiEdit: params.aiEditMetadata } : {})
     },
     created_by: params.createdBy
   });
@@ -491,7 +522,8 @@ async function createEditorSaveArtifacts(params: {
     request_payload: {
       source: "editor-save",
       sourceOutputId: params.sourceOutputId ?? null,
-      saveMode: params.saveMode
+      saveMode: params.saveMode,
+      aiEditJobId: typeof params.aiEditMetadata?.jobId === "string" ? params.aiEditMetadata.jobId : null
     },
     webhook_payload: {},
     submitted_at: new Date().toISOString(),
@@ -524,14 +556,15 @@ async function composePromptWithGemini(changes: string[]): Promise<PromptCompose
         {
           role: "system",
           content:
-            "You are an expert real-estate image edit prompt writer. Combine the provided edit changes into one concise prompt for an image editor. Preserve building truth, logos, brand marks, RERA/QR/compliance blocks, and existing readable text unless a requested change explicitly names that exact protected item. Do not broaden the edit into redesign, beautification, architecture changes, elevation changes, or brand changes. Output only the final prompt text."
+            "You are an expert real-estate image edit prompt writer. Combine the provided edit changes into one concise prompt for an image editor. Preserve the source image as a locked document: exact building shape, structure, elevation, facade, floor count, windows, balconies, construction progress, camera angle, crop, subject scale, layout, logos, brand marks, RERA/QR/compliance blocks, and existing readable text unless a requested change explicitly names that exact protected item. Do not broaden the edit into redesign, beautification, cleanup, architecture changes, elevation changes, perspective changes, crop changes, layout changes, spacing changes, or brand changes. If a requested change needs space, instruct the editor to modify only the named non-building element and not move/resize/reframe the building. Output only the final prompt text."
         },
         {
           role: "user",
           content: [
             "Combine these requested image edits into one coherent prompt.",
             "Keep all requested changes.",
-            "Do not infer extra building, elevation, facade, construction, logo, brand, RERA, QR, compliance, or text changes.",
+            "Do not infer extra building, structure, elevation, facade, construction, camera, crop, layout, scale, logo, brand, RERA, QR, compliance, or text changes.",
+            "Do not ask the image editor to make room by changing the building, changing the camera, resizing the building, cropping the image, or shifting the whole composition.",
             "If a requested edit is ambiguous, preserve those protected details exactly.",
             "Do not use numbering, bullets, or markdown.",
             "Do not mention model names or tool names.",
@@ -569,7 +602,7 @@ function composePromptFallback(changes: string[]): PromptComposerResult {
     .map((value) => value.replace(/\s+/g, " "));
 
   const prompt = normalizeComposedPrompt(
-    `Apply all of the following edits in one coherent pass while preserving existing composition, lighting, style, building/elevation truth, logos, brand marks, RERA/QR/compliance blocks, and readable text unless a listed edit explicitly changes those exact items: ${normalizedChanges.join(
+    `Apply all of the following edits in one coherent pass as localized in-place changes. Preserve existing composition, crop, camera angle, subject scale, lighting, style, building structure, elevation truth, facade, floor count, windows, balconies, logos, brand marks, RERA/QR/compliance blocks, and readable text unless a listed edit explicitly changes those exact items. Do not move, resize, reframe, redraw, or distort the building to accommodate the edit: ${normalizedChanges.join(
       "; "
     )}.`
   );
@@ -637,8 +670,97 @@ function parseEditorState(value: string | undefined): Record<string, unknown> | 
   return isRecord(parsed) ? parsed : null;
 }
 
+function parseAiEditSaveMetadata(value: string | undefined):
+  | { ok: true; value: Record<string, unknown> | null }
+  | { ok: false; message: string } {
+  if (!value) {
+    return { ok: true, value: null };
+  }
+
+  const parsed = safeParseJson(value);
+  const result = AiEditSaveMetadataSchema.safeParse(parsed);
+  if (!result.success) {
+    return {
+      ok: false,
+      message: result.error.issues[0]?.message ?? "aiEditMetadata must be valid AI edit metadata"
+    };
+  }
+
+  return { ok: true, value: result.data };
+}
+
 function cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function extractAiEditPromptText(metadata: Record<string, unknown> | null | undefined) {
+  if (!metadata) {
+    return null;
+  }
+
+  const exactInput = isRecord(metadata.exactInput) ? metadata.exactInput : null;
+  if (metadata.promptMode === "normal" && exactInput && typeof exactInput.prompt === "string") {
+    const prompt = exactInput.prompt.trim();
+    return prompt || null;
+  }
+
+  if (metadata.promptMode === "list" && exactInput && Array.isArray(exactInput.items)) {
+    const prompt = exactInput.items
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .join("\n");
+    return prompt || null;
+  }
+
+  if (typeof metadata.submittedPrompt === "string") {
+    const prompt = metadata.submittedPrompt.trim();
+    return prompt || null;
+  }
+
+  return null;
+}
+
+function truncateText(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
+}
+
+function getAiEditHistory(metadataJson: Record<string, unknown> | null | undefined) {
+  if (!metadataJson) {
+    return [];
+  }
+
+  if (Array.isArray(metadataJson.aiEditHistory)) {
+    return metadataJson.aiEditHistory
+      .filter(isRecord)
+      .map((item) => cloneRecord(item));
+  }
+
+  return isRecord(metadataJson.aiEdit) ? [cloneRecord(metadataJson.aiEdit)] : [];
+}
+
+async function resolveOriginalGenerationBrief(sourceOutput: EditorSourceOutputRow | null) {
+  const sourceMetadata = sourceOutput?.metadata_json ?? null;
+  if (sourceMetadata && typeof sourceMetadata.originalGenerationBrief === "string" && sourceMetadata.originalGenerationBrief.trim()) {
+    return sourceMetadata.originalGenerationBrief.trim();
+  }
+
+  if (!sourceOutput?.deliverable_id) {
+    return null;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("deliverables")
+    .select("brief_text")
+    .eq("id", sourceOutput.deliverable_id)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  const briefText = (data as { brief_text?: string | null } | null)?.brief_text;
+  return typeof briefText === "string" && briefText.trim() ? briefText.trim() : null;
 }
 
 function sanitizeEditorStateForStorage(
@@ -762,6 +884,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
     let saveModeValue: string | undefined;
     let sourceOutputIdValue: string | undefined;
     let editorStateValue: string | undefined;
+    let aiEditMetadataValue: string | undefined;
     let imagePart: UploadedImagePart | null = null;
     let sourceImagePart: UploadedImagePart | null = null;
     const layerImageParts = new Map<string, UploadedImagePart>();
@@ -794,6 +917,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
       if (part.fieldname === "saveMode") saveModeValue = readFieldValue(part.value);
       if (part.fieldname === "sourceOutputId") sourceOutputIdValue = readFieldValue(part.value);
       if (part.fieldname === "editorState") editorStateValue = readFieldValue(part.value);
+      if (part.fieldname === "aiEditMetadata") aiEditMetadataValue = readFieldValue(part.value);
     }
 
     if (!imagePart) {
@@ -813,6 +937,10 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
     }
 
     const parsedEditorState = parseEditorState(editorStateValue);
+    const parsedAiEditMetadata = parseAiEditSaveMetadata(aiEditMetadataValue);
+    if (!parsedAiEditMetadata.ok) {
+      return reply.badRequest(parsedAiEditMetadata.message);
+    }
 
     const parsedFields = EditorSaveFieldsSchema.safeParse({
       brandId: brandIdValue,
@@ -837,7 +965,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
       const { data, error } = await supabaseAdmin
         .from("creative_outputs")
         .select(
-          "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by"
+          "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by, metadata_json"
         )
         .eq("id", parsedFields.data.sourceOutputId)
         .maybeSingle();
@@ -906,11 +1034,28 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
       editorLayerStoragePaths.set(layerId, layerStoragePath);
     }
 
+    const now = new Date().toISOString();
+    const previousAiEditHistory = getAiEditHistory(sourceOutput?.metadata_json ?? null);
+    const currentAiEditMetadata = parsedAiEditMetadata.value
+      ? {
+          ...cloneRecord(parsedAiEditMetadata.value),
+          savedAt: now,
+          sourceOutputId: sourceOutput?.id ?? null,
+          outputId
+        }
+      : null;
+    const aiEditHistory = currentAiEditMetadata
+      ? [...previousAiEditHistory, currentAiEditMetadata].slice(-50)
+      : previousAiEditHistory.slice(-50);
+    const lastAiEditMetadata = currentAiEditMetadata ?? (aiEditHistory.length > 0 ? aiEditHistory[aiEditHistory.length - 1] : null);
+    const originalGenerationBrief = await resolveOriginalGenerationBrief(sourceOutput);
     const editorStateForStorage = sanitizeEditorStateForStorage(parsedEditorState, editorSourceStoragePath, editorLayerStoragePaths);
     const editorMetadataJson = {
       source: "editor-save",
       saveMode: resolvedMode,
-      ...(editorStateForStorage ? { editorState: editorStateForStorage } : {})
+      ...(originalGenerationBrief ? { originalGenerationBrief } : {}),
+      ...(editorStateForStorage ? { editorState: editorStateForStorage } : {}),
+      ...(lastAiEditMetadata ? { aiEdit: lastAiEditMetadata, aiEditHistory } : {})
     };
 
     await uploadBufferToStorage(storagePath, imagePart.buffer, imagePart.mimetype, true);
@@ -922,8 +1067,6 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
       width: undefined,
       height: undefined
     }));
-
-    const now = new Date().toISOString();
 
     if (resolvedMode === "replace" && sourceOutput) {
       const jobArtifacts = await createEditorSaveArtifacts({
@@ -939,7 +1082,8 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
         ...(typeof dimensions.height === "number" ? { height: dimensions.height } : {}),
         createdBy: viewer.userId,
         fileName: imagePart.filename,
-        saveMode: resolvedMode
+        saveMode: resolvedMode,
+        aiEditMetadata: currentAiEditMetadata
       });
       const { error } = await supabaseAdmin
         .from("creative_outputs")
@@ -984,7 +1128,8 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
         ...(typeof dimensions.height === "number" ? { height: dimensions.height } : {}),
         createdBy: viewer.userId,
         fileName: imagePart.filename,
-        saveMode: resolvedMode
+        saveMode: resolvedMode,
+        aiEditMetadata: currentAiEditMetadata
       });
 
       const rootOutputId = resolvedMode === "version" && sourceOutput

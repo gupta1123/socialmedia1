@@ -466,7 +466,10 @@ export default function OutputDetailPage() {
   const actualAspectRatio = imageNaturalSize ? formatImageAspectRatio(imageNaturalSize.width, imageNaturalSize.height) : null;
   const actualPixelSize = imageNaturalSize ? `${imageNaturalSize.width} × ${imageNaturalSize.height} px` : null;
   const actualFormatLabel = imageNaturalSize ? inferImageFormatLabel(imageNaturalSize.width, imageNaturalSize.height) : null;
-  const briefText = output?.previewContext?.brief?.prompt ?? deliverable?.briefText ?? null;
+  const originalBriefText = normalizeDisplayText(
+    deliverable?.briefText ?? output?.metadataJson?.originalGenerationBrief ?? output?.previewContext?.brief?.prompt ?? null
+  );
+  const aiEditInstructions = output ? getAiEditInstructionHistory(output.metadataJson) : [];
   const placement = channel && creativeFormat ? getPlacementSpec(channel, creativeFormat) : null;
   const settingsChips = [
     postType?.name ? { label: postType.name } : null,
@@ -722,11 +725,29 @@ export default function OutputDetailPage() {
             </details>
           </div>
 
-          {briefText ? (
+          {originalBriefText || aiEditInstructions.length > 0 ? (
             <section className="output-detail-section output-detail-brief-section">
-              <h2>Brief</h2>
-              <p className={`output-detail-brief-text${isBriefExpanded ? " is-expanded" : ""}`}>{briefText}</p>
-              {briefText.length > 180 ? (
+              <h2>Brief history</h2>
+              {originalBriefText ? (
+                <div className="output-detail-brief-block">
+                  <span>Original generation brief</span>
+                  <p className={`output-detail-brief-text${isBriefExpanded ? " is-expanded" : ""}`}>{originalBriefText}</p>
+                </div>
+              ) : null}
+              {aiEditInstructions.length > 0 ? (
+                <div className="output-detail-brief-block">
+                  <span>{aiEditInstructions.length === 1 ? "AI edit instruction" : "AI edit instructions"}</span>
+                  <div className="output-detail-edit-brief-list">
+                    {aiEditInstructions.map((item, index) => (
+                      <article className="output-detail-edit-brief" key={`${item.savedAt ?? "edit"}-${index}`}>
+                        <strong>{item.label}</strong>
+                        <p>{item.text}</p>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {(originalBriefText?.length ?? 0) > 180 ? (
                 <button className="output-detail-see-more" type="button" onClick={() => setIsBriefExpanded((value) => !value)}>
                   {isBriefExpanded ? "See less" : "See more"}
                 </button>
@@ -871,6 +892,64 @@ function formatAssetKind(kind: BrandAssetRecord["kind"]) {
   if (kind === "rera_qr") return "RERA";
   if (kind === "reference") return "Reference";
   return formatLabel(kind);
+}
+
+function normalizeDisplayText(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function getAiEditInstructionHistory(metadataJson: Record<string, unknown> | null | undefined) {
+  const metadata = asRecord(metadataJson) ?? {};
+  const rawHistory = Array.isArray(metadata.aiEditHistory)
+    ? metadata.aiEditHistory
+    : metadata.aiEdit
+      ? [metadata.aiEdit]
+      : [];
+
+  return rawHistory
+    .map((entry, index) => {
+      const record = asRecord(entry);
+      if (!record) {
+        return null;
+      }
+
+      const text = extractAiEditInstructionText(record);
+      if (!text) {
+        return null;
+      }
+
+      const savedAt = normalizeDisplayText(record.savedAt);
+      return {
+        label: rawHistory.length > 1 ? `Edit ${index + 1}` : "Edit",
+        text,
+        savedAt
+      };
+    })
+    .filter((item): item is { label: string; text: string; savedAt: string | null } => Boolean(item));
+}
+
+function extractAiEditInstructionText(record: Record<string, unknown>) {
+  const exactInput = asRecord(record.exactInput);
+  if (record.promptMode === "normal") {
+    const prompt = normalizeDisplayText(exactInput?.prompt);
+    if (prompt) {
+      return prompt;
+    }
+  }
+
+  if (record.promptMode === "list") {
+    const items = asStringArray(exactInput?.items);
+    if (items.length > 0) {
+      return items.join("\n");
+    }
+
+    const normalizedItems = asStringArray(exactInput?.normalizedItems);
+    if (normalizedItems.length > 0) {
+      return normalizedItems.join("\n");
+    }
+  }
+
+  return normalizeDisplayText(record.submittedPrompt);
 }
 
 function resolveUsedAssetsForOutput(output: CreativeOutputRecord, assets: BrandAssetRecord[]) {

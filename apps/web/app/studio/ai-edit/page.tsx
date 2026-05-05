@@ -1231,6 +1231,7 @@ function StudioAiEditPageContent({
     file: File;
     mergedLayerCount: number;
     preservedLayerCount: number;
+    aiEditMetadata: Record<string, unknown>;
   }) {
     if (!sessionToken) {
       setError("Edit applied, but auto-save could not run because your session is missing.");
@@ -1263,6 +1264,7 @@ function StudioAiEditPageContent({
         sourceImageFileName: payload.image.file.name,
         layerImages: editorDocument.layerImages,
         editorState: editorDocument.editorState,
+        aiEditMetadata: payload.aiEditMetadata,
       });
 
       const sourceMetadata = {

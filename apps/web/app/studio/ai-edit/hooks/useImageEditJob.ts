@@ -17,7 +17,10 @@ interface UseImageEditJobOptions {
   onError?: (error: string) => void;
 }
 
-type JobResult = AiImageEditResponse;
+export type ImageEditJobResult = AiImageEditResponse & {
+  jobId: string;
+  submittedPrompt: string;
+};
 
 export function useImageEditJob({ sessionToken, brandId, onError }: UseImageEditJobOptions) {
   const [isApplying, setIsApplying] = useState(false);
@@ -78,7 +81,7 @@ export function useImageEditJob({ sessionToken, brandId, onError }: UseImageEdit
     editPreset: ImageEditPreset,
     listPromptItems?: string[],
     promptMode?: "normal" | "list"
-  ): Promise<JobResult | null> => {
+  ): Promise<ImageEditJobResult | null> => {
     if (!sessionToken) {
       onError?.("Your session is missing. Refresh the page and try again.");
       return null;
@@ -121,7 +124,11 @@ export function useImageEditJob({ sessionToken, brandId, onError }: UseImageEdit
           if (!jobStatus.result) {
             throw new Error("AI edit completed without an image.");
           }
-          return jobStatus.result;
+          return {
+            ...jobStatus.result,
+            jobId: job.jobId,
+            submittedPrompt: resolvedPrompt,
+          };
         }
 
         if (jobStatus.status === "failed") {

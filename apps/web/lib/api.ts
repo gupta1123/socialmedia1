@@ -995,6 +995,7 @@ export function saveEditedCreativeOutput(
     sourceImageFileName?: string;
     layerImages?: Array<{ layerId: string; file: File | Blob; fileName?: string }>;
     editorState?: Record<string, unknown> | null;
+    aiEditMetadata?: Record<string, unknown> | null;
   }
 ) {
   const body = new FormData();
@@ -1017,6 +1018,10 @@ export function saveEditedCreativeOutput(
 
   if (payload.editorState) {
     body.append("editorState", JSON.stringify(payload.editorState));
+  }
+
+  if (payload.aiEditMetadata) {
+    body.append("aiEditMetadata", JSON.stringify(payload.aiEditMetadata));
   }
 
   return request<EditorSaveOutputResponse>("/api/creative/editor-save", token, {

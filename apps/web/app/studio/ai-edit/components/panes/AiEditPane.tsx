@@ -26,6 +26,7 @@ interface AiEditPaneProps {
     file: File;
     mergedLayerCount: number;
     preservedLayerCount: number;
+    aiEditMetadata: Record<string, unknown>;
   }) => Promise<void> | void;
 }
 
@@ -191,6 +192,27 @@ export function AiEditPane({ sessionToken, activeBrandId, onError, onStatus, onB
       );
 
       if (result) {
+        const normalizedListItems = listPromptItems.map((item) => item.trim()).filter((item) => item.length > 0);
+        const aiEditMetadata: Record<string, unknown> = {
+          source: "ai-edit",
+          promptMode,
+          exactInput: promptMode === "normal"
+            ? {
+                prompt,
+              }
+            : {
+                items: [...listPromptItems],
+                normalizedItems: normalizedListItems,
+              },
+          submittedPrompt: result.submittedPrompt,
+          jobId: result.jobId,
+          editPreset,
+          resultModel: result.model,
+          ...(typeof result.width === "number" ? { resultWidth: result.width } : {}),
+          ...(typeof result.height === "number" ? { resultHeight: result.height } : {}),
+          mergedLayerCount: layersToMerge.length,
+          preservedLayerCount: layersToPreserve.length,
+        };
         const nextFile = await sourceToFile(
           result.imageDataUrl ?? result.imageUrl,
           buildEditedFileName(state.currentImage.file.name),
@@ -219,6 +241,7 @@ export function AiEditPane({ sessionToken, activeBrandId, onError, onStatus, onB
             file: fileToSave,
             mergedLayerCount: layersToMerge.length,
             preservedLayerCount: layersToPreserve.length,
+            aiEditMetadata,
           });
         } finally {
           setIsAutoSaving(false);
