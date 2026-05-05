@@ -463,17 +463,38 @@ async function listCreativeV3VisualTemplates(params: {
     }));
 }
 
+class PromptEngineHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = "PromptEngineHttpError";
+  }
+}
+
 async function callPromptEngineV3(payload: Record<string, unknown>) {
   if (!env.PROMPT_ENGINE_V3_URL) {
     throw new Error("PROMPT_ENGINE_V3_URL is required for Creative V3 compile.");
   }
 
+  const baseUrl = env.PROMPT_ENGINE_V3_URL.replace(/\/+$/, "");
+  try {
+    return await callPromptEngineV3Async(baseUrl, payload);
+  } catch (error) {
+    if (error instanceof PromptEngineHttpError && [404, 405].includes(error.status)) {
+      return callPromptEngineV3Sync(baseUrl, payload);
+    }
+    throw error;
+  }
+}
+
+async function callPromptEngineV3Sync(baseUrl: string, payload: Record<string, unknown>) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), env.PROMPT_ENGINE_V3_TIMEOUT_SEC * 1000);
   timeout.unref?.();
 
   try {
-    const baseUrl = env.PROMPT_ENGINE_V3_URL.replace(/\/+$/, "");
     const response = await fetch(`${baseUrl}/compile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -490,6 +511,127 @@ async function callPromptEngineV3(payload: Record<string, unknown>) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function callPromptEngineV3Async(baseUrl: string, payload: Record<string, unknown>) {
+  const timeoutSeconds = env.PROMPT_ENGINE_V3_TIMEOUT_SEC;
+  const deadline = Date.now() + timeoutSeconds * 1000;
+  const start = await fetchPromptEngineJson(`${baseUrl}/compile-async`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!start.response.ok) {
+    throw new PromptEngineHttpError(
+      `Prompt engine V3 async start failed with ${start.response.status}: ${extractPromptEngineError(start.parsed, start.raw)}`,
+      start.response.status
+    );
+  }
+
+  const jobId = readStringField(start.parsed, "job_id") ?? readStringField(start.parsed, "jobId");
+  if (!jobId) {
+    throw new Error("Prompt engine V3 async start did not return a job id.");
+  }
+
+  const statusUrl = `${baseUrl}/compile-async/${encodeURIComponent(jobId)}`;
+  while (Date.now() < deadline) {
+    await delay(2000);
+    const statusResponse = await fetchPromptEngineJson(statusUrl, {
+      method: "GET",
+      headers: { Accept: "application/json" }
+    });
+
+    if (!statusResponse.response.ok) {
+      throw new PromptEngineHttpError(
+        `Prompt engine V3 async status failed with ${statusResponse.response.status}: ${extractPromptEngineError(
+          statusResponse.parsed,
+          statusResponse.raw
+        )}`,
+        statusResponse.response.status
+      );
+    }
+
+    const status = readStringField(statusResponse.parsed, "status");
+    if (status === "completed") {
+      if (!isPlainObject(statusResponse.parsed) || !("result" in statusResponse.parsed)) {
+        throw new Error("Prompt engine V3 async job completed without a result.");
+      }
+      return statusResponse.parsed.result;
+    }
+
+    if (status === "failed") {
+      throw new Error(`Prompt engine V3 async job failed: ${extractPromptEngineError(statusResponse.parsed, statusResponse.raw)}`);
+    }
+
+    if (!["queued", "running", "pending", "processing"].includes(status ?? "")) {
+      throw new Error(`Prompt engine V3 async job returned unknown status: ${status ?? "missing"}`);
+    }
+  }
+
+  throw new Error(`Prompt engine V3 async job timed out after ${timeoutSeconds}s.`);
+}
+
+async function fetchPromptEngineJson(url: string, init: RequestInit) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25_000);
+  timeout.unref?.();
+
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: controller.signal
+    });
+    const raw = await response.text();
+
+    let parsed: unknown = null;
+    if (raw) {
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        if (response.ok) {
+          throw new Error(`Prompt engine V3 returned invalid JSON from ${url}: ${raw.slice(0, 500)}`);
+        }
+      }
+    }
+
+    return { response, raw, parsed };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractPromptEngineError(parsed: unknown, raw: string) {
+  if (isPlainObject(parsed)) {
+    const error = parsed.error;
+    if (typeof error === "string") {
+      return error;
+    }
+    if (isPlainObject(error) && typeof error.message === "string") {
+      return error.message;
+    }
+    const detail = parsed.detail;
+    if (typeof detail === "string") {
+      return detail;
+    }
+    if (typeof parsed.message === "string") {
+      return parsed.message;
+    }
+  }
+
+  return raw.slice(0, 500);
+}
+
+function readStringField(value: unknown, key: string) {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+  const field = value[key];
+  return typeof field === "string" && field.trim() ? field : null;
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function localizeCreativeV3EngineResponse(params: {
