@@ -26,6 +26,8 @@ import {
   getCompileV2AsyncStatus,
   styleVariationLimit,
   getCreativeJob,
+  isUnauthorizedApiError,
+  isWorkspaceAccessApiError,
   submitFeedback,
   uploadBrandAsset
 } from "../../lib/api";
@@ -271,6 +273,26 @@ export function StudioProvider({
     });
   }, []);
 
+  const redirectToLoginForInvalidSession = useCallback(async () => {
+    const nextPath =
+      typeof window !== "undefined"
+        ? `${window.location.pathname}${window.location.search}`
+        : "/studio";
+    const loginPath =
+      nextPath && !nextPath.startsWith("/login")
+        ? `/login?next=${encodeURIComponent(nextPath)}`
+        : "/login";
+
+    clearBootstrapCache();
+    setSessionToken(null);
+    setBootstrap(null);
+    setActiveBrandIdState(null);
+    setUserEmail(null);
+    setPromptPackage(null);
+    await supabase.auth.signOut().catch(() => undefined);
+    router.replace(loginPath);
+  }, [router]);
+
   useEffect(() => {
     if (!messageState) {
       return;
@@ -293,15 +315,25 @@ export function StudioProvider({
         return;
       }
 
-      setSessionToken(accessToken);
       setUserEmail(email ?? null);
 
       const storedBrandId = window.localStorage.getItem("activeBrandId");
-      const payload = await bootstrapSession(
-        accessToken,
-        bootstrapMode,
-        bootstrapMode === "full" || bootstrapMode === "create" || bootstrapMode === "editor" ? storedBrandId ?? undefined : undefined
-      );
+      const scopedStoredBrandId =
+        bootstrapMode === "full" || bootstrapMode === "create" || bootstrapMode === "editor"
+          ? storedBrandId ?? undefined
+          : undefined;
+      let payload: BootstrapResponse;
+
+      try {
+        payload = await bootstrapSession(accessToken, bootstrapMode, scopedStoredBrandId);
+      } catch (error) {
+        if (scopedStoredBrandId && isWorkspaceAccessApiError(error)) {
+          clearBootstrapCache();
+          payload = await bootstrapSession(accessToken, bootstrapMode);
+        } else {
+          throw error;
+        }
+      }
 
       if (cancelled) {
         return;
@@ -310,6 +342,7 @@ export function StudioProvider({
       const normalizedPayload = normalizeBootstrapPayload(payload);
       setBootstrap(normalizedPayload);
       writeBootstrapCache(bootstrapMode, normalizedPayload);
+      setSessionToken(accessToken);
       setActiveBrandIdState((current) => {
         const resolved = resolveActiveBrandId(normalizedPayload.brands, current, storedBrandId);
         if (resolved) {
@@ -343,7 +376,7 @@ export function StudioProvider({
 
       if (!data.session?.access_token) {
         clearBootstrapCache();
-        router.push("/login");
+        router.replace("/login");
         return;
       }
 
@@ -359,12 +392,17 @@ export function StudioProvider({
         setBootstrap(null);
         setActiveBrandIdState(null);
         setUserEmail(null);
-        router.push("/login");
+        setPromptPackage(null);
+        router.replace("/login");
         return;
       }
 
       if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN" || event === "USER_UPDATED") {
         void hydrateSession(session.access_token, session.user.email ?? null).catch((error) => {
+          if (isUnauthorizedApiError(error)) {
+            void redirectToLoginForInvalidSession();
+            return;
+          }
           setMessage(error instanceof Error ? error.message : "Failed to refresh workspace session");
         });
       }
@@ -379,6 +417,10 @@ export function StudioProvider({
 
     void load()
       .catch((error) => {
+        if (isUnauthorizedApiError(error)) {
+          void redirectToLoginForInvalidSession();
+          return;
+        }
         setMessage(error instanceof Error ? error.message : "Failed to load workspace");
       })
       .finally(() => {
@@ -389,7 +431,7 @@ export function StudioProvider({
       cancelled = true;
       subscription.unsubscribe();
     };
-  }, [bootstrapMode, router]);
+  }, [bootstrapMode, redirectToLoginForInvalidSession, router]);
 
   const activeBrand = useMemo(
     () => bootstrap?.brands.find((brand) => brand.id === activeBrandId) ?? null,
@@ -483,7 +525,11 @@ export function StudioProvider({
           setBootstrap(normalizedPayload);
           setActiveBrandIdState((current) => current ?? normalizedPayload.brands[0]?.id ?? null);
         }
-      } catch {
+      } catch (error) {
+        if (isUnauthorizedApiError(error)) {
+          void redirectToLoginForInvalidSession();
+          return;
+        }
         // Background reconciliation should not interrupt the UI.
       }
     };
@@ -498,7 +544,7 @@ export function StudioProvider({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [activeBrandId, bootstrapMode, pathname, recentJobs, sessionToken]);
+  }, [activeBrandId, bootstrapMode, pathname, recentJobs, redirectToLoginForInvalidSession, sessionToken]);
 
   useEffect(() => {
     setBriefForm((state) => {
@@ -537,11 +583,25 @@ export function StudioProvider({
   const refresh = useCallback(async (preferredBrandId?: string) => {
     if (!sessionToken) return;
     const scopedBrandId = preferredBrandId ?? activeBrandId ?? undefined;
-    const payload = await bootstrapSession(
-      sessionToken,
-      bootstrapMode,
-      bootstrapMode === "full" || bootstrapMode === "create" || bootstrapMode === "editor" ? scopedBrandId : undefined
-    );
+    const shouldScopeBrand = bootstrapMode === "full" || bootstrapMode === "create" || bootstrapMode === "editor";
+    let payload: BootstrapResponse;
+
+    try {
+      payload = await bootstrapSession(sessionToken, bootstrapMode, shouldScopeBrand ? scopedBrandId : undefined);
+    } catch (error) {
+      if (isUnauthorizedApiError(error)) {
+        await redirectToLoginForInvalidSession();
+        return;
+      }
+
+      if (shouldScopeBrand && scopedBrandId && isWorkspaceAccessApiError(error)) {
+        clearBootstrapCache();
+        payload = await bootstrapSession(sessionToken, bootstrapMode);
+      } else {
+        throw error;
+      }
+    }
+
     const normalizedPayload = normalizeBootstrapPayload(payload);
     setBootstrap(normalizedPayload);
     writeBootstrapCache(bootstrapMode, normalizedPayload);
@@ -554,7 +614,7 @@ export function StudioProvider({
       }
       return resolved;
     });
-  }, [activeBrandId, bootstrapMode, sessionToken]);
+  }, [activeBrandId, bootstrapMode, redirectToLoginForInvalidSession, sessionToken]);
 
   function setActiveBrandId(value: string) {
     localStorage.setItem("activeBrandId", value);
@@ -1048,6 +1108,9 @@ function clearBootstrapCache() {
   try {
     window.sessionStorage.removeItem(`${BOOTSTRAP_CACHE_KEY_PREFIX}:full`);
     window.sessionStorage.removeItem(`${BOOTSTRAP_CACHE_KEY_PREFIX}:light`);
+    window.sessionStorage.removeItem(`${BOOTSTRAP_CACHE_KEY_PREFIX}:create`);
+    window.sessionStorage.removeItem(`${BOOTSTRAP_CACHE_KEY_PREFIX}:editor`);
+    window.localStorage.removeItem("activeBrandId");
   } catch {
     // Ignore storage errors during sign out.
   }

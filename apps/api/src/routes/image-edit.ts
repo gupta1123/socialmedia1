@@ -21,7 +21,10 @@ import { supabaseAdmin } from "../lib/supabase.js";
 import { createThumbnailFromBufferOrNull } from "../lib/thumbnails.js";
 import { ensurePostVersionForOutput } from "../lib/deliverable-flow.js";
 import { buildStoragePath, deriveAspectRatio, randomId, slugify } from "../lib/utils.js";
-import { buildProtectedImageEditPrompt } from "../lib/image-edit-prompt-protection.js";
+import {
+  buildProtectedImageEditPrompt,
+  detectProtectedImageEditPermissions
+} from "../lib/image-edit-prompt-protection.js";
 import sharp from "sharp";
 
 const ImageEditFieldsSchema = z.object({
@@ -40,6 +43,14 @@ const AsyncImageEditJobInputSchema = z.object({
   brandId: z.string().uuid(),
   workspaceId: z.string().uuid(),
   prompt: z.string().trim().min(3).max(2000),
+  protectedPrompt: z.string().trim().min(3).max(12000).optional(),
+  editPlan: z.record(z.unknown()).optional(),
+  promptStrategy: z.string().max(100).optional(),
+  plannerModel: z.string().max(200).nullable().optional(),
+  aiWrittenPrompt: z.string().max(6000).optional(),
+  guardrails: z.array(z.string().max(1000)).max(40).optional(),
+  negativePrompt: z.string().max(6000).optional(),
+  promptValidation: z.record(z.unknown()).optional(),
   sourceStoragePath: z.string().min(1),
   sourceContentType: z.string().min(1),
   sourceFileName: z.string().min(1),
@@ -238,10 +249,11 @@ async function applyConfiguredImageEdit(input: {
   provider: "fal" | "openai";
   model: string;
   quality?: OpenAiImageQuality;
+  protectedPrompt?: string;
   width?: number;
   height?: number;
 }) {
-  const protectedPrompt = buildProtectedImageEditPrompt(input.prompt);
+  const protectedPrompt = input.protectedPrompt ?? buildProtectedImageEditPrompt(input.prompt);
 
   return input.provider === "openai"
     ? applyOpenAiDirectEdit({
@@ -368,6 +380,7 @@ async function processImageEditJobLocally(params: {
       },
       provider: normalizeImageEditProvider(jobInput.provider),
       model: jobInput.model,
+      ...(jobInput.protectedPrompt ? { protectedPrompt: jobInput.protectedPrompt } : {}),
       ...(jobInput.quality ? { quality: jobInput.quality } : {}),
       ...(typeof jobInput.width === "number" ? { width: jobInput.width } : {}),
       ...(typeof jobInput.height === "number" ? { height: jobInput.height } : {})
@@ -540,6 +553,46 @@ type PromptComposerResult = {
   model: string | null;
 };
 
+const ImageEditPromptPlanRequestSchema = z.object({
+  brandId: z.string().uuid(),
+  prompt: z.string().trim().min(3).max(2000),
+  editPreset: z.enum(["v1_low", "v1_high", "v2_low", "v2_medium", "v2_high"]).optional(),
+  width: z.coerce.number().int().positive().max(10000).optional(),
+  height: z.coerce.number().int().positive().max(10000).optional()
+});
+
+const ImageEditAiPlanSchema = z.object({
+  intentSummary: z.string().trim().min(3).max(800),
+  allowedTargets: z.array(z.string().trim().min(1).max(120)).max(30).default([]),
+  protectedTargets: z.array(z.string().trim().min(1).max(160)).max(40).default([]),
+  requiresBuildingChange: z.boolean().default(false),
+  requiresLogoChange: z.boolean().default(false),
+  requiresTextComplianceChange: z.boolean().default(false),
+  requiresLayoutChange: z.boolean().default(false),
+  riskLevel: z.enum(["low", "medium", "high"]).default("medium"),
+  clarificationRequired: z.boolean().default(false),
+  aiWrittenPrompt: z.string().trim().min(3).max(4000),
+  guardrails: z.array(z.string().trim().min(3).max(600)).max(30).default([]),
+  negativePrompt: z.string().trim().max(3000).default("")
+});
+
+type ImageEditAiPlan = z.infer<typeof ImageEditAiPlanSchema>;
+
+type ImageEditPromptPlanResult = {
+  protectedPrompt: string;
+  editPlan: ImageEditAiPlan | Record<string, unknown>;
+  promptStrategy: "ai_planner" | "fixed_guardrail_fallback";
+  plannerModel: string | null;
+  aiWrittenPrompt: string;
+  guardrails: string[];
+  negativePrompt: string;
+  promptValidation: {
+    explicitPermissions: ReturnType<typeof detectProtectedImageEditPermissions>;
+    warnings: string[];
+    patchedGuardrailCount: number;
+  };
+};
+
 async function composePromptWithGemini(changes: string[]): Promise<PromptComposerResult | null> {
   if (!env.OPENROUTER_API_KEY) {
     return null;
@@ -614,6 +667,273 @@ function composePromptFallback(changes: string[]): PromptComposerResult {
   };
 }
 
+async function createImageEditPromptPlan(input: {
+  prompt: string;
+  editPreset?: ImageEditPreset;
+  provider?: string;
+  model?: string;
+  width?: number;
+  height?: number;
+}): Promise<ImageEditPromptPlanResult> {
+  const explicitPermissions = detectProtectedImageEditPermissions(input.prompt);
+  const aiPlan = await planImageEditWithAi(input).catch(() => null);
+  if (!aiPlan) {
+    const protectedPrompt = buildProtectedImageEditPrompt(input.prompt);
+    return {
+      protectedPrompt,
+      editPlan: {
+        intentSummary: "Fallback protected prompt was used because AI edit planning was unavailable.",
+        allowedTargets: [],
+        protectedTargets: [
+          "building/elevation truth",
+          "logos and brand marks",
+          "RERA, QR, compliance, contact details, and readable text",
+          "canvas, crop, camera angle, and global composition"
+        ],
+        requiresBuildingChange: explicitPermissions.buildingTruth,
+        requiresLogoChange: explicitPermissions.brandMarks,
+        requiresTextComplianceChange: explicitPermissions.textAndCompliance,
+        requiresLayoutChange: false,
+        riskLevel: "medium",
+        clarificationRequired: false,
+        aiWrittenPrompt: normalizeUserInstruction(input.prompt),
+        guardrails: [],
+        negativePrompt: ""
+      },
+      promptStrategy: "fixed_guardrail_fallback",
+      plannerModel: null,
+      aiWrittenPrompt: normalizeUserInstruction(input.prompt),
+      guardrails: [],
+      negativePrompt: "",
+      promptValidation: {
+        explicitPermissions,
+        warnings: ["AI planner unavailable; used fixed protected edit prompt fallback."],
+        patchedGuardrailCount: 0
+      }
+    };
+  }
+
+  const validation = validateAndPatchImageEditPlan(aiPlan.plan, input.prompt);
+  const protectedPrompt = buildImageEditProviderPrompt({
+    userPrompt: input.prompt,
+    plan: aiPlan.plan,
+    guardrails: validation.guardrails,
+    negativePrompt: validation.negativePrompt
+  });
+
+  return {
+    protectedPrompt,
+    editPlan: aiPlan.plan,
+    promptStrategy: "ai_planner",
+    plannerModel: aiPlan.model,
+    aiWrittenPrompt: aiPlan.plan.aiWrittenPrompt,
+    guardrails: validation.guardrails,
+    negativePrompt: validation.negativePrompt,
+    promptValidation: {
+      explicitPermissions: validation.explicitPermissions,
+      warnings: validation.warnings,
+      patchedGuardrailCount: validation.patchedGuardrailCount
+    }
+  };
+}
+
+async function planImageEditWithAi(input: {
+  prompt: string;
+  editPreset?: ImageEditPreset;
+  provider?: string;
+  model?: string;
+  width?: number;
+  height?: number;
+}): Promise<{ plan: ImageEditAiPlan; model: string } | null> {
+  if (!env.OPENROUTER_API_KEY) {
+    return null;
+  }
+
+  const model = env.OPENROUTER_PROMPT_COMPOSER_MODEL;
+  const response = await fetch(`${env.OPENROUTER_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: buildOpenRouterHeaders(),
+    body: JSON.stringify({
+      model,
+      temperature: 0.15,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are the intent planner and prompt writer for a real-estate AI image editor.",
+            "Your goal is to convert a user's edit request into a precise image-model prompt that preserves real-world property truth.",
+            "Think like a careful editor: identify what the user actually wants changed, what must stay locked, and what guardrails are needed for this specific request.",
+            "Protected content includes building architecture, elevation, facade, floor count, windows, balconies, construction progress, camera angle, crop, subject scale, logos, brand marks, RERA/QR/compliance blocks, phone/email/website details, and readable text.",
+            "Do not use generic blanket wording as the main solution. Write contextual instructions tied to the user's request.",
+            "If the user explicitly asks to change a protected item, allow only that exact item and preserve the rest of the protected content.",
+            "If the user asks for space, layout, color, background, or a new box, do not solve it by moving, resizing, redrawing, re-angling, cropping, or changing the building unless they explicitly asked for that.",
+            "If the request is ambiguous, preserve protected content and write the safest localized edit.",
+            "Return strict JSON only. No markdown, no code fences, no explanations outside JSON.",
+            "JSON shape: {\"intentSummary\":\"...\",\"allowedTargets\":[\"...\"],\"protectedTargets\":[\"...\"],\"requiresBuildingChange\":false,\"requiresLogoChange\":false,\"requiresTextComplianceChange\":false,\"requiresLayoutChange\":false,\"riskLevel\":\"low|medium|high\",\"clarificationRequired\":false,\"aiWrittenPrompt\":\"...\",\"guardrails\":[\"...\"],\"negativePrompt\":\"...\"}."
+          ].join(" ")
+        },
+        {
+          role: "user",
+          content: [
+            "Raw user edit instruction:",
+            normalizeUserInstruction(input.prompt),
+            "",
+            "Available technical context:",
+            `Edit preset: ${input.editPreset ?? "default"}`,
+            `Image edit provider: ${input.provider ?? "default"}`,
+            `Image edit model label: ${input.model ?? "default"}`,
+            `Canvas width: ${typeof input.width === "number" ? input.width : "unknown"}`,
+            `Canvas height: ${typeof input.height === "number" ? input.height : "unknown"}`,
+            "",
+            "Write the image-model prompt for this exact edit. The prompt must be directly usable by an image edit model."
+          ].join("\n")
+        }
+      ]
+    })
+  });
+
+  const text = await response.text();
+  const parsed = text.length > 0 ? safeParseJson(text) : null;
+  if (!response.ok) {
+    throw new Error(`Image edit prompt planning failed (${response.status})`);
+  }
+
+  const content = extractOpenRouterTextContent(parsed);
+  const planPayload = content ? safeParseJson(stripJsonFences(content)) : null;
+  const result = ImageEditAiPlanSchema.safeParse(planPayload);
+  if (!result.success) {
+    throw new Error("Image edit prompt planner returned invalid JSON.");
+  }
+
+  return { plan: result.data, model };
+}
+
+function validateAndPatchImageEditPlan(plan: ImageEditAiPlan, rawPrompt: string) {
+  const explicitPermissions = detectProtectedImageEditPermissions(rawPrompt);
+  const warnings: string[] = [];
+  const guardrails = dedupeStrings(plan.guardrails);
+
+  const addGuardrail = (value: string) => {
+    guardrails.push(value);
+  };
+
+  const initialGuardrailCount = guardrails.length;
+
+  if (!explicitPermissions.buildingTruth) {
+    if (plan.requiresBuildingChange) {
+      warnings.push("Planner marked building changes as required, but the raw user request did not explicitly ask for building/elevation changes.");
+    }
+    addGuardrail(
+      "Do not alter the building/elevation truth: preserve the exact architecture, facade, floor count, windows, balconies, construction progress, materials, camera angle, subject scale, and building position."
+    );
+  } else {
+    addGuardrail(
+      "Building/elevation change is allowed only for the exact building detail named by the user; preserve all other architectural and site details."
+    );
+  }
+
+  if (!explicitPermissions.brandMarks) {
+    if (plan.requiresLogoChange) {
+      warnings.push("Planner marked logo/brand changes as required, but the raw user request did not explicitly ask for logo or brand mark changes.");
+    }
+    addGuardrail("Do not remove, redraw, simplify, recolor, resize, or move any logo, wordmark, watermark, or brand mark.");
+  } else {
+    addGuardrail("Logo/brand change is allowed only for the exact logo or brand mark named by the user; preserve every other brand mark.");
+  }
+
+  if (!explicitPermissions.textAndCompliance) {
+    if (plan.requiresTextComplianceChange) {
+      warnings.push("Planner marked text/compliance changes as required, but the raw user request did not explicitly ask for text, RERA, QR, or contact changes.");
+    }
+    addGuardrail(
+      "Do not alter RERA details, QR codes, compliance blocks, phone numbers, emails, websites, CTAs, headlines, captions, disclaimers, or any existing readable text."
+    );
+  } else {
+    addGuardrail(
+      "Text/compliance changes are allowed only for the exact text, RERA, QR, contact, CTA, or compliance item named by the user; preserve all other readable text."
+    );
+  }
+
+  if (!explicitPermissions.buildingTruth && plan.requiresLayoutChange) {
+    addGuardrail(
+      "For layout or spacing changes, modify only the named editable non-building element; do not make room by resizing, moving, cropping, reframing, or redrawing the building."
+    );
+  }
+
+  addGuardrail("Apply only the requested edit. Do not add extra beautification, redesign, cleanup, new objects, or creative reinterpretation.");
+
+  const patchedGuardrails = dedupeStrings(guardrails);
+  const negativePrompt = dedupeStrings([
+    plan.negativePrompt,
+    !explicitPermissions.buildingTruth
+      ? "No building redraw, no elevation change, no facade change, no floor-count change, no window/balcony changes, no camera/crop/scale change."
+      : "",
+    !explicitPermissions.brandMarks ? "No logo or brand mark changes." : "",
+    !explicitPermissions.textAndCompliance ? "No RERA, QR, compliance, contact, CTA, headline, caption, or readable text changes." : ""
+  ])
+    .filter(Boolean)
+    .join(" ");
+
+  return {
+    explicitPermissions,
+    warnings,
+    guardrails: patchedGuardrails,
+    negativePrompt,
+    patchedGuardrailCount: Math.max(0, patchedGuardrails.length - initialGuardrailCount)
+  };
+}
+
+function buildImageEditProviderPrompt(input: {
+  userPrompt: string;
+  plan: ImageEditAiPlan;
+  guardrails: string[];
+  negativePrompt: string;
+}) {
+  const prompt = [
+    "User edit request:",
+    normalizeUserInstruction(input.userPrompt),
+    "",
+    "Interpreted goal:",
+    input.plan.intentSummary,
+    "",
+    "Image edit instruction:",
+    input.plan.aiWrittenPrompt,
+    "",
+    "Allowed edit targets:",
+    ...(input.plan.allowedTargets.length > 0 ? input.plan.allowedTargets.map((item) => `- ${item}`) : ["- Only the exact target described by the user."]),
+    "",
+    "Protected targets for this edit:",
+    ...(input.plan.protectedTargets.length > 0 ? input.plan.protectedTargets.map((item) => `- ${item}`) : ["- All image content not named by the user."]),
+    "",
+    "Mandatory guardrails:",
+    ...input.guardrails.map((item) => `- ${item}`),
+    "",
+    "Negative constraints:",
+    input.negativePrompt || "No unrequested changes."
+  ].join("\n");
+
+  return prompt.slice(0, 12000);
+}
+
+function normalizeUserInstruction(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function dedupeStrings(values: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+  }
+  return result;
+}
+
 function normalizeComposedPrompt(value: string | null) {
   if (!value) {
     return null;
@@ -655,6 +975,14 @@ function safeParseJson(value: string) {
   } catch {
     return null;
   }
+}
+
+function stripJsonFences(value: string) {
+  return value
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -737,6 +1065,62 @@ function getAiEditHistory(metadataJson: Record<string, unknown> | null | undefin
   }
 
   return isRecord(metadataJson.aiEdit) ? [cloneRecord(metadataJson.aiEdit)] : [];
+}
+
+async function hydrateAiEditMetadataWithProviderPrompt(
+  metadata: Record<string, unknown> | null,
+  log?: { warn: (payload: unknown, message?: string) => void }
+) {
+  if (!metadata) {
+    return null;
+  }
+
+  if (typeof metadata.protectedPrompt === "string" && metadata.protectedPrompt.trim()) {
+    return metadata;
+  }
+
+  const jobId = typeof metadata.jobId === "string" ? metadata.jobId : null;
+  if (!jobId) {
+    return metadata;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("compile_jobs")
+    .select("input_brief")
+    .eq("id", jobId)
+    .maybeSingle();
+
+  if (error) {
+    log?.warn({ error, jobId }, "failed to hydrate ai edit provider prompt");
+    return metadata;
+  }
+
+  const inputBrief = isRecord(data?.input_brief) ? data.input_brief : null;
+  const protectedPrompt = typeof inputBrief?.protectedPrompt === "string" ? inputBrief.protectedPrompt.trim() : "";
+  if (!protectedPrompt) {
+    return metadata;
+  }
+
+  const hydrated: Record<string, unknown> = {
+    ...metadata,
+    protectedPrompt
+  };
+  const passthroughKeys = [
+    "editPlan",
+    "promptStrategy",
+    "plannerModel",
+    "aiWrittenPrompt",
+    "guardrails",
+    "negativePrompt",
+    "promptValidation"
+  ];
+  for (const key of passthroughKeys) {
+    if (inputBrief && hydrated[key] === undefined && inputBrief[key] !== undefined) {
+      hydrated[key] = inputBrief[key];
+    }
+  }
+
+  return hydrated;
 }
 
 async function resolveOriginalGenerationBrief(sourceOutput: EditorSourceOutputRow | null) {
@@ -1036,7 +1420,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
 
     const now = new Date().toISOString();
     const previousAiEditHistory = getAiEditHistory(sourceOutput?.metadata_json ?? null);
-    const currentAiEditMetadata = parsedAiEditMetadata.value
+    const baseCurrentAiEditMetadata = parsedAiEditMetadata.value
       ? {
           ...cloneRecord(parsedAiEditMetadata.value),
           savedAt: now,
@@ -1044,6 +1428,10 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
           outputId
         }
       : null;
+    const currentAiEditMetadata = await hydrateAiEditMetadataWithProviderPrompt(
+      baseCurrentAiEditMetadata,
+      request.log
+    );
     const aiEditHistory = currentAiEditMetadata
       ? [...previousAiEditHistory, currentAiEditMetadata].slice(-50)
       : previousAiEditHistory.slice(-50);
@@ -1272,6 +1660,43 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
     }
   });
 
+  app.post("/api/creative/image-edit-plan", { preHandler: app.authenticate }, async (request, reply) => {
+    const viewer = request.viewer;
+    if (!viewer) {
+      return reply.unauthorized();
+    }
+
+    const parsedBody = ImageEditPromptPlanRequestSchema.safeParse(request.body ?? {});
+    if (!parsedBody.success) {
+      return reply.badRequest(parsedBody.error.issues[0]?.message ?? "Invalid image edit plan request");
+    }
+
+    const brand = await getBrand(parsedBody.data.brandId);
+    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
+
+    const resolvedPreset = resolveImageEditPreset(parsedBody.data.editPreset);
+    const plan = await createImageEditPromptPlan({
+      prompt: parsedBody.data.prompt,
+      editPreset: resolvedPreset.editPreset,
+      provider: resolvedPreset.provider,
+      model: resolvedPreset.model,
+      ...(typeof parsedBody.data.width === "number" ? { width: parsedBody.data.width } : {}),
+      ...(typeof parsedBody.data.height === "number" ? { height: parsedBody.data.height } : {})
+    });
+
+    return {
+      prompt: parsedBody.data.prompt,
+      protectedPrompt: plan.protectedPrompt,
+      editPlan: plan.editPlan,
+      promptStrategy: plan.promptStrategy,
+      plannerModel: plan.plannerModel,
+      aiWrittenPrompt: plan.aiWrittenPrompt,
+      guardrails: plan.guardrails,
+      negativePrompt: plan.negativePrompt,
+      promptValidation: plan.promptValidation
+    };
+  });
+
   app.post("/api/creative/image-edit-async", { preHandler: app.authenticate }, async (request, reply) => {
     const viewer = request.viewer;
     if (!viewer) {
@@ -1361,12 +1786,28 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
 
     try {
       await uploadBufferToStorage(sourceStoragePath, imagePart.buffer, imagePart.mimetype, true);
+      const promptPlan = await createImageEditPromptPlan({
+        prompt: parsedFields.data.prompt,
+        editPreset: resolvedPreset.editPreset,
+        provider: resolvedPreset.provider,
+        model: resolvedPreset.model,
+        ...(typeof parsedFields.data.width === "number" ? { width: parsedFields.data.width } : {}),
+        ...(typeof parsedFields.data.height === "number" ? { height: parsedFields.data.height } : {})
+      });
 
       const jobInput: ImageEditJobInput = {
         type: "image-edit",
         brandId: brand.id,
         workspaceId: brand.workspaceId,
         prompt: parsedFields.data.prompt,
+        protectedPrompt: promptPlan.protectedPrompt,
+        editPlan: promptPlan.editPlan,
+        promptStrategy: promptPlan.promptStrategy,
+        plannerModel: promptPlan.plannerModel,
+        aiWrittenPrompt: promptPlan.aiWrittenPrompt,
+        guardrails: promptPlan.guardrails,
+        negativePrompt: promptPlan.negativePrompt,
+        promptValidation: promptPlan.promptValidation,
         sourceStoragePath,
         sourceContentType: imagePart.mimetype,
         sourceFileName: imagePart.filename || "source.png",
@@ -1549,6 +1990,14 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
 
     try {
       const resolvedPreset = resolveImageEditPreset(parsedFields.data.editPreset);
+      const promptPlan = await createImageEditPromptPlan({
+        prompt: parsedFields.data.prompt,
+        editPreset: resolvedPreset.editPreset,
+        provider: resolvedPreset.provider,
+        model: resolvedPreset.model,
+        ...(typeof parsedFields.data.width === "number" ? { width: parsedFields.data.width } : {}),
+        ...(typeof parsedFields.data.height === "number" ? { height: parsedFields.data.height } : {})
+      });
       const editInput = {
         prompt: parsedFields.data.prompt,
         image: {
@@ -1561,6 +2010,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
         ...editInput,
         provider: resolvedPreset.provider,
         model: resolvedPreset.model,
+        protectedPrompt: promptPlan.protectedPrompt,
         ...(resolvedPreset.quality ? { quality: resolvedPreset.quality } : {}),
         ...(typeof parsedFields.data.width === "number" ? { width: parsedFields.data.width } : {}),
         ...(typeof parsedFields.data.height === "number" ? { height: parsedFields.data.height } : {})

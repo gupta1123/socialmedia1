@@ -132,7 +132,15 @@ const referenceFilterOptions: Array<{ value: RefModalKind; label: string; icon: 
 export default function CreateV3Page() {
   const searchParams = useSearchParams();
   const urlGenerationSessionId = searchParams.get("sessionId");
-  const { sessionToken, activeBrandId, activeAssets, activeBrand, setMessage } = useStudio();
+  const {
+    loading: studioLoading,
+    sessionToken,
+    bootstrap,
+    activeBrandId,
+    activeAssets,
+    activeBrand,
+    setMessage
+  } = useStudio();
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [postTypes, setPostTypes] = useState<PostTypeRecord[]>([]);
   const [festivals, setFestivals] = useState<FestivalRecord[]>([]);
@@ -177,9 +185,15 @@ export default function CreateV3Page() {
   const [refModalKind, setRefModalKind] = useState<RefModalKind>("all");
   const [refModalProjectId, setRefModalProjectId] = useState<string>(projectId || "");
   const [refSearchQuery, setRefSearchQuery] = useState("");
+  const activeBrandReady = Boolean(
+    !studioLoading &&
+      sessionToken &&
+      activeBrandId &&
+      bootstrap?.brands.some((brand) => brand.id === activeBrandId)
+  );
 
   useEffect(() => {
-    if (!sessionToken || !activeBrandId) return;
+    if (!activeBrandReady || !sessionToken || !activeBrandId) return;
     let cancelled = false;
 
     async function load() {
@@ -202,10 +216,10 @@ export default function CreateV3Page() {
     return () => {
       cancelled = true;
     };
-  }, [activeBrandId, sessionToken, setMessage]);
+  }, [activeBrandId, activeBrandReady, sessionToken, setMessage]);
 
   useEffect(() => {
-    if (!sessionToken || !activeBrandId) {
+    if (!activeBrandReady || !sessionToken || !activeBrandId) {
       setVisualTemplates([]);
       return;
     }
@@ -225,7 +239,7 @@ export default function CreateV3Page() {
     return () => {
       cancelled = true;
     };
-  }, [activeBrandId, format, postTypeId, projectId, sessionToken, setMessage]);
+  }, [activeBrandId, activeBrandReady, format, postTypeId, projectId, sessionToken, setMessage]);
 
   const selectedTemplate = useMemo(() => visualTemplates.find((t) => t.template_id === visualTemplateId) ?? null, [visualTemplateId, visualTemplates]);
 
@@ -355,7 +369,7 @@ export default function CreateV3Page() {
     () => generationRuns[0]?.result.result.variants.find((variant) => variant.variant_id === selectedVariantId) ?? generationRuns[0]?.result.result.variants[0] ?? null,
     [generationRuns, selectedVariantId]
   );
-  const canCompile = Boolean(activeBrandId && brief.trim().length >= 10 && !loading && (!isFestiveGreeting || festivalId));
+  const canCompile = Boolean(activeBrandReady && brief.trim().length >= 10 && !loading && (!isFestiveGreeting || festivalId));
   const selectedLogoAsset = logoAssets.find((asset) => asset.id === logoAssetId) ?? logoAssets[0] ?? null;
   const selectedAdditionalLogoAssets = additionalLogoAssetIds
     .map((assetId) => logoAssets.find((asset) => asset.id === assetId))

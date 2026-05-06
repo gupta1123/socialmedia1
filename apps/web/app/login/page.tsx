@@ -86,7 +86,8 @@ export default function LoginPage() {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      router.replace("/studio");
+      const next = new URLSearchParams(window.location.search).get("next");
+      router.replace(next?.startsWith("/studio") ? next : "/studio");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Authentication failed");
     } finally {

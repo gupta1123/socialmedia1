@@ -93,6 +93,33 @@ import type {
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const rawStyleVariationCount = Number(process.env.NEXT_PUBLIC_STYLE_VARIATION_COUNT ?? "3");
 
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly path: string;
+  readonly bodyText: string;
+
+  constructor(path: string, status: number, message: string, bodyText: string) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.path = path;
+    this.bodyText = bodyText;
+  }
+}
+
+export function isUnauthorizedApiError(error: unknown) {
+  return error instanceof ApiRequestError && error.status === 401;
+}
+
+export function isWorkspaceAccessApiError(error: unknown) {
+  if (!(error instanceof ApiRequestError)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return message.includes("workspace") && (message.includes("access") || message.includes("permission"));
+}
+
 export type CreativeFlowVersion = "v2";
 export type BootstrapMode = "full" | "light" | "create" | "editor";
 export const creativeFlowVersion: CreativeFlowVersion = "v2";
@@ -494,7 +521,7 @@ async function request<T>(path: string, token: string, init?: RequestInit) {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(extractApiErrorMessage(text, response.status));
+      throw new ApiRequestError(path, response.status, extractApiErrorMessage(text, response.status), text);
     }
 
     if (response.status === 204) {
