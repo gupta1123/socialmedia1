@@ -79,7 +79,10 @@ export default function OutputDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(1);
+  const [previewZoomOrigin, setPreviewZoomOrigin] = useState({ x: 50, y: 50 });
   const [isBriefExpanded, setIsBriefExpanded] = useState(false);
+  const [revisionNoteOpen, setRevisionNoteOpen] = useState(false);
+  const [revisionNote, setRevisionNote] = useState("");
   const [imageNaturalSize, setImageNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const [sessionStripIds, setSessionStripIds] = useState<string[] | null>(null);
 
@@ -92,6 +95,7 @@ export default function OutputDetailPage() {
   const membersLoadedRef = useRef(false);
   const neighborsBrandRef = useRef<string | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const previewImageRef = useRef<HTMLImageElement | null>(null);
   const sourceStripIds = useMemo(
     () => (routeStripIds.length > 0 ? routeStripIds : sessionStripIds ?? []),
     [routeStripIds, sessionStripIds]
@@ -159,6 +163,7 @@ export default function OutputDetailPage() {
 
   useEffect(() => {
     setPreviewZoom(1);
+    setPreviewZoomOrigin({ x: 50, y: 50 });
     setImageNaturalSize(null);
   }, [selectedOutputId]);
 
@@ -173,13 +178,11 @@ export default function OutputDetailPage() {
     }
 
     function handleWheel(event: WheelEvent) {
-      if (!event.ctrlKey && !event.metaKey) {
-        return;
-      }
-
       event.preventDefault();
-      const direction = event.deltaY > 0 ? -1 : 1;
-      setPreviewZoom((current) => clampPreviewZoom(current + direction * PREVIEW_ZOOM_STEP));
+      setPreviewZoomAroundPoint(event.deltaY > 0 ? -PREVIEW_ZOOM_STEP : PREVIEW_ZOOM_STEP, {
+        clientX: event.clientX,
+        clientY: event.clientY
+      });
     }
 
     stage.addEventListener("wheel", handleWheel, { passive: false });
@@ -470,6 +473,12 @@ export default function OutputDetailPage() {
     deliverable?.briefText ?? output?.metadataJson?.originalGenerationBrief ?? output?.previewContext?.brief?.prompt ?? null
   );
   const aiEditInstructions = output ? getAiEditInstructionHistory(output.metadataJson) : [];
+  const latestFirstAiEditInstructions = useMemo(
+    () => [...aiEditInstructions].reverse(),
+    [aiEditInstructions]
+  );
+  const groupedUsedAssets = useMemo(() => groupUsedAssets(usedAssets), [usedAssets]);
+  const hasGroupedUsedAssets = groupedUsedAssets.some((group) => group.assets.length > 0);
   const placement = channel && creativeFormat ? getPlacementSpec(channel, creativeFormat) : null;
   const settingsChips = [
     postType?.name ? { label: postType.name } : null,
@@ -524,6 +533,18 @@ export default function OutputDetailPage() {
     await refreshActiveOutput().catch(() => undefined);
   }
 
+  async function submitNeedsChangesWithNote() {
+    const note = revisionNote.trim();
+    if (!note) {
+      setMessage("Add a short note explaining what needs to change.");
+      return;
+    }
+
+    await submitDecision("close", note);
+    setRevisionNote("");
+    setRevisionNoteOpen(false);
+  }
+
   async function downloadActiveImage(format: "png" | "jpg") {
     if (!activeImageUrl || !output) {
       setMessage("This output does not have a downloadable image yet.");
@@ -576,6 +597,25 @@ export default function OutputDetailPage() {
   }
 
   function adjustPreviewZoom(delta: number) {
+    setPreviewZoomAroundPoint(delta);
+  }
+
+  function resetPreviewZoom() {
+    setPreviewZoom(1);
+    setPreviewZoomOrigin({ x: 50, y: 50 });
+  }
+
+  function setPreviewZoomAroundPoint(delta: number, focusPoint?: { clientX: number; clientY: number }) {
+    const image = previewImageRef.current;
+    if (image && focusPoint) {
+      const rect = image.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setPreviewZoomOrigin({
+          x: Math.min(100, Math.max(0, ((focusPoint.clientX - rect.left) / rect.width) * 100)),
+          y: Math.min(100, Math.max(0, ((focusPoint.clientY - rect.top) / rect.height) * 100))
+        });
+      }
+    }
     setPreviewZoom((current) => clampPreviewZoom(current + delta));
   }
 
@@ -626,6 +666,7 @@ export default function OutputDetailPage() {
                 alt={`Generated output ${output.outputIndex + 1}`}
                 className="output-detail-artwork"
                 decoding="async"
+                ref={previewImageRef}
                 onLoad={(event) => {
                   const { naturalWidth, naturalHeight } = event.currentTarget;
                   if (naturalWidth > 0 && naturalHeight > 0) {
@@ -633,7 +674,10 @@ export default function OutputDetailPage() {
                   }
                 }}
                 src={activeImageUrl}
-                style={{ transform: `scale(${previewZoom})` }}
+                style={{
+                  transform: `scale(${previewZoom})`,
+                  transformOrigin: `${previewZoomOrigin.x}% ${previewZoomOrigin.y}%`
+                }}
               />
             ) : (
               <div className="output-detail-artwork-fallback">No image preview</div>
@@ -648,7 +692,7 @@ export default function OutputDetailPage() {
             <button aria-label="Zoom in" onClick={() => adjustPreviewZoom(PREVIEW_ZOOM_STEP)} type="button">
               +
             </button>
-            <button aria-label="Reset zoom" onClick={() => setPreviewZoom(1)} type="button">
+            <button aria-label="Reset zoom" onClick={resetPreviewZoom} type="button">
               Fit
             </button>
           </div>
@@ -687,10 +731,11 @@ export default function OutputDetailPage() {
       <aside className="output-detail-rail" aria-label="Output details">
         <div className="output-detail-rail-header">
           <div>
-            <span className={`review-status-pill pill-review-${output.reviewState}`}>{formatReviewState(output.reviewState)}</span>
-            <p className="output-detail-saved-line">
+            <div className="output-detail-status-row">
+              <span className={`review-status-pill pill-review-${output.reviewState}`}>{formatReviewState(output.reviewState)}</span>
               {output.createdAt ? <span>{formatRelativeTime(output.createdAt)}</span> : null}
-              {output.createdAt && project?.name ? <span aria-hidden="true">•</span> : null}
+            </div>
+            <p className="output-detail-saved-line">
               {project?.name ? (
                 <span>
                   Saved in <strong>{project.name}</strong>
@@ -725,7 +770,7 @@ export default function OutputDetailPage() {
             </details>
           </div>
 
-          {originalBriefText || aiEditInstructions.length > 0 ? (
+          {originalBriefText || latestFirstAiEditInstructions.length > 0 ? (
             <section className="output-detail-section output-detail-brief-section">
               <h2>Brief history</h2>
               {originalBriefText ? (
@@ -734,15 +779,18 @@ export default function OutputDetailPage() {
                   <p className={`output-detail-brief-text${isBriefExpanded ? " is-expanded" : ""}`}>{originalBriefText}</p>
                 </div>
               ) : null}
-              {aiEditInstructions.length > 0 ? (
+              {latestFirstAiEditInstructions.length > 0 ? (
                 <div className="output-detail-brief-block">
-                  <span>{aiEditInstructions.length === 1 ? "AI edit instruction" : "AI edit instructions"}</span>
+                  <span>{latestFirstAiEditInstructions.length === 1 ? "AI edit instruction" : "AI edit instructions"}</span>
                   <div className="output-detail-edit-brief-list">
-                    {aiEditInstructions.map((item, index) => (
-                      <article className="output-detail-edit-brief" key={`${item.savedAt ?? "edit"}-${index}`}>
-                        <strong>{item.label}</strong>
+                    {latestFirstAiEditInstructions.map((item, index) => (
+                      <details className="output-detail-edit-brief" key={`${item.savedAt ?? "edit"}-${index}`} open={index === 0}>
+                        <summary>
+                          <strong>{index === 0 ? "Latest edit" : item.label}</strong>
+                          {item.savedAt ? <span>{formatRelativeTime(item.savedAt)}</span> : null}
+                        </summary>
                         <p>{item.text}</p>
-                      </article>
+                      </details>
                     ))}
                   </div>
                 </div>
@@ -766,24 +814,33 @@ export default function OutputDetailPage() {
             </section>
           ) : null}
 
-          {usedAssets.length > 0 ? (
+          {hasGroupedUsedAssets ? (
             <section className="output-detail-section output-detail-assets-section">
               <h2>Assets used</h2>
-              <div className="output-detail-used-assets">
-                {usedAssets.map((asset) => {
-                  const assetImageUrl = asset.mimeType.startsWith("image/") ? asset.thumbnailUrl ?? asset.previewUrl ?? asset.originalUrl ?? null : null;
-                  return (
-                    <article className={`output-detail-used-asset output-detail-used-asset-${asset.kind}`} key={asset.id}>
-                      <div className="output-detail-used-asset-thumb">
-                        {assetImageUrl ? <img alt="" decoding="async" loading="lazy" src={assetImageUrl} /> : <span>{asset.label.slice(0, 2)}</span>}
+              <div className="output-detail-used-asset-groups">
+                {groupedUsedAssets
+                  .filter((group) => group.assets.length > 0)
+                  .map((group) => (
+                    <div className="output-detail-used-asset-group" key={group.id}>
+                      <h3>{group.label}</h3>
+                      <div className="output-detail-used-assets">
+                        {group.assets.map((asset) => {
+                          const assetImageUrl = asset.mimeType.startsWith("image/") ? asset.thumbnailUrl ?? asset.previewUrl ?? asset.originalUrl ?? null : null;
+                          return (
+                            <article className={`output-detail-used-asset output-detail-used-asset-${asset.kind}`} key={asset.id}>
+                              <div className="output-detail-used-asset-thumb">
+                                {assetImageUrl ? <img alt="" decoding="async" loading="lazy" src={assetImageUrl} /> : <span>{asset.label.slice(0, 2)}</span>}
+                              </div>
+                              <div className="output-detail-used-asset-copy">
+                                <strong>{formatAssetKind(asset.kind)}</strong>
+                                <span title={asset.label}>{asset.label}</span>
+                              </div>
+                            </article>
+                          );
+                        })}
                       </div>
-                      <div className="output-detail-used-asset-copy">
-                        <strong>{formatAssetKind(asset.kind)}</strong>
-                        <span title={asset.label}>{asset.label}</span>
-                      </div>
-                    </article>
-                  );
-                })}
+                    </div>
+                  ))}
               </div>
             </section>
           ) : null}
@@ -797,14 +854,6 @@ export default function OutputDetailPage() {
                   <span className="output-detail-avatar-chip">
                     <span>{creatorInitial(createdBy)}</span>
                     <strong>{createdBy}</strong>
-                  </span>
-                </dd>
-              </div>
-              <div>
-                <dt>Review status</dt>
-                <dd>
-                  <span className={`review-status-pill pill-review-${output.reviewState}`}>
-                    {formatReviewState(output.reviewState)}
                   </span>
                 </dd>
               </div>
@@ -839,12 +888,45 @@ export default function OutputDetailPage() {
               <button
                 className="button button-ghost output-detail-action-button"
                 disabled={isRevisionPending}
-                onClick={() => void submitDecision("close", "Needs changes.")}
+                onClick={() => setRevisionNoteOpen((value) => !value)}
                 type="button"
               >
                 <IconMessage />
-                <span>{isRevisionPending ? "Saving…" : "Needs changes"}</span>
+                <span>{isRevisionPending ? "Saving…" : revisionNoteOpen ? "Hide note" : "Needs changes"}</span>
               </button>
+              {revisionNoteOpen ? (
+                <div className="output-detail-revision-note">
+                  <label htmlFor="output-detail-revision-note">What should change?</label>
+                  <textarea
+                    id="output-detail-revision-note"
+                    onChange={(event) => setRevisionNote(event.target.value)}
+                    placeholder="E.g. make the heading smaller and keep the building unchanged."
+                    rows={4}
+                    value={revisionNote}
+                  />
+                  <div className="output-detail-revision-note-actions">
+                    <button
+                      className="button button-ghost button-sm"
+                      disabled={isRevisionPending}
+                      onClick={() => {
+                        setRevisionNote("");
+                        setRevisionNoteOpen(false);
+                      }}
+                      type="button"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="button button-primary button-sm"
+                      disabled={isRevisionPending || revisionNote.trim().length === 0}
+                      onClick={() => void submitNeedsChangesWithNote()}
+                      type="button"
+                    >
+                      {isRevisionPending ? "Saving…" : "Send note"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <button
                 className="button button-ghost reject-button output-detail-action-button"
                 disabled={isRejectPending}
@@ -892,6 +974,31 @@ function formatAssetKind(kind: BrandAssetRecord["kind"]) {
   if (kind === "rera_qr") return "RERA";
   if (kind === "reference") return "Reference";
   return formatLabel(kind);
+}
+
+function groupUsedAssets(assets: BrandAssetRecord[]) {
+  return [
+    {
+      id: "references",
+      label: "References",
+      assets: assets.filter((asset) => asset.kind === "reference")
+    },
+    {
+      id: "logos",
+      label: "Logos",
+      assets: assets.filter((asset) => asset.kind === "logo")
+    },
+    {
+      id: "compliance",
+      label: "Compliance",
+      assets: assets.filter((asset) => asset.kind === "rera_qr")
+    },
+    {
+      id: "other",
+      label: "Other assets",
+      assets: assets.filter((asset) => asset.kind !== "reference" && asset.kind !== "logo" && asset.kind !== "rera_qr")
+    }
+  ];
 }
 
 function normalizeDisplayText(value: unknown) {
@@ -974,11 +1081,20 @@ function getOutputAssetIds(output: CreativeOutputRecord) {
   const metadata = asRecord(output.metadataJson) ?? {};
   const variant = asRecord(metadata.variant);
   const renderPackage = asRecord(metadata.render_package) ?? asRecord(variant?.render_package);
+  const providerReferences = [
+    ...asRecordArray(metadata.provider_references),
+    ...asRecordArray(renderPackage?.provider_references)
+  ];
   const ids = [
     ...asStringArray(metadata.reference_asset_ids),
+    ...asStringArray(metadata.provider_reference_asset_ids),
     ...asStringArray(renderPackage?.project_asset_ids),
     ...asStringArray(renderPackage?.reference_image_ids),
+    ...asStringArray(renderPackage?.provider_reference_asset_ids),
+    ...providerReferences.map((item) => asString(item.asset_id)),
     asString(renderPackage?.logo_asset_id),
+    asString(renderPackage?.secondary_logo_asset_id),
+    ...asStringArray(renderPackage?.additional_logo_asset_ids),
     asString(renderPackage?.rera_qr_asset_id)
   ].filter((value): value is string => Boolean(value));
 
@@ -989,10 +1105,19 @@ function getOutputStoragePaths(output: CreativeOutputRecord) {
   const metadata = asRecord(output.metadataJson) ?? {};
   const variant = asRecord(metadata.variant);
   const render = asRecord(metadata.render);
+  const renderPackage = asRecord(metadata.render_package) ?? asRecord(variant?.render_package);
+  const providerReferences = [
+    ...asRecordArray(metadata.provider_references),
+    ...asRecordArray(renderPackage?.provider_references)
+  ];
   const paths = [
     ...asStringArray(metadata.reference_storage_paths),
+    ...asStringArray(metadata.provider_reference_storage_paths),
     ...asStringArray(render?.referenceStoragePaths),
-    ...asStringArray(variant?.reference_storage_paths)
+    ...asStringArray(variant?.reference_storage_paths),
+    ...asStringArray(renderPackage?.reference_storage_paths),
+    ...asStringArray(renderPackage?.provider_reference_storage_paths),
+    ...providerReferences.map((item) => asString(item.storage_path))
   ];
   return Array.from(new Set(paths));
 }
@@ -1010,6 +1135,10 @@ function asString(value: unknown) {
 
 function asStringArray(value: unknown) {
   return Array.isArray(value) ? value.map(asString).filter((item): item is string => Boolean(item)) : [];
+}
+
+function asRecordArray(value: unknown) {
+  return Array.isArray(value) ? value.map(asRecord).filter((item): item is Record<string, unknown> => Boolean(item)) : [];
 }
 
 function clampPreviewZoom(value: number) {

@@ -158,7 +158,15 @@ def compile_final_provider_prompt(
         )
     else:
         copy_parts = []
-        for label, key in [("headline", "headline"), ("subheadline", "subheadline"), ("CTA", "cta")]:
+        for label, key in [
+            ("headline", "headline"),
+            ("subheadline", "subheadline"),
+            ("support copy", "support_copy"),
+            ("proof point", "proof_point_1"),
+            ("proof point", "proof_point_2"),
+            ("proof point", "proof_point_3"),
+            ("CTA", "cta"),
+        ]:
             value = str(copy.get(key) or "").strip()
             if value:
                 copy_parts.append("%s '%s'" % (label, value))

@@ -51,6 +51,7 @@ const TextStrategySchema = z.enum([
   "proof_badges",
   "poster_copy_block"
 ]);
+type CreativeV3TextStrategy = z.infer<typeof TextStrategySchema>;
 
 const ConstructionVisualModeSchema = z.enum(["auto", "actual_progress_reference", "visualized_progress_from_project_truth"]);
 const FestivalVisualScopeSchema = z.enum(["auto", "brand_only", "project_supported", "building_led"]);
@@ -595,6 +596,9 @@ function presetReraTriggerApplies(
     : isPlainRecord(presetJson.rera_qr_layer)
       ? presetJson.rera_qr_layer
       : null;
+  if (reraPresetIsDisabled(presetJson)) {
+    return false;
+  }
   const triggerTypes = Array.isArray(reraRules?.trigger_required_when_fact_types)
     ? reraRules.trigger_required_when_fact_types
     : Array.isArray(reraRules?.required_when_fact_types)
@@ -608,6 +612,15 @@ function presetReraTriggerApplies(
   if (triggers.has("typology") && /\b(?:[1-9]\s*(?:bhk|bed)|typology|configuration|apartment|flat|residence|villa)\b/i.test(brief)) return true;
   if (triggers.has("pricing") && (params.postTypeCode === "pricing-ad" || /\b(?:price|pricing|emi|offer|starting at|starting from|lakh|lac|crore|cr)\b|₹|rs\.?|inr/i.test(brief))) return true;
   return false;
+}
+
+function reraPresetIsDisabled(presetJson: Record<string, any>) {
+  const reraRules = isPlainRecord(presetJson.rera_qr)
+    ? presetJson.rera_qr
+    : isPlainRecord(presetJson.rera_qr_layer)
+      ? presetJson.rera_qr_layer
+      : null;
+  return reraRules?.mode === "disabled" || reraRules?.enabled === false || reraRules?.disabled === true;
 }
 
 async function listCreativeV3VisualTemplates(params: {
@@ -963,15 +976,23 @@ async function runCreativeV3Compile(params: {
       ? selectedPreset.preset_json as Record<string, any>
       : {};
   const presetRequiresLogo = Boolean(selectedPresetJson.logo?.required || selectedPresetJson.logo_layer?.required);
-  const presetRequiresReraQr = Boolean(selectedPresetJson.rera_qr?.required || selectedPresetJson.rera_qr_layer?.required);
-  const presetTriggersReraQr = presetReraTriggerApplies(selectedPresetJson, {
+  const presetDisablesReraQr = reraPresetIsDisabled(selectedPresetJson);
+  const presetRequiresReraQr = !presetDisablesReraQr && Boolean(selectedPresetJson.rera_qr?.required || selectedPresetJson.rera_qr_layer?.required);
+  const presetTriggersReraQr = !presetDisablesReraQr && presetReraTriggerApplies(selectedPresetJson, {
     brief: body.brief,
     project,
     postTypeCode: postType?.code ?? null
   });
   const effectiveIncludeLogo = body.includeLogo || Boolean(body.logoAssetId) || presetRequiresLogo;
-  const effectiveIncludeReraQr = body.includeReraQr || Boolean(body.reraQrAssetId) || presetRequiresReraQr || presetTriggersReraQr;
-  const additionalLogoAssetIds = Array.from(new Set(body.additionalLogoAssetIds.filter((assetId) => assetId !== logoAssetId)));
+  const effectiveIncludeReraQr = presetDisablesReraQr
+    ? false
+    : body.includeReraQr || Boolean(body.reraQrAssetId) || presetRequiresReraQr || presetTriggersReraQr;
+  const requestedAdditionalLogoAssetIds = Array.from(new Set(body.additionalLogoAssetIds.filter((assetId) => assetId !== logoAssetId)));
+  const additionalLogoAssetIds = filterAdditionalLogoAssetIdsForPreset({
+    requestedAdditionalLogoAssetIds,
+    selectedPresetJson,
+    log: params.log
+  });
   const presetContactItems = Array.isArray(selectedPresetJson.contact?.items)
     ? selectedPresetJson.contact.items.map(String).filter(Boolean)
     : [];
@@ -988,13 +1009,7 @@ async function runCreativeV3Compile(params: {
     return asset.projectId == null;
   });
   const effectiveAssetVariation = body.variantCount > 1 && body.assetVariation && selectedAssetIds.length === 0;
-  const effectiveTextStrategy = body.textStrategy !== "auto"
-    ? body.textStrategy
-    : typeof body.options.textStrategy === "string"
-      ? String(body.options.textStrategy)
-      : typeof body.options.text_strategy === "string"
-        ? String(body.options.text_strategy)
-        : "auto";
+  const effectiveTextStrategy = resolveEffectiveTextStrategy(body);
 
   const enginePayload = {
     capability: "image_prompt_generation",
@@ -1110,11 +1125,21 @@ async function runCreativeV3Compile(params: {
     projectName: project?.name ?? null,
     log: params.log
   }) as Record<string, any>;
-  const engineResponse = applyManualAdditionalLogoFallback({
+  const engineResponseWithAdditionalLogos = applyManualAdditionalLogoFallback({
     engineResponse: localizedEngineResponse,
     additionalLogoAssetIds,
     primaryLogoAssetId: effectiveIncludeLogo ? logoAssetId : null,
     selectedPresetJson
+  });
+  const engineResponse = normalizeCreativeV3ComplianceLayout({
+    engineResponse: engineResponseWithAdditionalLogos,
+    reraRequired: effectiveIncludeReraQr,
+    reraWebsiteUrl: workspaceComplianceSettings?.reraWebsiteUrl ?? "https://maharera.maharashtra.gov.in",
+    preferredContactWebsite: resolvePreferredContactWebsite({
+      projectProfile: projectProfile?.profile ?? null,
+      brandProfile: brandProfileVersion?.profile ?? null
+    }),
+    log: params.log
   });
   const status = engineResponse && typeof engineResponse === "object" && "status" in engineResponse
     ? String((engineResponse as { status?: unknown }).status)
@@ -1170,6 +1195,526 @@ function applyManualAdditionalLogoFallback(params: {
     ...params.engineResponse,
     variants: patchedVariants
   };
+}
+
+function filterAdditionalLogoAssetIdsForPreset(params: {
+  requestedAdditionalLogoAssetIds: string[];
+  selectedPresetJson: Record<string, any>;
+  log: FastifyBaseLogger;
+}) {
+  if (params.requestedAdditionalLogoAssetIds.length === 0) {
+    return [];
+  }
+  if (!isPlainRecord(params.selectedPresetJson) || Object.keys(params.selectedPresetJson).length === 0) {
+    return params.requestedAdditionalLogoAssetIds;
+  }
+  if (presetAllowsAdditionalLogos(params.selectedPresetJson)) {
+    return params.requestedAdditionalLogoAssetIds;
+  }
+  params.log.info(
+    { requestedAdditionalLogoAssetIds: params.requestedAdditionalLogoAssetIds },
+    "creative v3 ignored manually selected additional logos because selected preset does not allow secondary/additional logos"
+  );
+  return [];
+}
+
+function presetAllowsAdditionalLogos(presetJson: Record<string, unknown>) {
+  if (presetJson.allow_additional_logos === true || presetJson.allowAdditionalLogos === true) return true;
+  if (isPlainRecord(presetJson.logo_policy) && presetJson.logo_policy.allow_additional_logos === true) return true;
+  if (getPresetSecondaryLogoRules(presetJson as Record<string, any>)) return true;
+  if (Array.isArray(presetJson.additional_logos) && presetJson.additional_logos.length > 0) return true;
+  if (Array.isArray(presetJson.additional_logo_layers) && presetJson.additional_logo_layers.length > 0) return true;
+  if (Array.isArray(presetJson.logo_layers) && presetJson.logo_layers.some((item) => isPlainRecord(item) && item.primary !== true)) return true;
+  return false;
+}
+
+function resolveEffectiveTextStrategy(body: z.infer<typeof CreativeV3CompileRequestSchema>): CreativeV3TextStrategy {
+  if (body.textStrategy !== "auto") {
+    return body.textStrategy;
+  }
+
+  const directOption =
+    typeof body.options.textStrategy === "string"
+      ? body.options.textStrategy
+      : typeof body.options.text_strategy === "string"
+        ? body.options.text_strategy
+        : null;
+  const normalizedDirectOption = normalizeTextStrategyValue(directOption);
+  if (normalizedDirectOption) {
+    return normalizedDirectOption;
+  }
+
+  const textTreatment =
+    typeof body.options.textTreatment === "string"
+      ? body.options.textTreatment
+      : typeof body.options.text_treatment === "string"
+        ? body.options.text_treatment
+        : null;
+  if (textTreatment === "render_text") {
+    return "render_exact_text";
+  }
+  if (textTreatment === "reserve_space") {
+    return "reserve_editable_space";
+  }
+
+  return "auto";
+}
+
+function normalizeTextStrategyValue(value: string | null): CreativeV3TextStrategy | null {
+  if (!value) {
+    return null;
+  }
+  if (value === "render_text") {
+    return "render_exact_text";
+  }
+  if (value === "reserve_space") {
+    return "reserve_editable_space";
+  }
+  const parsed = TextStrategySchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function normalizeCreativeV3ComplianceLayout(params: {
+  engineResponse: Record<string, any>;
+  reraRequired: boolean;
+  reraWebsiteUrl: string;
+  preferredContactWebsite: { value: string; source: string } | null;
+  log: FastifyBaseLogger;
+}) {
+  const variants = Array.isArray(params.engineResponse?.variants) ? params.engineResponse.variants : [];
+  if (variants.length === 0) {
+    return params.engineResponse;
+  }
+
+  const warnings: string[] = [];
+  const patchedVariants = variants.map((variant, index) => {
+    const result = patchVariantComplianceLayout({
+      variant: isPlainRecord(variant) ? variant : {},
+      reraRequired: params.reraRequired,
+      reraWebsiteUrl: params.reraWebsiteUrl,
+      preferredContactWebsite: params.preferredContactWebsite
+    });
+    warnings.push(...result.warnings.map((warning) => `variant_${index + 1}: ${warning}`));
+    return result.variant;
+  });
+
+  if (warnings.length > 0) {
+    params.log.info({ warnings }, "creative v3 compliance layout normalized");
+  }
+
+  return {
+    ...params.engineResponse,
+    variants: patchedVariants,
+    validation: {
+      ...(isPlainRecord(params.engineResponse.validation) ? params.engineResponse.validation : {}),
+      policy_warnings: [
+        ...readStringArray(isPlainRecord(params.engineResponse.validation) ? params.engineResponse.validation.policy_warnings : null),
+        ...warnings
+      ]
+    }
+  };
+}
+
+function patchVariantComplianceLayout(params: {
+  variant: Record<string, any>;
+  reraRequired: boolean;
+  reraWebsiteUrl: string;
+  preferredContactWebsite: { value: string; source: string } | null;
+}) {
+  const renderPackage = isPlainRecord(params.variant.render_package) ? params.variant.render_package : {};
+  const reraRules = isPlainRecord(renderPackage.rera_qr_rules) ? renderPackage.rera_qr_rules : null;
+  const hasReraLayer = params.reraRequired || Boolean(renderPackage.rera_qr_asset_id) || reraRules?.required === true;
+  const reraPosition = hasReraLayer ? readPosition(reraRules, "top_right") : null;
+  const warnings: string[] = [];
+  let changed = false;
+
+  let logoRules = isPlainRecord(renderPackage.logo_rules) ? { ...renderPackage.logo_rules } : null;
+  const hasSecondaryLogoAsset = typeof renderPackage.secondary_logo_asset_id === "string" && renderPackage.secondary_logo_asset_id.trim().length > 0;
+  let secondaryLogoRules = hasSecondaryLogoAsset && isPlainRecord(renderPackage.secondary_logo_rules) ? { ...renderPackage.secondary_logo_rules } : null;
+  let contactRules = isPlainRecord(renderPackage.contact_rules) ? { ...renderPackage.contact_rules } : null;
+  const promptPatch: ResolvedPromptPatch = {};
+  const shouldDropStaleSecondaryLogoRules = !hasSecondaryLogoAsset && isPlainRecord(renderPackage.secondary_logo_rules);
+  if (shouldDropStaleSecondaryLogoRules) {
+    changed = true;
+  }
+
+  if (hasReraLayer && reraPosition && logoRules) {
+    const currentLogoPosition = readPosition(logoRules, "top_left");
+    if (positionsConflict(currentLogoPosition, reraPosition)) {
+      const resolvedLogoPosition = resolveLogoPositionAwayFromRera(logoRules, reraPosition);
+      if (resolvedLogoPosition !== currentLogoPosition) {
+        logoRules = {
+          ...logoRules,
+          position: resolvedLogoPosition
+        };
+        promptPatch.logoPosition = resolvedLogoPosition;
+        changed = true;
+        warnings.push(`moved primary logo from ${currentLogoPosition} to ${resolvedLogoPosition} because RERA uses ${reraPosition}`);
+      }
+    }
+  }
+
+  if (hasReraLayer && reraPosition && secondaryLogoRules) {
+    const primaryPosition = logoRules ? readPosition(logoRules, "top_left") : null;
+    const secondaryPosition = readPosition(secondaryLogoRules, "top_left");
+    if (
+      positionsConflict(secondaryPosition, reraPosition) ||
+      (primaryPosition && positionsConflict(secondaryPosition, primaryPosition))
+    ) {
+      const resolvedSecondaryPosition = resolveSecondaryLogoPosition({
+        secondaryRules: secondaryLogoRules,
+        primaryPosition,
+        reraPosition
+      });
+      if (resolvedSecondaryPosition !== secondaryPosition) {
+        secondaryLogoRules = {
+          ...secondaryLogoRules,
+          position: resolvedSecondaryPosition
+        };
+        promptPatch.secondaryLogoPosition = resolvedSecondaryPosition;
+        changed = true;
+        warnings.push(`moved secondary logo from ${secondaryPosition} to ${resolvedSecondaryPosition} to avoid brand/compliance overlap`);
+      }
+    }
+  }
+
+  if (contactRules) {
+    const contactPatch = patchContactWebsiteSource({
+      contactRules,
+      reraWebsiteUrl: params.reraWebsiteUrl,
+      preferredContactWebsite: params.preferredContactWebsite
+    });
+    if (contactPatch.changed && contactPatch.websiteReplacement) {
+      contactRules = contactPatch.contactRules;
+      promptPatch.websiteReplacement = contactPatch.websiteReplacement;
+      changed = true;
+      warnings.push("replaced RERA website in footer/contact with project or brand website");
+    }
+  }
+
+  if (logoRules) {
+    promptPatch.logoPosition ??= readPosition(logoRules, "top_left");
+  }
+  if (secondaryLogoRules) {
+    promptPatch.secondaryLogoPosition ??= readPosition(secondaryLogoRules, "top_left");
+  }
+  const contactWebsite = readContactWebsiteValue(contactRules);
+  if (
+    contactWebsite &&
+    params.preferredContactWebsite &&
+    !isReraWebsiteValue(contactWebsite, params.reraWebsiteUrl, undefined)
+  ) {
+    promptPatch.websiteReplacement ??= {
+      from: params.reraWebsiteUrl,
+      to: contactWebsite
+    };
+  }
+
+  if (!changed && !hasResolvedPromptPatch(promptPatch)) {
+    return { variant: params.variant, warnings };
+  }
+
+  const sanitizedRenderPackage = shouldDropStaleSecondaryLogoRules
+    ? omitRecordKeys(renderPackage, ["secondary_logo_rules", "secondary_logo_asset_id"])
+    : renderPackage;
+  const patchedRenderPackage = {
+    ...sanitizedRenderPackage,
+    ...(logoRules ? { logo_rules: logoRules } : {}),
+    ...(secondaryLogoRules ? { secondary_logo_rules: secondaryLogoRules } : {}),
+    ...(contactRules ? { contact_rules: contactRules } : {})
+  };
+  const patchedPromptFields = patchResolvedPromptFields(patchedRenderPackage, promptPatch);
+  const layoutContract = patchLayoutContractForResolvedPolicy({
+    layoutContract: isPlainRecord(params.variant.layout_contract) ? params.variant.layout_contract : null,
+    logoRules,
+    secondaryLogoRules,
+    contactRules,
+    warnings
+  });
+
+  return {
+    variant: {
+      ...params.variant,
+      render_package: {
+        ...patchedRenderPackage,
+        ...patchedPromptFields
+      },
+      layout_contract: layoutContract
+    },
+    warnings
+  };
+}
+
+type ResolvedPromptPatch = {
+  logoPosition?: string;
+  secondaryLogoPosition?: string;
+  websiteReplacement?: { from: string; to: string };
+};
+
+function hasResolvedPromptPatch(patch: ResolvedPromptPatch) {
+  return Boolean(patch.logoPosition || patch.secondaryLogoPosition || patch.websiteReplacement);
+}
+
+function readContactWebsiteValue(contactRules: Record<string, unknown> | null) {
+  if (!contactRules || !isPlainRecord(contactRules.values)) {
+    return null;
+  }
+  const value = contactRules.values.website;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function patchResolvedPromptFields(renderPackage: Record<string, unknown>, patch: ResolvedPromptPatch) {
+  const promptFieldNames = ["prompt", "compiled_prompt", "provider_prompt", "draft_prompt"] as const;
+  const patched: Record<string, unknown> = {};
+  for (const fieldName of promptFieldNames) {
+    const value = renderPackage[fieldName];
+    if (typeof value !== "string" || !value.trim()) continue;
+    patched[fieldName] = patchResolvedPromptText(value, patch);
+  }
+  if (patch.websiteReplacement) {
+    const exactTextLayers = renderPackage.exact_text_layers;
+    if (typeof exactTextLayers !== "undefined") {
+      patched.exact_text_layers = replaceStringDeep(
+        exactTextLayers,
+        patch.websiteReplacement.from,
+        patch.websiteReplacement.to
+      );
+    }
+  }
+  return patched;
+}
+
+function patchResolvedPromptText(value: string, patch: ResolvedPromptPatch) {
+  let next = value;
+  if (patch.websiteReplacement) {
+    next = next.split(patch.websiteReplacement.from).join(patch.websiteReplacement.to);
+  }
+  if (patch.logoPosition) {
+    const positionText = formatLogoPosition(patch.logoPosition);
+    next = next
+      .replace(/Logo position:\s*top[-_ ]right/gi, `Logo position: ${positionText}`)
+      .replace(/Logo position:\s*top[-_ ]left/gi, `Logo position: ${positionText}`)
+      .replace(/Primary logo must be placed at top[-_ ]right/gi, `Primary logo must be placed at ${positionText}`)
+      .replace(/Primary logo must be placed at top[-_ ]left/gi, `Primary logo must be placed at ${positionText}`)
+      .replace(/supplied logo reference exactly once as a separate flat brand mark at top[-_ ]right/gi, `supplied logo reference exactly once as a separate flat brand mark at ${positionText}`)
+      .replace(/supplied logo reference exactly once as a separate flat brand mark at top[-_ ]left/gi, `supplied logo reference exactly once as a separate flat brand mark at ${positionText}`);
+  }
+  if (patch.secondaryLogoPosition) {
+    const positionText = formatLogoPosition(patch.secondaryLogoPosition);
+    next = next
+      .replace(/Secondary logo position:\s*top[-_ ]right/gi, `Secondary logo position: ${positionText}`)
+      .replace(/Secondary logo position:\s*top[-_ ]left/gi, `Secondary logo position: ${positionText}`)
+      .replace(/secondary logo reference exactly once at top right/gi, `secondary logo reference exactly once at ${positionText}`)
+      .replace(/secondary logo reference exactly once at top_right/gi, `secondary logo reference exactly once at ${positionText}`)
+      .replace(/secondary logo reference exactly once at top left/gi, `secondary logo reference exactly once at ${positionText}`);
+  }
+
+  const overrideLines: string[] = [];
+  if (patch.logoPosition) {
+    overrideLines.push(`Primary logo must be placed at ${formatLogoPosition(patch.logoPosition)}.`);
+  }
+  if (patch.secondaryLogoPosition) {
+    overrideLines.push(`Secondary logo must be placed at ${formatLogoPosition(patch.secondaryLogoPosition)} with clear spacing from the primary logo and RERA block.`);
+  }
+  if (patch.websiteReplacement) {
+    overrideLines.push(`Footer/contact website must use ${patch.websiteReplacement.to}; MahaRERA URLs belong only inside the RERA compliance block.`);
+  }
+
+  if (overrideLines.length === 0) return next;
+  return `${next}\n\nResolved brand/compliance layout, highest priority: ${overrideLines.join(" ")}`;
+}
+
+function patchLayoutContractForResolvedPolicy(params: {
+  layoutContract: Record<string, unknown> | null;
+  logoRules: Record<string, unknown> | null;
+  secondaryLogoRules: Record<string, unknown> | null;
+  contactRules: Record<string, unknown> | null;
+  warnings: string[];
+}) {
+  const layoutContract = params.layoutContract ?? {};
+  const logoLayer = isPlainRecord(layoutContract.logo_layer) && params.logoRules
+    ? { ...layoutContract.logo_layer, position: params.logoRules.position }
+    : layoutContract.logo_layer;
+  const secondaryLogoLayer = isPlainRecord(layoutContract.secondary_logo_layer) && params.secondaryLogoRules
+    ? { ...layoutContract.secondary_logo_layer, position: params.secondaryLogoRules.position }
+    : layoutContract.secondary_logo_layer;
+  const contactLayer = isPlainRecord(layoutContract.contact_layer) && params.contactRules
+    ? { ...layoutContract.contact_layer, position: params.contactRules.position, values: params.contactRules.values }
+    : layoutContract.contact_layer;
+
+  return {
+    ...layoutContract,
+    ...(typeof logoLayer !== "undefined" ? { logo_layer: logoLayer } : {}),
+    ...(typeof secondaryLogoLayer !== "undefined" ? { secondary_logo_layer: secondaryLogoLayer } : {}),
+    ...(typeof contactLayer !== "undefined" ? { contact_layer: contactLayer } : {}),
+    prompt_audit: {
+      ...(isPlainRecord(layoutContract.prompt_audit) ? layoutContract.prompt_audit : {}),
+      compliance_layout_normalizer: {
+        applied: true,
+        warnings: params.warnings
+      }
+    }
+  };
+}
+
+function patchContactWebsiteSource(params: {
+  contactRules: Record<string, unknown>;
+  reraWebsiteUrl: string;
+  preferredContactWebsite: { value: string; source: string } | null;
+}) {
+  const values = isPlainRecord(params.contactRules.values) ? { ...params.contactRules.values } : {};
+  const sources = isPlainRecord(params.contactRules.sources) ? { ...params.contactRules.sources } : {};
+  const website = typeof values.website === "string" ? values.website.trim() : "";
+  const websiteSource = typeof sources.website === "string" ? sources.website : "";
+  if (!website || !params.preferredContactWebsite) {
+    return { changed: false, contactRules: params.contactRules, websiteReplacement: null as null };
+  }
+  if (!isReraWebsiteValue(website, params.reraWebsiteUrl, websiteSource)) {
+    return { changed: false, contactRules: params.contactRules, websiteReplacement: null as null };
+  }
+  const nextWebsite = params.preferredContactWebsite.value;
+  if (normalizeUrlForComparison(nextWebsite) === normalizeUrlForComparison(website)) {
+    return { changed: false, contactRules: params.contactRules, websiteReplacement: null as null };
+  }
+  return {
+    changed: true,
+    contactRules: {
+      ...params.contactRules,
+      values: {
+        ...values,
+        website: nextWebsite
+      },
+      sources: {
+        ...sources,
+        website: params.preferredContactWebsite.source
+      }
+    },
+    websiteReplacement: {
+      from: website,
+      to: nextWebsite
+    }
+  };
+}
+
+function resolvePreferredContactWebsite(params: {
+  projectProfile: unknown;
+  brandProfile: unknown;
+}) {
+  const candidates = [
+    readNestedString(params.projectProfile, ["contact", "website"], "project.profile.contact.website"),
+    readNestedString(params.projectProfile, ["website"], "project.profile.website"),
+    readNestedString(params.projectProfile, ["websiteUrl"], "project.profile.websiteUrl"),
+    readNestedString(params.brandProfile, ["contact", "website"], "brand.profile.contact.website"),
+    readNestedString(params.brandProfile, ["website"], "brand.profile.website"),
+    readNestedString(params.brandProfile, ["websiteUrl"], "brand.profile.websiteUrl")
+  ].filter((item): item is { value: string; source: string } => Boolean(item && item.value));
+  return candidates.find((item) => !isReraWebsiteValue(item.value, "https://maharera.maharashtra.gov.in", item.source)) ?? null;
+}
+
+function readNestedString(value: unknown, path: string[], source: string) {
+  let current: unknown = value;
+  for (const key of path) {
+    if (!isPlainRecord(current)) return null;
+    current = current[key];
+  }
+  return typeof current === "string" && current.trim()
+    ? { value: current.trim(), source }
+    : null;
+}
+
+function isReraWebsiteValue(value: string, reraWebsiteUrl: string, source = "") {
+  const normalizedValue = normalizeUrlForComparison(value);
+  const normalizedRera = normalizeUrlForComparison(reraWebsiteUrl);
+  return (
+    normalizedValue === normalizedRera ||
+    normalizedValue.includes("maharera.maharashtra.gov.in") ||
+    /rera_compliance|maharera|rera/i.test(source)
+  );
+}
+
+function normalizeUrlForComparison(value: string) {
+  return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+}
+
+function readPosition(rules: Record<string, unknown> | null | undefined, fallback: string) {
+  return typeof rules?.position === "string" && rules.position.trim()
+    ? rules.position.trim()
+    : fallback;
+}
+
+function positionsConflict(a: string, b: string) {
+  if (a === b) return true;
+  const bucketA = positionBucket(a);
+  const bucketB = positionBucket(b);
+  if (bucketA !== bucketB) return false;
+  return !(isNearPrimaryPosition(a) || isNearPrimaryPosition(b));
+}
+
+function positionBucket(position: string) {
+  if (position.startsWith("top_left")) return "top_left";
+  if (position.startsWith("top_right")) return "top_right";
+  if (position.startsWith("bottom_left")) return "bottom_left";
+  if (position.startsWith("bottom_right")) return "bottom_right";
+  if (position.startsWith("bottom_center") || position === "bottom_footer" || position === "bottom_signature") return "bottom";
+  return position;
+}
+
+function isNearPrimaryPosition(position: string) {
+  return position === "top_left_near_primary" || position === "top_right_near_primary";
+}
+
+function resolveLogoPositionAwayFromRera(logoRules: Record<string, unknown>, reraPosition: string) {
+  const allowedPositions = readStringArray(logoRules.allowed_positions);
+  const candidates = allowedPositions.length > 0
+    ? allowedPositions
+    : ["top_left", "top_right", "bottom_signature", "bottom_left", "bottom_right", "top_center"];
+  const preferred = reraPosition.startsWith("top_right")
+    ? ["top_left", "bottom_signature", "bottom_left", "bottom_right", "top_center"]
+    : reraPosition.startsWith("top_left")
+      ? ["top_right", "bottom_signature", "bottom_right", "bottom_left", "top_center"]
+      : ["top_left", "top_right", "bottom_signature", "bottom_left", "bottom_right", "top_center"];
+  return preferred.find((position) => candidates.includes(position) && !positionsConflict(position, reraPosition))
+    ?? candidates.find((position) => !positionsConflict(position, reraPosition))
+    ?? "top_left";
+}
+
+function resolveSecondaryLogoPosition(params: {
+  secondaryRules: Record<string, unknown>;
+  primaryPosition: string | null;
+  reraPosition: string;
+}) {
+  if (params.primaryPosition?.startsWith("top_left") && !params.reraPosition.startsWith("top_left")) {
+    return "top_left_near_primary";
+  }
+  if (params.primaryPosition?.startsWith("top_right") && !params.reraPosition.startsWith("top_right")) {
+    return "top_right_near_primary";
+  }
+  const candidates = [
+    "top_left_near_primary",
+    "top_right_near_primary",
+    "top_center",
+    "bottom_signature",
+    "bottom_left",
+    "bottom_right"
+  ];
+  return candidates.find((position) => (
+    !positionsConflict(position, params.reraPosition) &&
+    (!params.primaryPosition || !positionsConflict(position, params.primaryPosition))
+  )) ?? "top_left_near_primary";
+}
+
+function replaceStringDeep(value: unknown, from: string, to: string): unknown {
+  if (typeof value === "string") return value.split(from).join(to);
+  if (Array.isArray(value)) return value.map((item) => replaceStringDeep(item, from, to));
+  if (isPlainRecord(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replaceStringDeep(item, from, to)]));
+  }
+  return value;
+}
+
+function omitRecordKeys(source: Record<string, unknown>, keys: string[]) {
+  const blocked = new Set(keys);
+  return Object.fromEntries(Object.entries(source).filter(([key]) => !blocked.has(key)));
 }
 
 function patchVariantManualAdditionalLogos(params: {
@@ -1336,7 +1881,12 @@ function getPresetSecondaryLogoRules(presetJson?: Record<string, any> | null) {
     : isPlainRecord(presetJson.secondary_logo_layer)
       ? presetJson.secondary_logo_layer
       : null;
+  if (secondaryLogoPresetIsDisabled(rules)) return null;
   return rules ? { ...rules } : null;
+}
+
+function secondaryLogoPresetIsDisabled(rules: Record<string, unknown> | null) {
+  return !rules || rules.mode === "disabled" || rules.enabled === false || rules.disabled === true || rules.required === false;
 }
 
 function buildPresetSecondaryLogoRules(rules: Record<string, any> | null, assetId: string) {
@@ -1691,6 +2241,15 @@ function readNumericRule(rules: Record<string, unknown> | null | undefined, key:
 }
 
 function formatLogoPosition(position: string) {
+  if (position === "top_left_near_primary") {
+    return "top-left logo group, beside or below the primary logo";
+  }
+  if (position === "top_right_near_primary") {
+    return "top-right logo group, beside or below the primary logo";
+  }
+  if (position === "top_center") {
+    return "top-center";
+  }
   return position
     .replaceAll("_", "-")
     .replace("bottom-signature", "bottom signature area");
@@ -2099,21 +2658,40 @@ async function persistCreativeV3CompileRun(params: {
   createdBy: string | null;
   log: { warn: (payload: unknown, message?: string) => void };
 }) {
-  await supabaseAdmin.from("creative_v3_compile_runs").insert({
+  const status = ["ready", "ready_with_warnings", "blocked", "needs_input", "failed"].includes(params.status) ? params.status : "failed";
+  const payload = {
     workspace_id: params.brand.workspaceId,
     brand_id: params.brand.id,
     project_id: params.project?.id ?? null,
     post_type_id: params.postType?.id ?? null,
-    status: ["ready", "ready_with_warnings", "blocked", "needs_input", "failed"].includes(params.status) ? params.status : "failed",
+    status,
     request_json: params.enginePayload,
     response_json: params.engineResponse as any,
     engine_url: env.PROMPT_ENGINE_V3_URL ?? null,
     created_by: params.createdBy
-  }).then(({ error }) => {
-    if (error) {
-      params.log.warn({ error }, "failed to persist creative v3 compile run");
+  };
+  const { error } = await supabaseAdmin.from("creative_v3_compile_runs").insert(payload);
+  if (!error) return;
+
+  if (status === "ready_with_warnings" && error.code === "23514") {
+    const { error: retryError } = await supabaseAdmin.from("creative_v3_compile_runs").insert({
+      ...payload,
+      status: "ready",
+      response_json: {
+        ...(isPlainRecord(params.engineResponse) ? params.engineResponse : { value: params.engineResponse }),
+        persisted_status: "ready",
+        original_status: "ready_with_warnings"
+      } as any
+    });
+    if (!retryError) {
+      params.log.warn({ error }, "creative v3 compile run status downgraded to ready because DB constraint does not yet allow ready_with_warnings");
+      return;
     }
-  });
+    params.log.warn({ error: retryError }, "failed to persist creative v3 compile run after ready_with_warnings fallback");
+    return;
+  }
+
+  params.log.warn({ error }, "failed to persist creative v3 compile run");
 }
 
 function getCreativeV3Variants(compileResponse: unknown) {

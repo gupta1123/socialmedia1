@@ -720,3 +720,43 @@ def test_brand_palette_is_in_final_provider_prompt():
     assert "#D5B16A" in prompt
     assert "#F4F0E7" in prompt
     assert "do not oversaturate or recolor the supplied logo" in prompt.lower()
+
+
+def test_creative_direction_changes_visible_copy_depth():
+    context = payload()["context"]
+    context = {
+        **context,
+        "project": {
+            **context["project"],
+            "city": "Pune",
+            "micro_location": "Baner",
+            "profile": {
+                **context["project"].get("profile", {}),
+                "configuration": "2 BHK",
+                "tagline": "Premium homes designed for a more composed everyday life.",
+            },
+        },
+    }
+
+    copy_led = compile_prompt(
+        CompileRequest(**payload(context=context, creative_mode="copy_led", options={"disable_dspy": True}))
+    ).variants[0]
+    proof_led = compile_prompt(
+        CompileRequest(**payload(context=context, creative_mode="proof_led", options={"disable_dspy": True}))
+    ).variants[0]
+    image_led = compile_prompt(
+        CompileRequest(**payload(context=context, creative_mode="image_led", options={"disable_dspy": True}))
+    ).variants[0]
+
+    assert copy_led.text_policy["text_strategy"] == "poster_copy_block"
+    assert "support_copy" in copy_led.render_package.exact_text_layers
+    assert "proof_point_1" in copy_led.render_package.exact_text_layers
+    assert "Support copy:" in copy_led.compiled_prompt
+
+    assert proof_led.text_policy["text_strategy"] == "proof_badges"
+    assert "proof_point_1" in proof_led.render_package.exact_text_layers
+    assert "Proof point:" in proof_led.compiled_prompt
+
+    assert image_led.text_policy["text_strategy"] == "minimal_text"
+    assert "support_copy" not in image_led.render_package.exact_text_layers
+    assert "proof_point_1" not in image_led.render_package.exact_text_layers

@@ -90,6 +90,7 @@ export function stripFileExtension(fileName: string): string {
 
 export function ensureExtension(fileName: string, contentType: string): string {
   const baseName = stripFileExtension(fileName);
+  if (contentType === "image/svg+xml") return `${baseName}.svg`;
   if (contentType === "image/webp") return `${baseName}.webp`;
   if (contentType === "image/jpeg") return `${baseName}.jpg`;
   return `${baseName}.png`;

@@ -198,7 +198,7 @@ export default function GalleryPage() {
                             {output.createdAt && (
                               <>
                                 <span aria-hidden="true">•</span>
-                                <span className="work-gallery-time">{formatRelativeTime(output.createdAt)}</span>
+                                <span className="work-gallery-time">Created {formatRelativeTime(output.createdAt)}</span>
                               </>
                             )}
                           </div>

@@ -218,6 +218,12 @@ def _text_section(production: ProductionPlan, copy_plan: CopyPlan) -> str:
         parts.append(f"headline '{copy_plan.headline}'")
     if production.text_strategy not in {"minimal_text"} and copy_plan.subheadline:
         parts.append(f"subheadline '{copy_plan.subheadline}'")
+    if production.text_strategy in {"poster_copy_block", "proof_badges", "typography_dominant"} and copy_plan.support_copy:
+        parts.append(f"support copy '{copy_plan.support_copy}'")
+    if production.text_strategy in {"poster_copy_block", "proof_badges"}:
+        for point in copy_plan.proof_points[:3]:
+            if point:
+                parts.append(f"proof point '{point}'")
     if copy_plan.cta:
         parts.append(f"CTA '{copy_plan.cta}'")
     if not parts:

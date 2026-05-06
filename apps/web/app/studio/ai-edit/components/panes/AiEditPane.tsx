@@ -17,6 +17,13 @@ import { isLayerVisible, type CanvasLayer, type EditableImage } from "../../lib/
 interface AiEditPaneProps {
   sessionToken: string | null;
   activeBrandId: string | null;
+  pinnedEdits: Array<{ id: string; x: number; y: number; comment: string }>;
+  activePinId: string | null;
+  onPinModeChange: (enabled: boolean) => void;
+  onSelectPin: (id: string | null) => void;
+  onUpdatePinComment: (id: string, comment: string) => void;
+  onRemovePin: (id: string) => void;
+  onClearPins: () => void;
   onError: (error: string | null) => void;
   onStatus: (status: string | null) => void;
   onBusyChange: (isBusy: boolean) => void;
@@ -117,11 +124,25 @@ function SpeedDots({ level, tone }: { level: number; tone: "green" | "amber" | "
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function AiEditPane({ sessionToken, activeBrandId, onError, onStatus, onBusyChange, onEditApplied }: AiEditPaneProps) {
+export function AiEditPane({
+  sessionToken,
+  activeBrandId,
+  pinnedEdits,
+  activePinId,
+  onPinModeChange,
+  onSelectPin,
+  onUpdatePinComment,
+  onRemovePin,
+  onClearPins,
+  onError,
+  onStatus,
+  onBusyChange,
+  onEditApplied
+}: AiEditPaneProps) {
   const { state, setCurrentImage, setCanvasLayers, setSelectedLayerId, setToolMode, pushToHistory } = useEditorContext();
   const [prompt, setPrompt] = useState("");
   const [listPromptItems, setListPromptItems] = useState<string[]>([""]);
-  const [promptMode, setPromptMode] = useState<"normal" | "list">("normal");
+  const [promptMode, setPromptMode] = useState<"normal" | "list" | "pins">("normal");
   const [editPreset, setEditPreset] = useState<ImageEditPreset>("v2_high");
   const [isAutoSaving, setIsAutoSaving] = useState(false);
   const [isEngineMenuOpen, setIsEngineMenuOpen] = useState(false);
@@ -145,7 +166,19 @@ export function AiEditPane({ sessionToken, activeBrandId, onError, onStatus, onB
 
   const promptTrimmed = prompt.trim();
   const normalizedListPromptItems = listPromptItems.map((item) => item.trim()).filter((item) => item.length > 0);
-  const hasPromptInput = promptMode === "normal" ? promptTrimmed.length > 0 : normalizedListPromptItems.length > 0;
+  const normalizedPinnedEdits = pinnedEdits.filter((pin) => pin.comment.trim().length > 0);
+  const pinnedPromptItems = [
+    ...(promptTrimmed ? [`Global edit context: ${promptTrimmed}`] : []),
+    ...normalizedPinnedEdits.map((pin, index) => (
+      `Pinned edit ${index + 1} at x=${Math.round(pin.x * 100)}%, y=${Math.round(pin.y * 100)}%: ${pin.comment.trim()}`
+    )),
+  ];
+  const hasPromptInput =
+    promptMode === "normal"
+      ? promptTrimmed.length > 0
+      : promptMode === "list"
+        ? normalizedListPromptItems.length > 0
+        : normalizedPinnedEdits.length > 0;
   const canApplyDirectEdit = Boolean(state.currentImage && hasPromptInput) && !isApplying && !isComposingPrompt && !isAutoSaving;
   const primaryActionLabel = isComposingPrompt ? "Preparing edit..." : isApplying ? "Applying..." : isAutoSaving ? "Saving..." : "Apply AI edit";
   const layersToPreserveCount = state.canvasLayers.filter((layer) => isLayerVisible(layer) && shouldPreserveLayerAfterAiEdit(layer)).length;
@@ -159,6 +192,11 @@ export function AiEditPane({ sessionToken, activeBrandId, onError, onStatus, onB
   useEffect(() => {
     return () => onBusyChange(false);
   }, [onBusyChange]);
+
+  useEffect(() => {
+    onPinModeChange(promptMode === "pins");
+    return () => onPinModeChange(false);
+  }, [onPinModeChange, promptMode]);
 
   async function handlePrimaryAction() {
     if (!state.currentImage) return;
@@ -187,8 +225,8 @@ export function AiEditPane({ sessionToken, activeBrandId, onError, onStatus, onB
         state.currentImage.height,
         buildNormalizedSourceFileName(sourceFileForEdit.name),
         editPreset,
-        listPromptItems,
-        promptMode
+        promptMode === "pins" ? pinnedPromptItems : listPromptItems,
+        promptMode === "pins" ? "list" : promptMode
       );
 
       if (result) {
@@ -200,10 +238,21 @@ export function AiEditPane({ sessionToken, activeBrandId, onError, onStatus, onB
             ? {
                 prompt,
               }
-            : {
-                items: [...listPromptItems],
-                normalizedItems: normalizedListItems,
-              },
+            : promptMode === "list"
+              ? {
+                  items: [...listPromptItems],
+                  normalizedItems: normalizedListItems,
+                }
+              : {
+                  globalPrompt: prompt,
+                  pins: pinnedEdits.map((pin) => ({
+                    id: pin.id,
+                    x: pin.x,
+                    y: pin.y,
+                    comment: pin.comment,
+                  })),
+                  normalizedItems: pinnedPromptItems,
+                },
           submittedPrompt: result.submittedPrompt,
           jobId: result.jobId,
           editPreset,
@@ -228,6 +277,10 @@ export function AiEditPane({ sessionToken, activeBrandId, onError, onStatus, onB
         setCanvasLayers(layersToPreserve);
         setSelectedLayerId(null);
         setToolMode("select");
+        if (promptMode === "pins") {
+          onClearPins();
+          onSelectPin(null);
+        }
         onStatus(
           layersToPreserve.length > 0
             ? "Edit applied. Brand/RERA assets stayed on the canvas. Auto-saving this version."
@@ -272,6 +325,7 @@ export function AiEditPane({ sessionToken, activeBrandId, onError, onStatus, onB
   const currentEngineGroup = EDIT_ENGINE_OPTIONS.find((group) => group.options.some((option) => option.value === editPreset));
   const currentEngineOption = currentEngineGroup?.options.find((option) => option.value === editPreset);
   const currentEngineName = currentEngineGroup && currentEngineOption ? `${currentEngineGroup.group} ${currentEngineOption.label}` : "V2 High";
+  const activePin = activePinId ? pinnedEdits.find((pin) => pin.id === activePinId) ?? null : null;
 
   return (
     <div className="ai-editor-pane">
@@ -364,6 +418,18 @@ export function AiEditPane({ sessionToken, activeBrandId, onError, onStatus, onB
                 <line x1="3" y1="18" x2="3.01" y2="18"/>
               </svg>
             </button>
+            <button
+              className={`chatgpt-mode-btn ${promptMode === "pins" ? "is-active" : ""}`}
+              onClick={() => setPromptMode("pins")}
+              role="tab"
+              title="Pinned edits"
+              type="button"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 21s6-5.4 6-11a6 6 0 1 0-12 0c0 5.6 6 11 6 11Z" />
+                <circle cx="12" cy="10" r="2" />
+              </svg>
+            </button>
           </div>
         </div>
       </div>
@@ -380,7 +446,7 @@ export function AiEditPane({ sessionToken, activeBrandId, onError, onStatus, onB
             value={prompt}
           />
         </div>
-      ) : (
+      ) : promptMode === "list" ? (
         <div className="ai-editor-section">
           <p className="ai-editor-pane-copy" style={{ marginBottom: '12px' }}>Add each requested change separately.</p>
           <div className="ai-editor-list-container">
@@ -414,6 +480,44 @@ export function AiEditPane({ sessionToken, activeBrandId, onError, onStatus, onB
             </svg>
             <span>Add another change</span>
           </button>
+        </div>
+      ) : (
+        <div className="ai-editor-section ai-editor-pinned-section">
+          <p className="ai-editor-pane-copy">Click the image to add a pin. Write the note beside the pin.</p>
+          <AutoExpandingTextarea
+            className="create-prompt-textarea"
+            onChange={(val) => setPrompt(val)}
+            placeholder="Optional overall note"
+            rows={2}
+            value={prompt}
+          />
+          <div className="ai-editor-pin-summary">
+            <span>{pinnedEdits.length ? `${pinnedEdits.length} pin${pinnedEdits.length === 1 ? "" : "s"} added` : "No pins yet"}</span>
+            {activePin ? <button onClick={() => onSelectPin(activePin.id)} type="button">Edit selected</button> : null}
+          </div>
+          {pinnedEdits.length > 0 ? (
+            <div className="ai-editor-pin-nav-list" aria-label="Pinned edit notes">
+              {pinnedEdits.map((pin, index) => {
+                const comment = pin.comment.trim();
+                return (
+                  <button
+                    className={`ai-editor-pin-nav-item ${pin.id === activePinId ? "is-active" : ""}`}
+                    key={pin.id}
+                    onClick={() => onSelectPin(pin.id)}
+                    type="button"
+                  >
+                    <span>{index + 1}</span>
+                    <strong>{comment || "Add note on canvas"}</strong>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          {pinnedEdits.length > 0 ? (
+            <button className="ai-editor-list-add-btn" onClick={onClearPins} type="button">
+              Clear all pins
+            </button>
+          ) : null}
         </div>
       )}
 

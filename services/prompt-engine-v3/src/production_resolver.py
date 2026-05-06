@@ -60,7 +60,7 @@ def resolve_production_plan(
         rules_extra=preset_contact_rules(preset),
     )
     location_plan = _resolve_location_plan(preset, fact_store, has_contact=bool(contact_plan.values))
-    text_strategy = intent.text_strategy if intent.text_strategy != "auto" else "render_exact_text"
+    text_strategy = intent.text_strategy if intent.text_strategy != "auto" else _default_text_strategy_for_mode(intent.creative_mode)
     text_treatment = "reserve_space" if text_strategy in {"reserve_editable_space", "no_text_visual_only"} else "render_text"
     missing = []
     if include_logo and not logo_asset_id:
@@ -92,6 +92,18 @@ def resolve_production_plan(
         preset_id=preset.get("preset_id") if isinstance(preset, dict) else None,
         preset_name=preset.get("name") if isinstance(preset, dict) else None,
     )
+
+
+def _default_text_strategy_for_mode(creative_mode: str) -> str:
+    if creative_mode == "copy_led":
+        return "poster_copy_block"
+    if creative_mode == "proof_led":
+        return "proof_badges"
+    if creative_mode == "offer_led":
+        return "poster_copy_block"
+    if creative_mode in {"image_led", "lifestyle_led", "asset_led"}:
+        return "minimal_text"
+    return "render_exact_text"
 
 
 def _resolve_additional_logo_layers(

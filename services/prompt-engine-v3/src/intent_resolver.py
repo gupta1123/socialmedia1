@@ -173,10 +173,10 @@ def _text_strategy(request: CompileRequest, lowered: str) -> str:
     if any(_positive(lowered, term) for term in ["reserve space", "editable text", "add text later"]):
         return "reserve_editable_space"
     if any(_positive(lowered, term) for term in ["copy led", "typography led", "text led", "headline led"]):
-        return "typography_dominant"
+        return "poster_copy_block"
     if any(_positive(lowered, term) for term in ["minimal text", "less text", "tiny text", "keep text minimal"]):
         return "minimal_text"
-    return "render_exact_text"
+    return "auto"
 
 
 def _creative_mode(request: CompileRequest, lowered: str, semantics: List[str]) -> str:

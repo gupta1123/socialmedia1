@@ -346,7 +346,15 @@ def _location_label(production: ProductionPlan) -> str:
 
 def _ensure_exact_text(text: str, copy_plan: CopyPlan, production: ProductionPlan) -> str:
     copy = copy_plan.as_contract()
-    values = [("Headline", copy.get("headline")), ("Subheadline", copy.get("subheadline")), ("CTA", copy.get("cta"))]
+    values = [
+        ("Headline", copy.get("headline")),
+        ("Subheadline", copy.get("subheadline")),
+        ("Support copy", copy.get("support_copy")),
+        ("Proof point", copy.get("proof_point_1")),
+        ("Proof point", copy.get("proof_point_2")),
+        ("Proof point", copy.get("proof_point_3")),
+        ("CTA", copy.get("cta")),
+    ]
     footer = _contact_footer(production)
     if footer:
         values.append(("Footer", footer))

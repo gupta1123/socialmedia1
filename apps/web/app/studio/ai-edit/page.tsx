@@ -85,6 +85,14 @@ type EditorDocumentBuildResult = {
   layerImages: Array<{ layerId: string; file: File; fileName: string }>;
 };
 
+type AppliedEditPin = { id: string; x: number; y: number; comment: string };
+
+type AppliedEditOverlay = {
+  pins: AppliedEditPin[];
+  prompt: string | null;
+  label: string;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -209,6 +217,89 @@ function latestCreativeOutputsByRoot(outputs: CreativeOutputRecord[]) {
   return Array.from(latestByRoot.values());
 }
 
+function getStringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function getStringList(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => getStringValue(item)).filter((item): item is string => Boolean(item))
+    : [];
+}
+
+function getLatestAiEditRecord(metadataJson: unknown) {
+  const metadata = isRecord(metadataJson) ? metadataJson : null;
+  if (!metadata) {
+    return null;
+  }
+
+  const history = Array.isArray(metadata.aiEditHistory)
+    ? metadata.aiEditHistory.filter((item): item is Record<string, unknown> => isRecord(item))
+    : [];
+  const latestHistoryItem = history.length ? history[history.length - 1] : null;
+
+  if (latestHistoryItem) {
+    return latestHistoryItem;
+  }
+
+  return isRecord(metadata.aiEdit) ? metadata.aiEdit : null;
+}
+
+function getAppliedEditOverlay(output: CreativeOutputRecord | null): AppliedEditOverlay | null {
+  const aiEdit = getLatestAiEditRecord(output?.metadataJson);
+  if (!aiEdit) {
+    return null;
+  }
+
+  const exactInput = isRecord(aiEdit.exactInput) ? aiEdit.exactInput : null;
+  const promptMode = getStringValue(aiEdit.promptMode);
+  const pins = Array.isArray(exactInput?.pins)
+    ? exactInput.pins
+        .map((rawPin, index): AppliedEditPin | null => {
+          if (!isRecord(rawPin) || typeof rawPin.x !== "number" || typeof rawPin.y !== "number") {
+            return null;
+          }
+          const comment = getStringValue(rawPin.comment);
+          if (!comment) {
+            return null;
+          }
+          return {
+            id: getStringValue(rawPin.id) ?? `applied-pin-${index + 1}`,
+            x: clampNumber(rawPin.x, 0.01, 0.99),
+            y: clampNumber(rawPin.y, 0.01, 0.99),
+            comment,
+          };
+        })
+        .filter((pin): pin is AppliedEditPin => Boolean(pin))
+    : [];
+
+  const globalPrompt = getStringValue(exactInput?.globalPrompt);
+  const normalPrompt = getStringValue(exactInput?.prompt);
+  const listItems = getStringList(exactInput?.items);
+  const normalizedItems = getStringList(exactInput?.normalizedItems);
+  const submittedPrompt = getStringValue(aiEdit.submittedPrompt);
+
+  let prompt = normalPrompt ?? submittedPrompt;
+  if (promptMode === "list") {
+    prompt = listItems.length ? listItems.join("\n") : normalizedItems.length ? normalizedItems.join("\n") : submittedPrompt;
+  }
+  if (promptMode === "pins") {
+    const pinLines = pins.map((pin, index) => `Pin ${index + 1}: ${pin.comment}`);
+    const combined = [globalPrompt, ...pinLines].filter(Boolean).join("\n");
+    prompt = combined || normalizedItems.join("\n") || submittedPrompt;
+  }
+
+  if (!pins.length && !prompt) {
+    return null;
+  }
+
+  return {
+    pins,
+    prompt: prompt ?? null,
+    label: promptMode === "pins" ? "Pinned edit notes" : promptMode === "list" ? "Edit points" : "AI edit prompt",
+  };
+}
+
 interface StudioAiEditPageContentProps {
   sessionToken: string | null;
   activeBrand: BootstrapResponse["brands"][number] | null;
@@ -275,6 +366,11 @@ function StudioAiEditPageContent({
   const [isLoadingRecentOutputs, setIsLoadingRecentOutputs] = useState(true);
   const [layerDrag, setLayerDrag] = useState<LayerDragState | null>(null);
   const [drawPath, setDrawPath] = useState<CanvasDrawLayer | null>(null);
+  const [isPinEditMode, setIsPinEditMode] = useState(false);
+  const [pinnedEdits, setPinnedEdits] = useState<Array<{ id: string; x: number; y: number; comment: string }>>([]);
+  const [activePinId, setActivePinId] = useState<string | null>(null);
+  const [showAppliedEdits, setShowAppliedEdits] = useState(false);
+  const [activeAppliedPinId, setActiveAppliedPinId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const layerImageInputRef = useRef<HTMLInputElement>(null);
@@ -304,6 +400,7 @@ function StudioAiEditPageContent({
     const outputs = versionHistory.length ? versionHistory : lastSavedOutput ? [lastSavedOutput] : [];
     return [...outputs].sort((left, right) => right.versionNumber - left.versionNumber);
   }, [lastSavedOutput, versionHistory]);
+  const appliedEditOverlay = useMemo(() => getAppliedEditOverlay(lastSavedOutput), [lastSavedOutput]);
   const compareBeforeOutput = compareBeforeId
     ? compareOutputCache[compareBeforeId] ?? savedVersions.find((output) => output.id === compareBeforeId) ?? null
     : null;
@@ -315,6 +412,27 @@ function StudioAiEditPageContent({
     (compareAfterId && loadingCompareOutputIds[compareAfterId])
   );
   const isHistoryLocked = isSavingOutput || isAiEditBusy || Boolean(loadingOutputId);
+  const canShowAppliedEdits = Boolean(appliedEditOverlay);
+
+  useEffect(() => {
+    if (!canShowAppliedEdits) {
+      setShowAppliedEdits(false);
+      setActiveAppliedPinId(null);
+    }
+  }, [canShowAppliedEdits]);
+
+  useEffect(() => {
+    if (!showAppliedEdits || !appliedEditOverlay?.pins.length) {
+      setActiveAppliedPinId(null);
+      return;
+    }
+
+    setActiveAppliedPinId((current) =>
+      current && appliedEditOverlay.pins.some((pin) => pin.id === current)
+        ? current
+        : appliedEditOverlay.pins[0]?.id ?? null
+    );
+  }, [appliedEditOverlay, showAppliedEdits]);
 
   const topbarActions = useMemo(() => (
     <>
@@ -384,6 +502,25 @@ function StudioAiEditPageContent({
           </svg>
         </button>
       ) : null}
+      {state.currentImage ? (
+        <button
+          aria-label="Show applied edit notes"
+          className={`topbar-icon-btn ai-edit-applied-edits-button ${showAppliedEdits ? "is-active" : ""}`}
+          disabled={!canShowAppliedEdits}
+          onClick={() => {
+            setShowAppliedEdits((value) => !value);
+            setIsCompareOpen(false);
+          }}
+          title={canShowAppliedEdits ? "Show what was edited" : "No saved edit notes for this version"}
+          type="button"
+        >
+          <svg fill="none" height="16" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M7 8h10" />
+            <path d="M7 12h6" />
+            <path d="M21 12c0 4-4 7-9 7a10 10 0 0 1-3.7-.7L3 20l1.7-4A6.7 6.7 0 0 1 3 12c0-4 4-7 9-7s9 3 9 7Z" />
+          </svg>
+        </button>
+      ) : null}
       <button aria-label="Undo" className="topbar-icon-btn" disabled={!canUndo || isHistoryLocked} onClick={undo} title="Undo" type="button">
         <svg fill="none" height="16" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M3 7v6h6" />
@@ -397,7 +534,7 @@ function StudioAiEditPageContent({
         </svg>
       </button>
     </>
-  ), [canUndo, canRedo, hasUnsavedChanges, isCompareOpen, isSavingOutput, isHistoryLocked, lastSavedOutput, redo, savedVersions.length, state.currentImage, undo]);
+  ), [canShowAppliedEdits, canUndo, canRedo, hasUnsavedChanges, isCompareOpen, isSavingOutput, isHistoryLocked, lastSavedOutput, redo, savedVersions.length, showAppliedEdits, state.currentImage, undo]);
 
   useRegisterTopbarActions(topbarActions);
   useRegisterTopbarControls(topbarControls);
@@ -820,6 +957,9 @@ function StudioAiEditPageContent({
 
   function handleEditorPaneChange(pane: typeof EDITOR_PANES[number]["id"]) {
     editor.setActiveEditorPane(pane);
+    if (pane !== "ai-edit") {
+      setIsPinEditMode(false);
+    }
     if (pane === "draw") {
       editor.setToolMode("draw");
       editor.setSelectedLayerId(null);
@@ -968,6 +1108,10 @@ function StudioAiEditPageContent({
   }
 
   function handleStagePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (isPinEditMode) {
+      return;
+    }
+
     if (shouldStartPan(event)) {
       beginPan(event);
       return;
@@ -1144,6 +1288,33 @@ function StudioAiEditPageContent({
 
   function handleFitToScreen() {
     fitStageToView(true);
+  }
+
+  function handleCreatePinnedEdit(pin: { x: number; y: number }) {
+    const nextPin = {
+      id: `pin-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      x: pin.x,
+      y: pin.y,
+      comment: "",
+    };
+    setPinnedEdits((previous) => [...previous, nextPin]);
+    setActivePinId(nextPin.id);
+    editor.setSelectedLayerId(null);
+    setStatus("Pinned edit added. Add the instruction in the AI Edit panel.");
+  }
+
+  function handleUpdatePinnedEditComment(id: string, comment: string) {
+    setPinnedEdits((previous) => previous.map((pin) => (pin.id === id ? { ...pin, comment } : pin)));
+  }
+
+  function handleRemovePinnedEdit(id: string) {
+    setPinnedEdits((previous) => previous.filter((pin) => pin.id !== id));
+    setActivePinId((current) => (current === id ? null : current));
+  }
+
+  function handleClearPinnedEdits() {
+    setPinnedEdits([]);
+    setActivePinId(null);
   }
 
   async function handleDownloadComposition() {
@@ -1362,6 +1533,8 @@ function StudioAiEditPageContent({
     }
 
     setLoadingOutputId(output.id);
+    setShowAppliedEdits(false);
+    setActiveAppliedPinId(null);
     setStatus(`Opening version ${output.versionNumber}...`);
     router.replace(`/studio/ai-edit?outputId=${output.id}`);
   }
@@ -1384,6 +1557,8 @@ function StudioAiEditPageContent({
     setCompareAfterId(afterOutput.id);
     setCompareBeforeId(beforeOutput.id);
     setCompareSliderValue(50);
+    setShowAppliedEdits(false);
+    setActiveAppliedPinId(null);
     setIsCompareOpen(true);
     void ensureCompareOutput(beforeOutput.id);
     void ensureCompareOutput(afterOutput.id);
@@ -1429,11 +1604,6 @@ function StudioAiEditPageContent({
       case "uploads":
         return (
           <UploadsPane
-            sessionToken={sessionToken}
-            activeBrandId={activeBrandId}
-            recentOutputs={editorRecentOutputs}
-            isLoadingRecent={isLoadingRecentOutputs}
-            onViewAllGenerated={() => setIsGeneratedPostsModalOpen(true)}
             onUploadClick={() => fileInputRef.current?.click()}
             onAddImageLayerClick={() => layerImageInputRef.current?.click()}
             onClearCanvas={handleClearCanvas}
@@ -1444,6 +1614,13 @@ function StudioAiEditPageContent({
           <AiEditPane
             sessionToken={sessionToken}
             activeBrandId={activeBrandId}
+            pinnedEdits={pinnedEdits}
+            activePinId={activePinId}
+            onPinModeChange={setIsPinEditMode}
+            onSelectPin={setActivePinId}
+            onUpdatePinComment={handleUpdatePinnedEditComment}
+            onRemovePin={handleRemovePinnedEdit}
+            onClearPins={handleClearPinnedEdits}
             onError={setError}
             onStatus={setStatus}
             onBusyChange={setIsAiEditBusy}
@@ -1475,11 +1652,6 @@ function StudioAiEditPageContent({
       default:
         return (
           <UploadsPane
-            sessionToken={sessionToken}
-            activeBrandId={activeBrandId}
-            recentOutputs={editorRecentOutputs}
-            isLoadingRecent={isLoadingRecentOutputs}
-            onViewAllGenerated={() => setIsGeneratedPostsModalOpen(true)}
             onUploadClick={() => fileInputRef.current?.click()}
             onAddImageLayerClick={() => layerImageInputRef.current?.click()}
             onClearCanvas={handleClearCanvas}
@@ -1519,8 +1691,28 @@ function StudioAiEditPageContent({
               stageFrameRef={stageFrameRef}
               isPanning={isPanning}
               isSpacePressed={isSpacePressed}
+              pinMode={isPinEditMode}
+              pinnedEdits={pinnedEdits}
+              readOnlyPins={showAppliedEdits && !isPinEditMode ? appliedEditOverlay?.pins ?? [] : []}
+              activePinId={showAppliedEdits && !isPinEditMode ? activeAppliedPinId : activePinId}
+              onCreatePin={handleCreatePinnedEdit}
+              onSelectPin={showAppliedEdits && !isPinEditMode ? setActiveAppliedPinId : setActivePinId}
+              onUpdatePinComment={handleUpdatePinnedEditComment}
+              onRemovePin={handleRemovePinnedEdit}
             />
           </div>
+
+          {showAppliedEdits && !isPinEditMode && appliedEditOverlay ? (
+            <AppliedEditNotesPanel
+              activePinId={activeAppliedPinId}
+              overlay={appliedEditOverlay}
+              onClose={() => {
+                setShowAppliedEdits(false);
+                setActiveAppliedPinId(null);
+              }}
+              onSelectPin={setActiveAppliedPinId}
+            />
+          ) : null}
 
           {isCompareOpen && state.currentImage && savedVersions.length >= 2 ? (
             <EditorCompareOverlay
@@ -1684,6 +1876,77 @@ function getCreativeOutputOriginalUrl(output: CreativeOutputRecord | null) {
   return output?.originalUrl ?? null;
 }
 
+function getExactCompareSize(
+  beforeSize: { width: number; height: number } | null,
+  afterSize: { width: number; height: number } | null,
+  fallbackImage: EditableImage
+) {
+  if (beforeSize && afterSize) {
+    return {
+      width: Math.max(beforeSize.width, afterSize.width),
+      height: Math.max(beforeSize.height, afterSize.height),
+    };
+  }
+
+  return {
+    width: fallbackImage.width,
+    height: fallbackImage.height,
+  };
+}
+
+function getExactCompareImageStyle(
+  imageSize: { width: number; height: number } | null,
+  compareSize: { width: number; height: number }
+) {
+  if (!imageSize || compareSize.width <= 0 || compareSize.height <= 0) {
+    return undefined;
+  }
+
+  return {
+    width: `${(imageSize.width / compareSize.width) * 100}%`,
+    height: `${(imageSize.height / compareSize.height) * 100}%`,
+  };
+}
+
+function AppliedEditNotesPanel({
+  activePinId,
+  overlay,
+  onClose,
+  onSelectPin,
+}: {
+  activePinId: string | null;
+  overlay: AppliedEditOverlay;
+  onClose: () => void;
+  onSelectPin: (id: string) => void;
+}) {
+  return (
+    <div className="ai-edit-applied-edits-panel">
+      <div className="ai-edit-applied-edits-panel-header">
+        <strong>{overlay.label}</strong>
+        <button aria-label="Hide previous edits" onClick={onClose} type="button">
+          ×
+        </button>
+      </div>
+      {overlay.prompt ? <p>{overlay.prompt}</p> : null}
+      {overlay.pins.length ? (
+        <div className="ai-edit-applied-pin-list" aria-label="Previous pinned edits">
+          {overlay.pins.map((pin, index) => (
+            <button
+              className={`ai-edit-applied-pin-item ${pin.id === activePinId ? "is-active" : ""}`}
+              key={pin.id}
+              onClick={() => onSelectPin(pin.id)}
+              type="button"
+            >
+              <span>{index + 1}</span>
+              <strong>{pin.comment}</strong>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function EditorCompareOverlay({
   afterId,
   afterOutput,
@@ -1713,9 +1976,28 @@ function EditorCompareOverlay({
 }) {
   const beforeUrl = getCreativeOutputOriginalUrl(beforeOutput);
   const afterUrl = getCreativeOutputOriginalUrl(afterOutput);
+  const [beforeNaturalSize, setBeforeNaturalSize] = useState<{ width: number; height: number } | null>(null);
+  const [afterNaturalSize, setAfterNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const beforeLabel = beforeOutput ? `v${beforeOutput.versionNumber}` : "Before";
   const afterLabel = afterOutput ? `v${afterOutput.versionNumber}` : "After";
-  const showLoading = isLoading || !beforeUrl || !afterUrl;
+  const compareSize = getExactCompareSize(beforeNaturalSize, afterNaturalSize, image);
+  const beforeImageStyle = getExactCompareImageStyle(beforeNaturalSize, compareSize);
+  const afterImageStyle = getExactCompareImageStyle(afterNaturalSize, compareSize);
+  const dimensionsMismatch = beforeNaturalSize && afterNaturalSize
+    ? beforeNaturalSize.width !== afterNaturalSize.width || beforeNaturalSize.height !== afterNaturalSize.height
+    : false;
+  const dimensionsMismatchLabel = dimensionsMismatch && beforeNaturalSize && afterNaturalSize
+    ? `Different sizes: ${beforeNaturalSize.width}x${beforeNaturalSize.height} / ${afterNaturalSize.width}x${afterNaturalSize.height}`
+    : null;
+  const showLoading = isLoading || !beforeUrl || !afterUrl || !beforeNaturalSize || !afterNaturalSize;
+
+  useEffect(() => {
+    setBeforeNaturalSize(null);
+  }, [beforeUrl]);
+
+  useEffect(() => {
+    setAfterNaturalSize(null);
+  }, [afterUrl]);
 
   return (
     <div className="ai-edit-compare-overlay" role="dialog" aria-label="Compare versions">
@@ -1751,16 +2033,47 @@ function EditorCompareOverlay({
 
       <div
         className={`ai-edit-compare-frame ${showLoading ? "is-loading" : ""}`}
-        style={{ aspectRatio: `${image.width} / ${image.height}` }}
+        style={{ aspectRatio: `${compareSize.width} / ${compareSize.height}` }}
       >
-        {beforeUrl ? <img alt={`${beforeLabel} before`} className="ai-edit-compare-image" decoding="async" src={beforeUrl} /> : null}
+        {beforeUrl ? (
+          <img
+            alt={`${beforeLabel} before`}
+            className="ai-edit-compare-image"
+            decoding="async"
+            onLoad={(event) => {
+              setBeforeNaturalSize({
+                width: event.currentTarget.naturalWidth,
+                height: event.currentTarget.naturalHeight,
+              });
+            }}
+            src={beforeUrl}
+            style={beforeImageStyle}
+          />
+        ) : null}
         {afterUrl ? (
           <div className="ai-edit-compare-after" style={{ clipPath: `inset(0 ${100 - sliderValue}% 0 0)` }}>
-            <img alt={`${afterLabel} after`} className="ai-edit-compare-image" decoding="async" src={afterUrl} />
+            <img
+              alt={`${afterLabel} after`}
+              className="ai-edit-compare-image"
+              decoding="async"
+              onLoad={(event) => {
+                setAfterNaturalSize({
+                  width: event.currentTarget.naturalWidth,
+                  height: event.currentTarget.naturalHeight,
+                });
+              }}
+              src={afterUrl}
+              style={afterImageStyle}
+            />
           </div>
         ) : null}
         <span className="ai-edit-compare-chip is-before">{beforeLabel}</span>
         <span className="ai-edit-compare-chip is-after">{afterLabel}</span>
+        {dimensionsMismatchLabel ? (
+          <span className="ai-edit-compare-size-warning">
+            {dimensionsMismatchLabel}
+          </span>
+        ) : null}
         <span className="ai-edit-compare-divider" style={{ left: `${sliderValue}%` }}>
           <span />
         </span>

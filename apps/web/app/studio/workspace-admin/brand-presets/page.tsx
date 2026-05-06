@@ -20,6 +20,8 @@ type PresetFormState = {
   projectId: string;
   logoRequired: boolean;
   logoPosition: string;
+  secondaryLogoRequired: boolean;
+  secondaryLogoPosition: string;
   reraRequired: boolean;
   reraPosition: string;
   contactItems: string[];
@@ -29,6 +31,13 @@ type PresetFormState = {
   active: boolean;
 };
 
+const RERA_TRIGGER_KEYS = [
+  "required_when_fact_types",
+  "trigger_required_when_fact_types",
+  "requiredWhenFactTypes",
+  "triggerRequiredWhenFactTypes"
+];
+
 const emptyForm: PresetFormState = {
   id: null,
   name: "Launch default",
@@ -36,6 +45,8 @@ const emptyForm: PresetFormState = {
   projectId: "",
   logoRequired: true,
   logoPosition: "top_left",
+  secondaryLogoRequired: false,
+  secondaryLogoPosition: "top_left_near_primary",
   reraRequired: false,
   reraPosition: "top_right",
   contactItems: ["phone", "website"],
@@ -99,6 +110,8 @@ export default function BrandPresetsSettingsPage() {
       projectId: preset.project_id ?? "",
       logoRequired: Boolean(json.logo?.required || json.logo_layer?.required),
       logoPosition: String(json.logo?.position ?? json.logo_layer?.position ?? "top_left"),
+      secondaryLogoRequired: secondaryLogoIsEnabled(json),
+      secondaryLogoPosition: String(json.secondary_logo?.position ?? json.secondary_logo_layer?.position ?? "top_left_near_primary"),
       reraRequired: Boolean(json.rera_qr?.required || json.rera_qr_layer?.required),
       reraPosition: String(json.rera_qr?.position ?? json.rera_qr_layer?.position ?? "top_right"),
       contactItems: Array.isArray(json.contact?.items) ? json.contact.items.map(String) : [],
@@ -123,6 +136,7 @@ export default function BrandPresetsSettingsPage() {
       ? selectedPreset.preset_json as Record<string, any>
       : {};
     const existingLogo = existing.logo && typeof existing.logo === "object" && !Array.isArray(existing.logo) ? existing.logo : {};
+    const existingSecondaryLogo = existing.secondary_logo && typeof existing.secondary_logo === "object" && !Array.isArray(existing.secondary_logo) ? existing.secondary_logo : {};
     const existingRera = existing.rera_qr && typeof existing.rera_qr === "object" && !Array.isArray(existing.rera_qr) ? existing.rera_qr : {};
     const existingContact = existing.contact && typeof existing.contact === "object" && !Array.isArray(existing.contact) ? existing.contact : {};
     const existingTypography = existing.typography && typeof existing.typography === "object" && !Array.isArray(existing.typography) ? existing.typography : {};
@@ -136,18 +150,9 @@ export default function BrandPresetsSettingsPage() {
         max_instances: 1,
         source: "exact_asset_only"
       },
-      rera_qr: {
-        ...existingRera,
-        required: form.reraRequired,
-        position: form.reraPosition,
-        max_instances: 1,
-        source: "exact_asset_only",
-        render_mode: "composite_rera_block",
-        size: "compact_badge",
-        height_match: "logo_height",
-        avoid_full_width_banner: true,
-        never_generate_qr: true
-      },
+      allow_additional_logos: form.secondaryLogoRequired,
+      secondary_logo: buildSecondaryLogoPresetJson(existingSecondaryLogo, form),
+      rera_qr: buildReraPresetJson(existingRera, form),
       contact: {
         ...existingContact,
         required: form.contactItems.length > 0,
@@ -164,6 +169,83 @@ export default function BrandPresetsSettingsPage() {
         ...existingPalette,
         source: form.paletteMode
       }
+    };
+  }
+
+  function secondaryLogoIsEnabled(json: Record<string, any>) {
+    const rules = json.secondary_logo && typeof json.secondary_logo === "object" && !Array.isArray(json.secondary_logo)
+      ? json.secondary_logo
+      : json.secondary_logo_layer && typeof json.secondary_logo_layer === "object" && !Array.isArray(json.secondary_logo_layer)
+        ? json.secondary_logo_layer
+        : null;
+    if (!rules) return false;
+    return rules.mode !== "disabled" && rules.enabled !== false && rules.disabled !== true && rules.required !== false;
+  }
+
+  function buildSecondaryLogoPresetJson(existingSecondaryLogo: Record<string, any>, currentForm: PresetFormState) {
+    const next = { ...existingSecondaryLogo };
+    if (!currentForm.secondaryLogoRequired) {
+      delete next.asset_id;
+      return {
+        ...next,
+        mode: "disabled",
+        enabled: false,
+        required: false,
+        position: currentForm.secondaryLogoPosition,
+        source: "exact_asset_only",
+        max_instances: 1,
+        role: "preset_secondary_logo"
+      };
+    }
+
+    delete next.mode;
+    delete next.enabled;
+    delete next.disabled;
+    return {
+      ...next,
+      required: true,
+      position: currentForm.secondaryLogoPosition,
+      source: "exact_asset_only",
+      max_instances: 1,
+      role: "preset_secondary_logo"
+    };
+  }
+
+  function buildReraPresetJson(existingRera: Record<string, any>, currentForm: PresetFormState) {
+    const next = { ...existingRera };
+    if (!currentForm.reraRequired) {
+      for (const key of RERA_TRIGGER_KEYS) {
+        delete next[key];
+      }
+      return {
+        ...next,
+        mode: "disabled",
+        enabled: false,
+        required: false,
+        position: currentForm.reraPosition,
+        max_instances: 1,
+        source: "exact_asset_only",
+        render_mode: "composite_rera_block",
+        size: "compact_badge",
+        height_match: "logo_height",
+        avoid_full_width_banner: true,
+        never_generate_qr: true
+      };
+    }
+
+    delete next.mode;
+    delete next.enabled;
+    return {
+      ...next,
+      required: true,
+      position: currentForm.reraPosition,
+      max_instances: 1,
+      source: "exact_asset_only",
+      render_mode: "composite_rera_block",
+      size: "compact_badge",
+      height_match: "logo_height",
+      avoid_full_width_banner: true,
+      never_generate_qr: true
     };
   }
 
@@ -313,6 +395,21 @@ export default function BrandPresetsSettingsPage() {
                     <option value="off">Disabled</option>
                     <option value="top_left">Top Left</option>
                     <option value="top_right">Top Right</option>
+                    <option value="bottom_signature">Bottom Signature</option>
+                  </select>
+                </label>
+                <label className="field-label">
+                  Secondary Logo
+                  <select value={form.secondaryLogoRequired ? form.secondaryLogoPosition : "off"} onChange={(e) => {
+                    const value = e.target.value;
+                    setForm(c => ({ ...c, secondaryLogoRequired: value !== "off", secondaryLogoPosition: value === "off" ? c.secondaryLogoPosition : value }));
+                  }}>
+                    <option value="off">Disabled</option>
+                    <option value="top_left_near_primary">Near Primary</option>
+                    <option value="top_left">Top Left</option>
+                    <option value="top_right">Top Right</option>
+                    <option value="bottom_left">Bottom Left</option>
+                    <option value="bottom_right">Bottom Right</option>
                     <option value="bottom_signature">Bottom Signature</option>
                   </select>
                 </label>

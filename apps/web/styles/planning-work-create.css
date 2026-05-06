@@ -2851,9 +2851,10 @@
 }
 
 .output-detail-page {
-  min-height: calc(100vh - 112px);
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  align-items: start;
   gap: 24px;
   padding: 0 0 28px;
 }
@@ -2861,7 +2862,8 @@
 .output-detail-main {
   min-width: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-content: start;
   gap: 16px;
   padding-left: 6px;
 }
@@ -2916,12 +2918,10 @@
   min-height: 560px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
-  background:
-    radial-gradient(circle at 50% 12%, color-mix(in srgb, var(--paper-strong) 68%, transparent), transparent 48%),
-    color-mix(in srgb, var(--paper-soft) 82%, transparent);
-  border: 1px solid color-mix(in srgb, var(--line) 62%, transparent);
-  box-shadow: 0 26px 60px rgba(22, 20, 16, 0.07);
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
   overflow: hidden;
 }
 
@@ -3236,19 +3236,21 @@
   position: sticky;
   top: 88px;
   align-self: start;
-  max-height: calc(100vh - 112px);
+  height: calc(100dvh - 124px);
+  max-height: calc(100dvh - 124px);
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 18px;
+  padding: 18px 18px 0;
   border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--paper-soft) 88%, transparent);
   box-shadow: 0 24px 60px rgba(22, 20, 16, 0.09);
-  overflow: auto;
+  overflow: hidden;
 }
 
 .output-detail-rail-header {
+  flex: 0 0 auto;
   display: flex;
   justify-content: space-between;
   gap: 14px;
@@ -3264,6 +3266,22 @@
   margin: 0;
   color: var(--ink-soft);
   font-size: 0.78rem;
+}
+
+.output-detail-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+
+.output-detail-status-row > span:not(.review-status-pill) {
+  margin-left: auto;
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .output-detail-saved-line {
@@ -3298,8 +3316,16 @@
 }
 
 .output-detail-panel {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   display: grid;
+  align-content: start;
   gap: 16px;
+  padding-right: 2px;
+  padding-bottom: 14px;
 }
 
 .output-detail-icon-actions {
@@ -3439,13 +3465,34 @@
   background: var(--paper-soft);
 }
 
+.output-detail-edit-brief summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.output-detail-edit-brief summary::-webkit-details-marker {
+  display: none;
+}
+
 .output-detail-edit-brief strong {
   color: var(--ink);
   font-size: 0.74rem;
   font-weight: 720;
 }
 
+.output-detail-edit-brief summary span {
+  color: var(--ink-soft);
+  font-size: 0.66rem;
+  font-weight: 620;
+  white-space: nowrap;
+}
+
 .output-detail-edit-brief p {
+  padding-top: 5px;
   white-space: pre-line;
 }
 
@@ -3487,6 +3534,25 @@
   font-size: 0.72rem;
   font-weight: 520;
   line-height: 1;
+}
+
+.output-detail-used-asset-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.output-detail-used-asset-group {
+  display: grid;
+  gap: 7px;
+}
+
+.output-detail-used-asset-group h3 {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .output-detail-used-assets {
@@ -3633,15 +3699,14 @@
 }
 
 .output-detail-actions {
-  position: sticky;
-  bottom: -18px;
+  flex: 0 0 auto;
   display: grid;
   gap: 8px;
-  margin: auto -18px -18px;
-  padding: 14px 18px 18px;
+  margin: 0 -18px 0;
+  padding: 14px 18px calc(18px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
   background: color-mix(in srgb, var(--paper-soft) 88%, transparent);
-  backdrop-filter: blur(14px);
+  z-index: 2;
 }
 
 .output-detail-actions .button {
@@ -3661,6 +3726,46 @@
 
 .output-detail-action-button svg {
   flex: 0 0 auto;
+}
+
+.output-detail-revision-note {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--paper) 84%, var(--paper-strong));
+}
+
+.output-detail-revision-note label {
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 720;
+}
+
+.output-detail-revision-note textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 84px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.output-detail-revision-note textarea:focus {
+  outline: 2px solid color-mix(in srgb, var(--brand) 28%, transparent);
+  border-color: color-mix(in srgb, var(--brand) 42%, var(--line));
+}
+
+.output-detail-revision-note-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 .work-gallery-card {
@@ -9807,7 +9912,13 @@
 
   .output-detail-rail {
     position: static;
+    height: auto;
     max-height: none;
+    overflow: visible;
+  }
+
+  .output-detail-panel {
+    overflow: visible;
   }
 
   .output-detail-stage {

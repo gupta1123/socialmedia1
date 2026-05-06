@@ -17,7 +17,13 @@ export function formatRelativeTime(date: string | Date | null) {
   if (isYesterday) {
     return `Yesterday ${timeStr}`;
   }
-  return `${d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })} ${timeStr}`;
+
+  const includeYear = d.getFullYear() !== now.getFullYear();
+  return `${d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    ...(includeYear ? { year: "numeric" } : {})
+  })} ${timeStr}`;
 }
 
 export function formatDisplayDate(date: string | Date | null) {

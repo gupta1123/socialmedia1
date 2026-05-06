@@ -85,7 +85,15 @@ def build_copy_contract(
 
 
 def visible_text_allowed(copy: Dict[str, str], session_facts: List[SessionFactOverride]) -> List[str]:
-    values = [copy.get("headline"), copy.get("subheadline"), copy.get("cta")]
+    values = [
+        copy.get("headline"),
+        copy.get("subheadline"),
+        copy.get("support_copy"),
+        copy.get("proof_point_1"),
+        copy.get("proof_point_2"),
+        copy.get("proof_point_3"),
+        copy.get("cta"),
+    ]
     values.extend(fact.value for fact in session_facts if fact.field in {"price", "emi", "phone", "email", "website", "rera"})
     return [str(value).strip() for value in values if str(value or "").strip()]
 

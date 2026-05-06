@@ -73,12 +73,26 @@ const EditorSaveFieldsSchema = z.object({
 const AiEditSaveMetadataSchema = z
   .object({
     source: z.literal("ai-edit"),
-    promptMode: z.enum(["normal", "list"]),
+    promptMode: z.enum(["normal", "list", "pins"]),
     exactInput: z
       .object({
         prompt: z.string().max(5000).optional(),
+        globalPrompt: z.string().max(5000).optional(),
+        pins: z
+          .array(
+            z
+              .object({
+                id: z.string().max(120).optional(),
+                x: z.number().min(0).max(1),
+                y: z.number().min(0).max(1),
+                comment: z.string().max(1000)
+              })
+              .passthrough()
+          )
+          .max(30)
+          .optional(),
         items: z.array(z.string().max(1000)).max(20).optional(),
-        normalizedItems: z.array(z.string().max(500)).max(20).optional()
+        normalizedItems: z.array(z.string().max(1000)).max(40).optional()
       })
       .passthrough()
       .optional(),
@@ -1041,6 +1055,24 @@ function extractAiEditPromptText(metadata: Record<string, unknown> | null | unde
     return prompt || null;
   }
 
+  if (metadata.promptMode === "pins" && exactInput) {
+    const globalPrompt = typeof exactInput.globalPrompt === "string" ? exactInput.globalPrompt.trim() : "";
+    const pinPrompts = Array.isArray(exactInput.pins)
+      ? exactInput.pins
+          .filter(isRecord)
+          .map((pin, index) => {
+            const comment = typeof pin.comment === "string" ? pin.comment.trim() : "";
+            if (!comment) return "";
+            const x = typeof pin.x === "number" ? Math.round(pin.x * 100) : null;
+            const y = typeof pin.y === "number" ? Math.round(pin.y * 100) : null;
+            return `Pinned edit ${index + 1}${x !== null && y !== null ? ` at x=${x}%, y=${y}%` : ""}: ${comment}`;
+          })
+          .filter(Boolean)
+      : [];
+    const prompt = [globalPrompt ? `Global edit context: ${globalPrompt}` : "", ...pinPrompts].filter(Boolean).join("\n");
+    return prompt || null;
+  }
+
   if (typeof metadata.submittedPrompt === "string") {
     const prompt = metadata.submittedPrompt.trim();
     return prompt || null;
@@ -1065,6 +1097,30 @@ function getAiEditHistory(metadataJson: Record<string, unknown> | null | undefin
   }
 
   return isRecord(metadataJson.aiEdit) ? [cloneRecord(metadataJson.aiEdit)] : [];
+}
+
+function extractOutputReferenceMetadata(metadataJson: Record<string, unknown> | null | undefined) {
+  if (!metadataJson) {
+    return {};
+  }
+
+  const metadata = cloneRecord(metadataJson);
+  const referenceKeys = [
+    "reference_asset_ids",
+    "reference_storage_paths",
+    "provider_reference_asset_ids",
+    "provider_reference_storage_paths",
+    "render_package"
+  ];
+  const result: Record<string, unknown> = {};
+
+  for (const key of referenceKeys) {
+    if (metadata[key] !== undefined) {
+      result[key] = metadata[key];
+    }
+  }
+
+  return result;
 }
 
 async function hydrateAiEditMetadataWithProviderPrompt(
@@ -1437,11 +1493,13 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
       : previousAiEditHistory.slice(-50);
     const lastAiEditMetadata = currentAiEditMetadata ?? (aiEditHistory.length > 0 ? aiEditHistory[aiEditHistory.length - 1] : null);
     const originalGenerationBrief = await resolveOriginalGenerationBrief(sourceOutput);
+    const sourceReferenceMetadata = extractOutputReferenceMetadata(sourceOutput?.metadata_json ?? null);
     const editorStateForStorage = sanitizeEditorStateForStorage(parsedEditorState, editorSourceStoragePath, editorLayerStoragePaths);
     const editorMetadataJson = {
       source: "editor-save",
       saveMode: resolvedMode,
       ...(originalGenerationBrief ? { originalGenerationBrief } : {}),
+      ...sourceReferenceMetadata,
       ...(editorStateForStorage ? { editorState: editorStateForStorage } : {}),
       ...(lastAiEditMetadata ? { aiEdit: lastAiEditMetadata, aiEditHistory } : {})
     };
@@ -1583,7 +1641,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
     const { data: savedOutput, error: savedOutputError } = await supabaseAdmin
       .from("creative_outputs")
       .select(
-        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by, metadata_json"
+        "id, workspace_id, brand_id, deliverable_id, project_id, post_type_id, creative_template_id, calendar_item_id, job_id, post_version_id, kind, storage_path, thumbnail_storage_path, provider_url, output_index, parent_output_id, root_output_id, edited_from_output_id, version_number, is_latest_version, review_state, latest_feedback_verdict, reviewed_at, created_by, created_at, metadata_json"
       )
       .eq("id", outputId)
       .maybeSingle();
@@ -1627,6 +1685,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
         latestVerdict: savedOutput.latest_feedback_verdict,
         reviewedAt: savedOutput.reviewed_at,
         createdBy: savedOutput.created_by,
+        createdAt: savedOutput.created_at,
         metadataJson,
         previewUrl: signedUrls.originalUrl,
         thumbnailUrl: signedUrls.thumbnailUrl,

@@ -465,6 +465,96 @@
   color: var(--brand);
 }
 
+.ai-editor-pinned-section {
+  gap: 12px;
+}
+
+.ai-editor-pin-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ai-editor-pin-summary span {
+  color: var(--ink-soft);
+}
+
+.ai-editor-pin-summary button {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ai-editor-pin-nav-list {
+  display: grid;
+  gap: 7px;
+}
+
+.ai-editor-pin-nav-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--paper);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-editor-pin-nav-item:hover,
+.ai-editor-pin-nav-item.is-active {
+  border-color: color-mix(in srgb, var(--brand) 44%, var(--line));
+  background: color-mix(in srgb, var(--brand) 5%, var(--paper));
+}
+
+.ai-editor-pin-nav-item span {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px 999px 999px 4px;
+  background: #111111;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.ai-editor-pin-nav-item.is-active span {
+  background: #a855f7;
+}
+
+.ai-editor-pin-nav-item strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-editor-pane-empty-state.is-compact {
+  padding: 18px 16px;
+  border-radius: 12px;
+}
+
 .ai-edit-apply-button {
   width: 100%;
   height: 48px;
@@ -2391,10 +2481,113 @@
   font-weight: 800;
 }
 
-.ai-edit-compare-button.is-active {
+.ai-edit-compare-button.is-active,
+.ai-edit-applied-edits-button.is-active {
   background: var(--ink);
   border-color: var(--ink);
   color: var(--paper);
+}
+
+.ai-edit-applied-edits-panel {
+  position: absolute;
+  top: 72px;
+  right: 128px;
+  z-index: 94;
+  width: min(340px, 32vw);
+  max-height: min(420px, calc(100% - 112px));
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--paper) 94%, transparent);
+  box-shadow: 0 22px 58px rgba(17, 24, 39, 0.16);
+  backdrop-filter: blur(18px);
+}
+
+.ai-edit-applied-edits-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ai-edit-applied-edits-panel-header strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.ai-edit-applied-edits-panel-header button {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.ai-edit-applied-edits-panel p {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.ai-edit-applied-pin-list {
+  display: grid;
+  gap: 7px;
+}
+
+.ai-edit-applied-pin-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-edit-applied-pin-item:hover,
+.ai-edit-applied-pin-item.is-active {
+  border-color: color-mix(in srgb, var(--brand) 48%, var(--line));
+  background: color-mix(in srgb, var(--brand) 6%, var(--paper));
+}
+
+.ai-edit-applied-pin-item span {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px 999px 999px 4px;
+  background: #111111;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.ai-edit-applied-pin-item.is-active span {
+  background: #a855f7;
+}
+
+.ai-edit-applied-pin-item strong {
+  min-width: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.35;
 }
 
 .ai-edit-compare-overlay {
@@ -2524,6 +2717,22 @@
 
 .ai-edit-compare-chip.is-after {
   right: 12px;
+}
+
+.ai-edit-compare-size-warning {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  z-index: 3;
+  max-width: calc(100% - 24px);
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.78);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
 }
 
 .ai-edit-compare-divider {
@@ -2937,6 +3146,147 @@
   overflow: hidden;
 }
 
+.ai-edit-pin-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.ai-edit-pin-cluster {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  pointer-events: auto;
+  z-index: 1;
+}
+
+.ai-edit-pin-cluster.is-active {
+  z-index: 5;
+}
+
+.ai-edit-pin-cluster.is-readonly {
+  z-index: 6;
+}
+
+.ai-edit-pin {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #ffffff;
+  border-radius: 999px 999px 999px 4px;
+  background: #111111;
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1;
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.ai-edit-pin.has-comment {
+  background: #f59e0b;
+  color: #111111;
+}
+
+.ai-edit-pin.is-active {
+  background: #a855f7;
+  color: #ffffff;
+  box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.2), 0 12px 24px rgba(0, 0, 0, 0.28);
+}
+
+.ai-edit-pin-cluster.is-readonly .ai-edit-pin {
+  background: #111111;
+  color: #ffffff;
+  cursor: default;
+}
+
+.ai-edit-pin-popover {
+  position: absolute;
+  left: 36px;
+  top: -2px;
+  width: min(260px, 34vw);
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--paper) 94%, transparent);
+  box-shadow: 0 18px 42px rgba(17, 24, 39, 0.18);
+  backdrop-filter: blur(16px);
+}
+
+.ai-edit-pin-popover textarea {
+  width: 100%;
+  min-height: 74px;
+  resize: none;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: var(--paper-soft);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+  outline: none;
+}
+
+.ai-edit-pin-popover textarea:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+
+.ai-edit-pin-popover.is-readonly {
+  width: min(240px, 30vw);
+  padding: 9px 10px;
+  pointer-events: none;
+}
+
+.ai-edit-pin-popover.is-readonly p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ai-edit-pin-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.ai-edit-pin-popover-actions button {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--paper-soft);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.ai-edit-pin-popover-actions button:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.ai-edit-pin-popover-actions button:last-child {
+  background: #111111;
+  border-color: #111111;
+  color: #ffffff;
+}
+
+.ai-edit-pin-popover-actions button:last-child:hover {
+  background: #2a2a2a;
+  border-color: #2a2a2a;
+  color: #ffffff;
+}
+
 .ai-editor-layer-surface {
   position: absolute;
   inset: 0;
@@ -2950,6 +3300,10 @@
   user-select: none;
   touch-action: none;
   cursor: grab;
+}
+
+.ai-editor-layer-surface.is-pin-mode .ai-editor-layer {
+  pointer-events: none;
 }
 
 .ai-editor-layer:active {
@@ -3380,6 +3734,41 @@
   display: grid;
   gap: 12px;
   padding-top: 4px;
+}
+
+.ai-editor-rera-color-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper-soft);
+}
+
+.ai-editor-rera-color-mode button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 800;
+  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.ai-editor-rera-color-mode button:hover:not(:disabled),
+.ai-editor-rera-color-mode button.is-active {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow-soft);
+}
+
+.ai-editor-rera-color-mode button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .ai-editor-textarea {

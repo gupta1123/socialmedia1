@@ -77,7 +77,9 @@ export interface ReraBlockData {
   registrationNumber: string;
   websiteUrl: string;
   textColor: string;
+  colorMode?: "text" | "all";
   qrSourceUrl?: string | null;
+  qrDataUrl?: string | null;
 }
 
 export type ShapeType = "rect" | "circle" | "triangle" | "star" | "badge";

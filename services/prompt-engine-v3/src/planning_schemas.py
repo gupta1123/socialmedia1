@@ -216,6 +216,7 @@ class CopyPlan(BaseModel):
     copy_role: str = "supporting"
     headline: str = ""
     subheadline: str = ""
+    support_copy: str = ""
     cta: str = ""
     proof_points: List[str] = Field(default_factory=list)
     contact_line: Optional[str] = None
@@ -223,4 +224,11 @@ class CopyPlan(BaseModel):
     source: str = "auto"
 
     def as_contract(self) -> Dict[str, str]:
-        return {"headline": self.headline, "subheadline": self.subheadline, "cta": self.cta}
+        contract = {"headline": self.headline, "subheadline": self.subheadline}
+        if self.support_copy:
+            contract["support_copy"] = self.support_copy
+        for index, point in enumerate(self.proof_points[:3], start=1):
+            if point:
+                contract[f"proof_point_{index}"] = point
+        contract["cta"] = self.cta
+        return contract

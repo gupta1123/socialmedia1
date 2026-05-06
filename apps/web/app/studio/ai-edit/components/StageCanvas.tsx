@@ -18,6 +18,14 @@ interface StageCanvasProps {
   stageFrameRef: RefObject<HTMLDivElement | null>;
   isPanning?: boolean;
   isSpacePressed?: boolean;
+  pinMode?: boolean;
+  pinnedEdits?: Array<{ id: string; x: number; y: number; comment: string }>;
+  readOnlyPins?: Array<{ id: string; x: number; y: number; comment: string }>;
+  activePinId?: string | null;
+  onCreatePin?: (pin: { x: number; y: number }) => void;
+  onSelectPin?: (id: string | null) => void;
+  onUpdatePinComment?: (id: string, comment: string) => void;
+  onRemovePin?: (id: string) => void;
 }
 
 export function StageCanvas({
@@ -30,10 +38,19 @@ export function StageCanvas({
   stageFrameRef,
   isPanning,
   isSpacePressed,
+  pinMode = false,
+  pinnedEdits = [],
+  readOnlyPins = [],
+  activePinId = null,
+  onCreatePin,
+  onSelectPin,
+  onUpdatePinComment,
+  onRemovePin,
 }: StageCanvasProps) {
   const { state } = useEditorContext();
   const { displayStageWidth, stageScale } = useStageDimensions();
   const currentImageUrl = useObjectUrl(state.currentImage?.file ?? null);
+  const visiblePins = pinnedEdits.length > 0 ? pinnedEdits : readOnlyPins;
 
   if (!state.currentImage) {
     return (
@@ -63,6 +80,16 @@ export function StageCanvas({
             }}
             onPointerDown={(event) => {
               event.stopPropagation();
+              if (pinMode) {
+                const rect = event.currentTarget.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                  onCreatePin?.({
+                    x: Math.min(0.99, Math.max(0.01, (event.clientX - rect.left) / rect.width)),
+                    y: Math.min(0.99, Math.max(0.01, (event.clientY - rect.top) / rect.height)),
+                  });
+                }
+                return;
+              }
               onStagePointerDown(event);
             }}
             onPointerMove={(event) => {
@@ -80,7 +107,68 @@ export function StageCanvas({
             }}
           >
             {currentImageUrl ? <img alt="Source" className="ai-edit-stage-image" draggable={false} src={currentImageUrl} /> : null}
-            <div className="ai-editor-layer-surface" aria-label="Editable layers">
+            {visiblePins.length > 0 ? (
+              <div className="ai-edit-pin-surface" aria-label="Pinned edit comments">
+                {visiblePins.map((pin, index) => {
+                  const isReadOnlyPin = pinnedEdits.length === 0;
+                  return (
+                    <div
+                      className={`ai-edit-pin-cluster ${pin.id === activePinId ? "is-active" : ""} ${isReadOnlyPin ? "is-readonly" : ""}`}
+                      key={pin.id}
+                      style={{
+                        left: `${pin.x * 100}%`,
+                        top: `${pin.y * 100}%`,
+                      }}
+                    >
+                      <button
+                        aria-label={`Pinned edit ${index + 1}`}
+                        className={`ai-edit-pin ${pin.id === activePinId ? "is-active" : ""} ${pin.comment.trim() ? "has-comment" : ""}`}
+                        onPointerDown={(event) => {
+                          event.stopPropagation();
+                          onSelectPin?.(pin.id);
+                        }}
+                        title={pin.comment || `Pinned edit ${index + 1}`}
+                        type="button"
+                      >
+                        {index + 1}
+                      </button>
+                      {pin.id === activePinId && !isReadOnlyPin ? (
+                        <div className="ai-edit-pin-popover" onPointerDown={(event) => event.stopPropagation()}>
+                          <textarea
+                            autoFocus
+                            onChange={(event) => onUpdatePinComment?.(pin.id, event.target.value)}
+                            placeholder="What should change here?"
+                            rows={3}
+                            value={pin.comment}
+                          />
+                          <div className="ai-edit-pin-popover-actions">
+                            <button aria-label="Remove pin" onClick={() => onRemovePin?.(pin.id)} title="Remove pin" type="button">
+                              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M3 6h18" />
+                                <path d="M8 6V4h8v2" />
+                                <path d="M19 6l-1 14H6L5 6" />
+                                <path d="M10 11v5" />
+                                <path d="M14 11v5" />
+                              </svg>
+                            </button>
+                            <button aria-label="Done editing pin" onClick={() => onSelectPin?.(null)} title="Done" type="button">
+                              <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M20 6 9 17l-5-5" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      ) : isReadOnlyPin && pin.comment.trim() && pin.id === activePinId ? (
+                        <div className="ai-edit-pin-popover is-readonly">
+                          <p>{pin.comment.trim()}</p>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+            <div className={`ai-editor-layer-surface ${pinMode ? "is-pin-mode" : ""}`} aria-label="Editable layers">
               {state.canvasLayers.filter(isLayerVisible).map((layer) => {
                 const selected = layer.id === state.selectedLayerId;
                 return renderLayer(layer, selected, stageScale, displayStageWidth, onLayerPointerDown);

@@ -138,7 +138,9 @@ export function AssetsPane({
         registrationNumber: number || "RERA",
         websiteUrl,
         textColor,
+        colorMode: "text",
         qrSourceUrl: qrSourceUrl || null,
+        qrDataUrl: blockImage.qrDataUrl ?? null,
       },
       preserveOnAiEdit: true,
     };

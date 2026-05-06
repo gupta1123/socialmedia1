@@ -41,37 +41,55 @@ export function LayersPane() {
     updateLayer(state.selectedLayerId, { text });
   }
 
-  async function handleReraBlockColorChange(color: string) {
-    if (!selectedReraBlockLayer?.reraBlock) return;
-
-    const nextColor = normalizeHexColor(color, selectedReraBlockLayer.reraBlock.textColor);
-    updateLayer(selectedReraBlockLayer.id, {
-      reraBlock: {
-        ...selectedReraBlockLayer.reraBlock,
-        textColor: nextColor,
-      },
-    });
-
-    if (nextColor !== color) {
-      return;
-    }
+  async function regenerateReraBlock(
+    layer: NonNullable<typeof selectedReraBlockLayer>,
+    nextReraBlock: NonNullable<typeof selectedReraBlockLayer>["reraBlock"]
+  ) {
+    if (!nextReraBlock) return;
 
     setIsUpdatingReraColor(true);
     try {
-      const blockImage = await createReraComplianceBlockImage({
-        ...selectedReraBlockLayer.reraBlock,
-        textColor: nextColor,
-      });
-      updateLayer(selectedReraBlockLayer.id, {
+      const blockImage = await createReraComplianceBlockImage(nextReraBlock);
+      updateLayer(layer.id, {
         src: blockImage.dataUrl,
         reraBlock: {
-          ...selectedReraBlockLayer.reraBlock,
-          textColor: nextColor,
+          ...nextReraBlock,
+          qrDataUrl: blockImage.qrDataUrl ?? nextReraBlock.qrDataUrl ?? null,
         },
       });
     } finally {
       setIsUpdatingReraColor(false);
     }
+  }
+
+  async function handleReraBlockColorChange(color: string) {
+    if (!selectedReraBlockLayer?.reraBlock) return;
+
+    const nextColor = normalizeHexColor(color, selectedReraBlockLayer.reraBlock.textColor);
+    const nextReraBlock = {
+      ...selectedReraBlockLayer.reraBlock,
+      textColor: nextColor,
+    };
+    updateLayer(selectedReraBlockLayer.id, { reraBlock: nextReraBlock });
+
+    if (nextColor !== color) {
+      return;
+    }
+
+    await regenerateReraBlock(selectedReraBlockLayer, nextReraBlock);
+  }
+
+  async function handleReraColorModeChange(colorMode: "text" | "all") {
+    if (!selectedReraBlockLayer?.reraBlock) return;
+
+    const nextReraBlock = {
+      ...selectedReraBlockLayer.reraBlock,
+      colorMode,
+    };
+
+    pushToHistory();
+    updateLayer(selectedReraBlockLayer.id, { reraBlock: nextReraBlock });
+    await regenerateReraBlock(selectedReraBlockLayer, nextReraBlock);
   }
 
   return (
@@ -188,18 +206,42 @@ export function LayersPane() {
           ) : null}
 
           {selectedLayer.type === "image" && selectedLayer.reraBlock ? (
-            <label className="create-field-label">
-              RERA text color
-              <StudioColorPicker
-                disabled={isUpdatingReraColor}
-                onChange={(color) => handleReraBlockColorChange(color)}
-                onChangeEnd={commitTransaction}
-                onChangeStart={beginTransaction}
-                value={normalizeHexColor(selectedLayer.reraBlock.textColor, "#111111")}
-                variant="field"
-              />
-              {isUpdatingReraColor ? <small className="ai-editor-field-hint">Updating RERA block...</small> : null}
-            </label>
+            <>
+              <label className="create-field-label">
+                RERA color
+                <StudioColorPicker
+                  disabled={isUpdatingReraColor}
+                  onChange={(color) => handleReraBlockColorChange(color)}
+                  onChangeEnd={commitTransaction}
+                  onChangeStart={beginTransaction}
+                  value={normalizeHexColor(selectedLayer.reraBlock.textColor, "#111111")}
+                  variant="field"
+                />
+              </label>
+
+              <div className="create-field-label">
+                Apply color to
+                <div className="ai-editor-rera-color-mode" role="group" aria-label="RERA color mode">
+                  <button
+                    className={(selectedLayer.reraBlock.colorMode ?? "text") === "text" ? "is-active" : ""}
+                    disabled={isUpdatingReraColor}
+                    onClick={() => void handleReraColorModeChange("text")}
+                    type="button"
+                  >
+                    Text only
+                  </button>
+                  <button
+                    className={(selectedLayer.reraBlock.colorMode ?? "text") === "all" ? "is-active" : ""}
+                    disabled={isUpdatingReraColor}
+                    onClick={() => void handleReraColorModeChange("all")}
+                    type="button"
+                  >
+                    Text + QR
+                  </button>
+                </div>
+                {isUpdatingReraColor ? <small className="ai-editor-field-hint">Updating RERA block...</small> : null}
+              </div>
+            </>
           ) : null}
         </div>
       ) : null}

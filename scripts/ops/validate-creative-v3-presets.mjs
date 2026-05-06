@@ -15,6 +15,7 @@ const allowedPositions = new Set([
   "bottom_right",
   "bottom_center",
   "bottom_footer",
+  "bottom_signature",
   "center",
   "left",
   "right"
@@ -147,14 +148,44 @@ function validateTextAgainstJson(json, context, out) {
   const secondaryLogo = objectAt(json, "secondary_logo") ?? objectAt(json, "secondary_logo_layer");
   const contact = objectAt(json, "contact") ?? objectAt(json, "contact_layer");
   const location = objectAt(json, "location") ?? objectAt(json, "location_layer");
+  const defaultContext = {
+    ...context,
+    text: stripConditionalReraLayoutText(context.text)
+  };
 
-  expectPositionFromText(out, context, logo, "logo", "top-right", "top_right");
-  expectPositionFromText(out, context, logo, "logo", "top-left", "top_left");
-  expectPositionFromText(out, context, secondaryLogo, "secondary logo", "top-left", "top_left");
-  expectPositionFromText(out, context, location, "location", "bottom-left", "bottom_left");
-  expectPositionFromText(out, context, location, "location", "bottom-center", "bottom_center");
-  expectPositionFromText(out, context, contact, "contact", "bottom-right", "bottom_right");
-  expectPositionFromText(out, context, contact, "contact number", "bottom-right", "bottom_right");
+  expectPositionFromText(out, defaultContext, logo, "logo", "top-right", "top_right");
+  expectPositionFromText(out, defaultContext, logo, "logo", "top-left", "top_left");
+  expectPositionFromText(out, defaultContext, secondaryLogo, "secondary logo", "top-left", "top_left");
+  expectPositionFromText(out, defaultContext, location, "location", "bottom-left", "bottom_left");
+  expectPositionFromText(out, defaultContext, location, "location", "bottom-center", "bottom_center");
+  expectPositionFromText(out, defaultContext, contact, "contact", "bottom-right", "bottom_right");
+  expectPositionFromText(out, defaultContext, contact, "contact number", "bottom-right", "bottom_right");
+  validateConditionalReraLayoutText(json, context, out);
+}
+
+function stripConditionalReraLayoutText(text) {
+  return text
+    .split(/\n|(?<=\.)\s+/)
+    .filter((sentence) => !/\b(?:if|when)\s+rera\b|rera\s+becomes\s+required/i.test(sentence))
+    .join("\n");
+}
+
+function validateConditionalReraLayoutText(json, context, out) {
+  const conditional = objectAt(objectAt(json, "conditional_layouts"), "when_rera_required");
+  if (!conditional) return;
+  const text = context.text;
+  const logo = objectAt(conditional, "logo");
+  const secondaryLogo = objectAt(conditional, "secondary_logo");
+  const rera = objectAt(conditional, "rera_qr");
+  if (/\b(?:if|when)\s+rera\b|rera\s+becomes\s+required/i.test(text)) {
+    if (/logo[^.\n]{0,90}top[-\s]left/i.test(text) && logo?.position && !positionMatches(logo.position, "top_left")) {
+      add(out, "error", context.label, `Conditional RERA text says logo should be top-left, but conditional_layouts.when_rera_required.logo has position "${logo.position}".`);
+    }
+    if (/rera[^.\n]{0,90}top[-\s]right/i.test(text) && rera?.position && !positionMatches(rera.position, "top_right")) {
+      add(out, "error", context.label, `Conditional RERA text says RERA should be top-right, but conditional_layouts.when_rera_required.rera_qr has position "${rera.position}".`);
+    }
+    if (secondaryLogo?.position) validatePosition(out, context.label, "conditional_layouts.when_rera_required.secondary_logo.position", secondaryLogo.position);
+  }
 }
 
 function expectPositionFromText(out, context, rules, subject, phrase, expected) {

@@ -54,12 +54,14 @@ def plan_copy(
         subheadline = _shorten(subheadline, 92)
     if strategy.creative_mode == "copy_led":
         headline = _stronger_headline(headline, concept)
+    proof_points = _proof_points(intent, fact_store)
     return CopyPlan(
         copy_role=copy_role,
         headline=headline,
         subheadline=subheadline,
         cta=cta,
-        proof_points=_proof_points(intent, fact_store),
+        support_copy=_support_copy(intent, strategy, fact_store, concept),
+        proof_points=proof_points if _should_show_proof_points(strategy) else [],
         contact_line=_contact_line(production),
         forbidden_claims=_forbidden_claims(request, intent),
         source="auto_planned",
@@ -131,6 +133,41 @@ def _subheadline(intent: CreativeIntent, strategy: CreativeStrategy, concept: Va
     if location:
         return f"A refined project introduction at {location}, framed with truthful visuals and a distinct campaign mood."
     return "A refined project introduction with clear hierarchy, truthful visuals, and a distinct campaign mood."
+
+
+def _support_copy(intent: CreativeIntent, strategy: CreativeStrategy, fact_store: GroundedFactStore, concept: VariantConcept) -> str:
+    if strategy.creative_mode not in {"copy_led", "proof_led", "offer_led"}:
+        return ""
+    location = fact_store.first_value("micro_location") or fact_store.first_value("city")
+    config = fact_store.first_value("configuration")
+    tagline = fact_store.first_value("tagline")
+    approved_claim = fact_store.first_value("approved_claim")
+    price = fact_store.first_value("price") if intent.content_job_id == "pricing_ad" or strategy.creative_mode == "offer_led" else ""
+    if strategy.creative_mode == "offer_led":
+        pieces = [piece for piece in [price, config, location] if piece]
+        if pieces:
+            return "A clear proposition anchored in %s." % ", ".join(pieces[:3])
+        return "A focused enquiry-led message with only verified project details."
+    if strategy.creative_mode == "proof_led":
+        pieces = [piece for piece in [location, config, approved_claim] if piece]
+        if pieces:
+            return "Grounded in verified project context: %s." % ", ".join(pieces[:3])
+        return "A fact-first project message using only verified details."
+    if tagline:
+        return tagline
+    if config and location:
+        return f"{config} homes planned around everyday comfort at {location}."
+    if location:
+        return f"A composed project story shaped around the address at {location}."
+    if approved_claim:
+        return approved_claim
+    if concept.copy_strategy:
+        return _shorten(concept.copy_strategy, 120)
+    return "A composed project story with clear reasons to explore."
+
+
+def _should_show_proof_points(strategy: CreativeStrategy) -> bool:
+    return strategy.creative_mode in {"copy_led", "proof_led", "offer_led"}
 
 
 def _cta(content_job_id: str, strategy: CreativeStrategy, production: ProductionPlan, subject: str = "") -> str:
