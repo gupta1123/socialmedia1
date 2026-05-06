@@ -5,12 +5,16 @@ import os
 import re
 import ast
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, get_origin
 
 os.environ.setdefault("DSPY_CACHEDIR", os.path.join(tempfile.gettempdir(), "briefly-social-dspy-cache"))
 os.environ.setdefault("LITELLM_CACHE_DIR", os.path.join(tempfile.gettempdir(), "briefly-social-litellm-cache"))
 
 import dspy
+import litellm
+from pydantic import BaseModel, ConfigDict, Field, create_model
+
+from dspy.adapters.json_adapter import _has_open_ended_mapping
 
 from .schemas import CompileRequest
 from .creative_levers import CONTENT_JOBS as CONTENT_JOB_REGISTRY, lever_options_for_job, sanitize_creative_direction
@@ -20,17 +24,167 @@ CONTENT_JOBS = list(CONTENT_JOB_REGISTRY.keys())
 
 
 class JsonObjectAdapter(dspy.JSONAdapter):
-    """Use provider JSON mode without structured-output retries.
+    """DSPy JSON adapter with structured-output support.
 
-    This mirrors the notebook setup for OpenRouter/Gemini. The default DSPy JSON
-    adapter can ask providers for structured output in a way OpenRouter does not
-    always support, and then parse only ChainOfThought reasoning. JSON mode keeps
-    the response shape stable while preserving DSPy's field extraction.
+    The output signatures below are typed Pydantic objects. Let DSPy request a
+    native structured schema where the provider supports it, and use DSPy's own
+    JSON fallback otherwise.
     """
 
     def __call__(self, lm, lm_kwargs, signature, demos, inputs):
-        lm_kwargs["response_format"] = {"type": "json_object"}
-        return dspy.ChatAdapter.__call__(self, lm, lm_kwargs, signature, demos, inputs)
+        provider = lm.model.split("/", 1)[0] or "openai"
+        params = litellm.get_supported_openai_params(model=lm.model, custom_llm_provider=provider)
+        if not params or "response_format" not in params:
+            return dspy.ChatAdapter.__call__(self, lm, lm_kwargs, signature, demos, inputs)
+
+        if _has_open_ended_mapping(signature):
+            lm_kwargs["response_format"] = {"type": "json_object"}
+            return dspy.ChatAdapter.__call__(self, lm, lm_kwargs, signature, demos, inputs)
+
+        try:
+            lm_kwargs["response_format"] = _get_structured_outputs_response_format(signature)
+            return dspy.ChatAdapter.__call__(self, lm, lm_kwargs, signature, demos, inputs)
+        except Exception as structured_exc:
+            try:
+                lm_kwargs["response_format"] = {"type": "json_object"}
+                return dspy.ChatAdapter.__call__(self, lm, lm_kwargs, signature, demos, inputs)
+            except Exception:
+                raise structured_exc
+
+
+def _get_structured_outputs_response_format(signature):
+    for name, field in signature.output_fields.items():
+        if get_origin(field.annotation) is dict:
+            raise ValueError(f"Field '{name}' has an open-ended mapping type.")
+
+    fields = {}
+    for name, field in signature.output_fields.items():
+        default = field.default if hasattr(field, "default") else ...
+        fields[name] = (field.annotation, default)
+
+    pydantic_model = create_model(
+        "DSPyProgramOutputs",
+        **fields,
+        __config__=ConfigDict(extra="forbid"),
+    )
+    schema = pydantic_model.model_json_schema()
+    for prop in schema.get("properties", {}).values():
+        prop.pop("json_schema_extra", None)
+
+    def enforce_required(schema_part: dict) -> None:
+        if schema_part.get("type") == "object":
+            props = schema_part.get("properties")
+            if props is not None:
+                schema_part["required"] = list(props.keys())
+                schema_part["additionalProperties"] = False
+                for sub_schema in props.values():
+                    if isinstance(sub_schema, dict):
+                        enforce_required(sub_schema)
+            else:
+                schema_part["properties"] = {}
+                schema_part["required"] = []
+                schema_part["additionalProperties"] = False
+        if schema_part.get("type") == "array" and isinstance(schema_part.get("items"), dict):
+            enforce_required(schema_part["items"])
+        for key in ("$defs", "definitions"):
+            if key in schema_part:
+                for def_schema in schema_part[key].values():
+                    enforce_required(def_schema)
+
+    enforce_required(schema)
+    pydantic_model.model_json_schema = lambda *args, **kwargs: schema
+    return pydantic_model
+
+
+class CreativeDirectionOutput(BaseModel):
+    style_family: str = ""
+    hero_presentation: str = ""
+    layout_geometry: str = ""
+    graphic_layer: List[str] = Field(default_factory=list)
+    type_voice: str = ""
+    text_architecture: str = ""
+    mood_mode: str = ""
+    density: str = ""
+    brand_visibility: str = ""
+    visual_mode: str = ""
+
+
+class IntentOutput(BaseModel):
+    resolved_content_job_id: str = ""
+    confidence: float = 0.0
+    brief_summary: str = ""
+    explicit_user_requests: List[str] = Field(default_factory=list)
+    factual_claims: List[str] = Field(default_factory=list)
+    risk_notes: List[str] = Field(default_factory=list)
+
+
+class AssetSelectionOutput(BaseModel):
+    selected_asset_id: str = ""
+    confidence: float = 0.0
+    selection_reason: str = ""
+    asset_role: str = ""
+    render_truth_notes: str = ""
+    warnings: List[str] = Field(default_factory=list)
+
+
+class VariantPlanItemOutput(BaseModel):
+    variant_id: str = ""
+    label: str = ""
+    variation_axis: str = ""
+    selected_template_id: str = ""
+    creative_direction: CreativeDirectionOutput = Field(default_factory=CreativeDirectionOutput)
+    copy_angle: str = ""
+    creative_big_idea: str = ""
+    asset_treatment: str = ""
+    layout_plan: str = ""
+    graphic_devices: List[str] = Field(default_factory=list)
+    copy_strategy: str = ""
+    why_distinct: str = ""
+
+
+class VariantPlanOutput(BaseModel):
+    variants: List[VariantPlanItemOutput] = Field(default_factory=list)
+
+
+class CopyOutput(BaseModel):
+    headline: str = ""
+    subheadline: str = ""
+    cta: str = ""
+
+
+class ImagePromptOutput(BaseModel):
+    prompt: str = ""
+    negative_prompt: str = ""
+    copy_text: CopyOutput = Field(default_factory=CopyOutput, alias="copy")
+    visible_text_allowed: List[str] = Field(default_factory=list)
+    creative_direction: CreativeDirectionOutput = Field(default_factory=CreativeDirectionOutput)
+    text_policy: str = ""
+    layout_contract: str = ""
+
+
+class ValidationOutput(BaseModel):
+    passed: bool = True
+    score: float = 1.0
+    errors: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    improvement_notes: List[str] = Field(default_factory=list)
+
+
+class AuditIssueOutput(BaseModel):
+    severity: str = "warning"
+    type: str = "prompt_audit"
+    message: str = ""
+
+
+class AuditOutput(BaseModel):
+    status: str = "clean"
+    repaired_provider_prompt: str = ""
+    repaired_negative_prompt: str = ""
+    issues_found: List[AuditIssueOutput] = Field(default_factory=list)
+    changes_made: List[str] = Field(default_factory=list)
+    remaining_risks: List[str] = Field(default_factory=list)
+    facts_used_in_prompt: List[str] = Field(default_factory=list)
+    facts_used_in_visible_copy: List[str] = Field(default_factory=list)
 
 
 def dspy_available() -> bool:
@@ -67,6 +221,15 @@ def configure_dspy_once() -> None:
 def extract_json(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return value
+    if isinstance(value, BaseModel):
+        return value.model_dump(by_alias=True)
+    if hasattr(value, "model_dump"):
+        try:
+            data = value.model_dump(by_alias=True)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
     if hasattr(value, "toDict"):
         try:
             data = value.toDict()
@@ -106,10 +269,10 @@ class ResolveCreativeIntent(dspy.Signature):
     Treat the brief as creative guidance within that selected post type, not permission to switch jobs.
     """
 
-    request_json = dspy.InputField()
-    project_context_json = dspy.InputField()
-    available_content_jobs_json = dspy.InputField()
-    intent_json = dspy.OutputField(
+    request_json: str = dspy.InputField()
+    project_context_json: str = dspy.InputField()
+    available_content_jobs_json: str = dspy.InputField()
+    intent_json: IntentOutput = dspy.OutputField(
         desc=(
             "JSON object with resolved_content_job_id, confidence, brief_summary, "
             "explicit_user_requests, factual_claims, risk_notes."
@@ -120,10 +283,10 @@ class ResolveCreativeIntent(dspy.Signature):
 class SelectHeroAsset(dspy.Signature):
     """Choose the best hero/reference asset from a factual asset shortlist."""
 
-    request_json = dspy.InputField()
-    content_job_id = dspy.InputField()
-    asset_candidates_json = dspy.InputField()
-    selection_json = dspy.OutputField(
+    request_json: str = dspy.InputField()
+    content_job_id: str = dspy.InputField()
+    asset_candidates_json: str = dspy.InputField()
+    selection_json: AssetSelectionOutput = dspy.OutputField(
         desc=(
             "JSON object with selected_asset_id, confidence, selection_reason, "
             "asset_role, render_truth_notes, warnings."
@@ -138,12 +301,12 @@ class GenerateVariantPlan(dspy.Signature):
     the central creative axis and avoid launch, pricing, or site-visit framing unless explicitly requested.
     """
 
-    request_json = dspy.InputField()
-    content_job_id = dspy.InputField()
-    selected_asset_json = dspy.InputField()
-    eligible_templates_json = dspy.InputField()
-    lever_options_json = dspy.InputField()
-    variant_plan_json = dspy.OutputField(
+    request_json: str = dspy.InputField()
+    content_job_id: str = dspy.InputField()
+    selected_asset_json: str = dspy.InputField()
+    eligible_templates_json: str = dspy.InputField()
+    lever_options_json: str = dspy.InputField()
+    variant_plan_json: VariantPlanOutput = dspy.OutputField(
         desc=(
             "JSON object with variants array. Each variant has variant_id, label, "
             "variation_axis, selected_template_id, creative_direction, copy_angle, "
@@ -157,11 +320,11 @@ class GenerateVariantPlan(dspy.Signature):
 class GenerateImagePrompt(dspy.Signature):
     """Write a grounded image-generation prompt and render contract for one variant."""
 
-    request_json = dspy.InputField()
-    project_context_json = dspy.InputField()
-    asset_json = dspy.InputField()
-    variant_spec_json = dspy.InputField()
-    output_json = dspy.OutputField(
+    request_json: str = dspy.InputField()
+    project_context_json: str = dspy.InputField()
+    asset_json: str = dspy.InputField()
+    variant_spec_json: str = dspy.InputField()
+    output_json: ImagePromptOutput = dspy.OutputField(
         desc=(
             "JSON object with prompt, negative_prompt, copy, visible_text_allowed, "
             "creative_direction, text_policy, layout_contract. Preserve asset truth. "
@@ -176,9 +339,9 @@ class GenerateImagePrompt(dspy.Signature):
 class ValidateCreativeQuality(dspy.Signature):
     """Judge whether the prompt is grounded, non-generic, and useful for image rendering."""
 
-    request_json = dspy.InputField()
-    output_json = dspy.InputField()
-    validation_json = dspy.OutputField(
+    request_json: str = dspy.InputField()
+    output_json: str = dspy.InputField()
+    validation_json: ValidationOutput = dspy.OutputField(
         desc="JSON object with passed boolean, score 0-1, errors array, warnings array, improvement_notes array."
     )
 
@@ -186,10 +349,10 @@ class ValidateCreativeQuality(dspy.Signature):
 class RepairCreativeOutput(dspy.Signature):
     """Repair one generated creative output without changing grounded facts or selected assets."""
 
-    request_json = dspy.InputField()
-    output_json = dspy.InputField()
-    validation_json = dspy.InputField()
-    repaired_output_json = dspy.OutputField(
+    request_json: str = dspy.InputField()
+    output_json: str = dspy.InputField()
+    validation_json: str = dspy.InputField()
+    repaired_output_json: ImagePromptOutput = dspy.OutputField(
         desc="JSON object with the same output fields, fixed for validation errors while preserving selected asset, facts, and copy."
     )
 
@@ -201,8 +364,8 @@ class AuditAndRepairPrompt(dspy.Signature):
     and asset/template leakage. Return JSON only.
     """
 
-    audit_payload_json = dspy.InputField()
-    audit_result_json = dspy.OutputField(
+    audit_payload_json: str = dspy.InputField()
+    audit_result_json: AuditOutput = dspy.OutputField(
         desc=(
             "JSON object with status clean|repaired|needs_input|blocked, repaired_provider_prompt, "
             "repaired_negative_prompt, issues_found array, changes_made array, remaining_risks array, "
@@ -214,29 +377,35 @@ class AuditAndRepairPrompt(dspy.Signature):
 class DspyPromptProgram:
     def __init__(self) -> None:
         configure_dspy_once()
-        self.resolve_intent = dspy.ChainOfThought(ResolveCreativeIntent)
-        self.select_asset = dspy.ChainOfThought(SelectHeroAsset)
-        self.plan_variants = dspy.ChainOfThought(GenerateVariantPlan)
-        self.generate_prompt = dspy.ChainOfThought(GenerateImagePrompt)
-        self.validate_quality = dspy.ChainOfThought(ValidateCreativeQuality)
-        self.repair_output = dspy.ChainOfThought(RepairCreativeOutput)
-        self.audit_prompt = dspy.ChainOfThought(AuditAndRepairPrompt)
+        # JSON mode is stricter and more stable when each call returns only the
+        # requested JSON field. ChainOfThought adds an extra `reasoning` field that
+        # some providers return without the final output field, causing parse-only
+        # failures and unnecessary fallback to the deterministic planner.
+        self.resolve_intent = dspy.Predict(ResolveCreativeIntent)
+        self.select_asset = dspy.Predict(SelectHeroAsset)
+        self.plan_variants = dspy.Predict(GenerateVariantPlan)
+        self.generate_prompt = dspy.Predict(GenerateImagePrompt)
+        self.validate_quality = dspy.Predict(ValidateCreativeQuality)
+        self.repair_output = dspy.Predict(RepairCreativeOutput)
+        self.audit_prompt = dspy.Predict(AuditAndRepairPrompt)
 
     def resolve(self, request: CompileRequest, context: Dict[str, Any]) -> Dict[str, Any]:
-        pred = self.resolve_intent(
+        return self._predict_json(
+            self.resolve_intent,
+            "intent_json",
             request_json=json.dumps(_request_for_model(request), ensure_ascii=False),
             project_context_json=json.dumps(_project_context_for_model(context), ensure_ascii=False),
             available_content_jobs_json=json.dumps(CONTENT_JOBS, ensure_ascii=False),
         )
-        return extract_json(getattr(pred, "intent_json", pred))
 
     def select_hero_asset(self, request: CompileRequest, content_job_id: str, assets: List[Dict[str, Any]], asset_selection_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        pred = self.select_asset(
+        return self._predict_json(
+            self.select_asset,
+            "selection_json",
             request_json=json.dumps(_request_for_model(request), ensure_ascii=False),
             content_job_id=content_job_id,
             asset_candidates_json=json.dumps(asset_selection_context or assets[:12], ensure_ascii=False),
         )
-        return extract_json(getattr(pred, "selection_json", pred))
 
     def make_variant_plan(
         self,
@@ -245,14 +414,15 @@ class DspyPromptProgram:
         asset: Dict[str, Any],
         templates: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        pred = self.plan_variants(
+        return self._predict_json(
+            self.plan_variants,
+            "variant_plan_json",
             request_json=json.dumps(_request_for_model(request), ensure_ascii=False),
             content_job_id=content_job_id,
             selected_asset_json=json.dumps(asset, ensure_ascii=False),
             eligible_templates_json=json.dumps(templates[:8], ensure_ascii=False),
             lever_options_json=json.dumps(lever_options_for_job(content_job_id), ensure_ascii=False),
         )
-        return extract_json(getattr(pred, "variant_plan_json", pred))
 
     def generate_variant_output(
         self,
@@ -261,34 +431,56 @@ class DspyPromptProgram:
         asset: Dict[str, Any],
         variant_spec: Dict[str, Any],
     ) -> Dict[str, Any]:
-        pred = self.generate_prompt(
+        return self._predict_json(
+            self.generate_prompt,
+            "output_json",
             request_json=json.dumps(_request_for_model(request), ensure_ascii=False),
             project_context_json=json.dumps(_project_context_for_model(context), ensure_ascii=False),
             asset_json=json.dumps(asset, ensure_ascii=False),
             variant_spec_json=json.dumps(variant_spec, ensure_ascii=False),
         )
-        return extract_json(getattr(pred, "output_json", pred))
 
     def validate_output(self, request: CompileRequest, output: Dict[str, Any]) -> Dict[str, Any]:
-        pred = self.validate_quality(
+        return self._predict_json(
+            self.validate_quality,
+            "validation_json",
             request_json=json.dumps(_request_for_model(request), ensure_ascii=False),
             output_json=json.dumps(output, ensure_ascii=False),
         )
-        return extract_json(getattr(pred, "validation_json", pred))
 
     def audit_and_repair_prompt(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        pred = self.audit_prompt(
+        return self._predict_json(
+            self.audit_prompt,
+            "audit_result_json",
             audit_payload_json=json.dumps(payload, ensure_ascii=False),
         )
-        return extract_json(getattr(pred, "audit_result_json", pred))
 
     def repair_variant_output(self, request: CompileRequest, output: Dict[str, Any], validation: Dict[str, Any]) -> Dict[str, Any]:
-        pred = self.repair_output(
+        return self._predict_json(
+            self.repair_output,
+            "repaired_output_json",
             request_json=json.dumps(_request_for_model(request), ensure_ascii=False),
             output_json=json.dumps(output, ensure_ascii=False),
             validation_json=json.dumps(validation, ensure_ascii=False),
         )
-        return extract_json(getattr(pred, "repaired_output_json", pred))
+
+    def _predict_json(self, predictor: Any, field_name: str, **kwargs: Any) -> Dict[str, Any]:
+        attempts = max(1, int(os.getenv("PROMPT_ENGINE_V3_DSPY_PARSE_RETRIES", "2")) + 1)
+        last_exc: Optional[Exception] = None
+        for attempt in range(attempts):
+            try:
+                pred = predictor(**kwargs)
+                parsed = extract_json(getattr(pred, field_name, pred))
+                if parsed.get("parse_error"):
+                    raise ValueError(str(parsed.get("message") or "Model response was not parseable JSON."))
+                return parsed
+            except Exception as exc:
+                last_exc = exc
+                if attempt == attempts - 1:
+                    raise
+        if last_exc:
+            raise last_exc
+        return {}
 
 
 def _request_for_model(request: CompileRequest) -> Dict[str, Any]:

@@ -6,6 +6,16 @@ from typing import Iterable, List
 from .planning_schemas import ProductionPlan
 from .schemas import SessionFactOverride, ValidationResult, VariantOutput
 
+INTERNAL_PROMPT_AUDIT_TYPES = {"prompt_auditor_error", "adapter_parse_error", "model_parse_error"}
+INTERNAL_PROMPT_AUDIT_MARKERS = (
+    "AdapterParseError",
+    "JSONAdapter",
+    "Traceback",
+    "Expected to find output fields",
+    "Actual output fields parsed",
+    "DSPy",
+)
+
 
 def validate_full_variant(
     variant: VariantOutput,
@@ -75,12 +85,21 @@ def validate_full_variant(
                 message = str(issue.get("message") or issue).strip()
                 if not message:
                     continue
+                if _is_internal_prompt_audit_issue(issue, message):
+                    continue
                 if str(issue.get("severity") or "warning") == "error":
                     warnings.append("Prompt audit error repaired/flagged: %s" % message)
                 else:
                     warnings.append("Prompt audit: %s" % message)
     warnings.extend(_quality_warnings(variant))
     return ValidationResult(passed=not errors, errors=_dedupe(errors), warnings=_dedupe(warnings))
+
+
+def _is_internal_prompt_audit_issue(issue: dict, message: str) -> bool:
+    issue_type = str(issue.get("type") or "").strip()
+    if issue_type in INTERNAL_PROMPT_AUDIT_TYPES:
+        return True
+    return any(marker.lower() in message.lower() for marker in INTERNAL_PROMPT_AUDIT_MARKERS)
 
 
 def _audit_text(variant: VariantOutput) -> str:
@@ -149,6 +168,9 @@ def _normalize_claim_value(label: str, value: object) -> str:
         digits = re.sub(r"\D+", "", text)
         # Normalize India country code so +91-22-... and 022-... can be compared sanely.
         return digits[2:] if digits.startswith("91") and len(digits) > 10 else digits
+    if label == "rera":
+        match = re.search(r"\b[A-Z]?\d{6,}\b", text, flags=re.IGNORECASE)
+        return match.group(0).lower() if match else ""
     return re.sub(r"\s+", " ", text.lower())
 
 
@@ -185,6 +207,13 @@ def _quality_warnings(variant: VariantOutput) -> List[str]:
     assumptions = template.get("asset_assumptions") if isinstance(template, dict) else []
     if isinstance(assumptions, list) and semantic and assumptions and semantic not in [str(x).lower() for x in assumptions]:
         warnings.append("Selected template assumptions do not directly match selected asset semantic; ensure concept is adapted to the asset.")
+    intent = variant.layout_contract.get("intent") if isinstance(variant.layout_contract, dict) else {}
+    if isinstance(intent, dict):
+        requested_semantics = [str(item).lower() for item in intent.get("requested_asset_semantics") or []]
+        if "building_exterior" in requested_semantics and semantic not in {"exterior", "project_exterior", "building_exterior"}:
+            warnings.append("Selected asset semantic does not match the requested building exterior route; adapt the concept or choose an exterior asset.")
+        if intent.get("content_job_id") == "amenity_spotlight" and semantic and semantic not in {"amenity", "pool", "clubhouse", "garden", "landscape", "interior"}:
+            warnings.append("Amenity spotlight is using a non-amenity selected asset; adapt the concept to the selected asset or choose an amenity asset.")
     copy = variant.copy_contract or {}
     headline = str(copy.get("headline") or "").strip().lower()
     subheadline = str(copy.get("subheadline") or "").strip().lower()

@@ -23,7 +23,7 @@ from .grounding_validator import validate_full_variant
 from .intent_resolver import resolve_creative_intent
 from .planning_schemas import AssetDecision, CopyPlan, CreativeIntent, CreativeStrategy, GroundedFactStore, ProductionPlan, TemplateConstraint, VariantConcept
 from .production_resolver import resolve_production_plan
-from .prompt_compiler import compile_image_prompt, fallback_prompt, strip_internal_tokens
+from .prompt_compiler import compile_image_prompt, fallback_prompt, remove_unsafe_commercial_claims, repair_structural_change_requests, strip_internal_tokens
 from .prompt_auditor import audit_and_repair_prompt
 from .renderer_contract import build_asset_role_plan, build_render_package
 from .schemas import CompileRequest, CompileResponse, FactAudit, ValidationResult, VariantOutput
@@ -40,7 +40,7 @@ def compile_prompt(request: CompileRequest) -> CompileResponse:
             response = compile_prompt_with_registry_planner(request)
             response.debug["dspy_error"] = "%s: %s" % (type(exc).__name__, exc)
             response.debug["engine_fallback_reason"] = "dspy_parse_or_runtime_error"
-            response.validation.warnings.append("DSPy generation failed; registry planner fallback was used.")
+            response.validation.warnings.append("AI planner returned an invalid structured response; safe fallback planner was used.")
             return response
     return compile_prompt_with_registry_planner(request)
 
@@ -106,7 +106,7 @@ def compile_prompt_with_dspy(request: CompileRequest) -> CompileResponse:
     concepts = plan_variant_concepts(request=request, intent=intent, strategy=strategy, asset_decision=asset_decision, template_constraint=template_constraint, variant_specs=variant_specs)
 
     variants: List[VariantOutput] = []
-    warnings = list(gate.warnings)
+    warnings = list(gate.warnings) + list(commercial_warnings)
     errors: List[str] = []
     selected_assets_by_variant: List[str] = []
     db_facts = fact_strings_for_validation(fact_store, db_fact_strings(context))
@@ -217,7 +217,7 @@ def compile_prompt_with_registry_planner(request: CompileRequest) -> CompileResp
     concepts = plan_variant_concepts(request=request, intent=intent, strategy=strategy, asset_decision=asset_decision, template_constraint=template_constraint, variant_specs=specs)
     variants: List[VariantOutput] = []
     errors: List[str] = []
-    warnings = list(gate.warnings)
+    warnings = list(gate.warnings) + list(commercial_warnings)
     if production.missing_requirements:
         errors.extend("Missing required production asset/value: %s" % item for item in production.missing_requirements)
     selected_assets_by_variant: List[str] = []
@@ -463,6 +463,8 @@ def build_variant_output(
     if not raw_prompt:
         raw_prompt = fallback_prompt(runtime_context, asset, copy, creative_direction)
     raw_prompt = append_variant_distinction(raw_prompt, spec)
+    raw_prompt = remove_unsafe_commercial_claims(raw_prompt)
+    raw_prompt = repair_structural_change_requests(raw_prompt, getattr(intent, "brief_summary", request.brief))
     compiled_prompt = compile_image_prompt(
         raw_prompt,
         runtime_context,
@@ -508,6 +510,7 @@ def build_variant_output(
     )
     compiled_prompt = str(prompt_audit.get("repaired_provider_prompt") or compiled_prompt)
     negative_prompt = str(prompt_audit.get("repaired_negative_prompt") or negative_prompt)
+    additional_logo_layers = production.additional_logos[1:]
     asset_role_plan = build_asset_role_plan(
         asset,
         production.include_logo,
@@ -515,9 +518,10 @@ def build_variant_output(
         production.secondary_logo.asset_id,
         production.include_rera_qr,
         production.rera_qr_asset_id,
-        [logo.asset_id for logo in production.additional_logos if logo.asset_id],
+        [logo.asset_id for logo in additional_logo_layers if logo.asset_id],
     )
     contact_rules = {
+        **production.contact_plan.rules_extra,
         "required": bool(production.contact_plan.items),
         "position": production.contact_plan.position,
         "items": production.contact_plan.items,
@@ -560,7 +564,7 @@ def build_variant_output(
                 "role": logo.role,
                 **({"label": logo.label} if logo.label else {}),
             }
-            for logo in production.additional_logos
+            for logo in additional_logo_layers
         ],
         logo_position=production.logo_position,
         logo_rules_extra=production.logo_rules_extra,
@@ -661,7 +665,7 @@ def build_variant_output(
                     "role": logo.role,
                     **({"label": logo.label} if logo.label else {}),
                 }
-                for logo in production.additional_logos
+                for logo in additional_logo_layers
             ],
             "rera_qr_layer": {
                 "required": production.include_rera_qr,
@@ -715,9 +719,31 @@ def commercial_pricing_guard(request: CompileRequest, context: Dict[str, Any], c
     options = request.options if isinstance(request.options, dict) else {}
     if options.get("allowUnverifiedPricing") or options.get("allow_unverified_pricing") or options.get("clientApprovedPricing") or options.get("client_approved_pricing"):
         return [], ["Commercial pricing was allowed by explicit request option and should be client-reviewed before publishing."]
+    brief_text = request.brief or ""
+    risky_financial_claim = re.search(r"\b(?:guaranteed|assured)\s+(?:returns?|roi|appreciation|profit)s?\b", brief_text, flags=re.I)
+    brief_price_claims = price_claims_present_in_text(brief_text)
+    warnings: List[str] = []
+    if risky_financial_claim:
+        warnings.append("Unsupported commercial/financial claim was requested and omitted: %s." % risky_financial_claim.group(0))
+    if brief_price_claims:
+        warnings.append("Price/offer claim was supplied in the brief and requires client review before publishing: %s." % ", ".join(brief_price_claims[:3]))
+    if risky_financial_claim:
+        return ["Unsupported commercial/financial guarantees cannot be generated. Remove or replace the claim with verified client-approved offer details."], dedupe(warnings)
+    conflicting_price = next(
+        (
+            fact
+            for fact in session_facts
+            if getattr(fact, "field", "") in {"price", "emi"} and getattr(fact, "overrides", "")
+        ),
+        None,
+    )
+    if conflicting_price:
+        return [
+            "The brief supplied a price/offer value that appears to conflict with the project profile. Confirm approved pricing before generation."
+        ], dedupe(warnings + ["Conflicting price/offer value needs client approval before generation."])
     has_client_price = any(getattr(fact, "field", "") in {"price", "emi"} and getattr(fact, "value", "") for fact in session_facts)
     if has_client_price:
-        return [], ["Pricing/offer value was supplied in the current brief and requires client review before publishing."]
+        return [], dedupe(warnings + ["Pricing/offer value was supplied in the current brief and requires client review before publishing."])
     profile = project_profile(context)
     commercial_text = " ".join(str(x) for x in [
         profile.get("commercialDataConfidence"),
@@ -732,13 +758,16 @@ def commercial_pricing_guard(request: CompileRequest, context: Dict[str, Any], c
     brief_requires_verified = bool(re.search(r"verified|client[- ]provided|client provided|approved|confirmed", request.brief or "", flags=re.I))
     if has_pricing_data and verify_required:
         reason = "Pricing details are available in the project profile but are marked verify-before-ad-use/client-confirmation required. Provide approved pricing in the brief or set allowUnverifiedPricing/clientApprovedPricing after review."
-        return [reason], ["Pricing ad requires verified or client-provided commercial details before generation."]
+        return [reason], dedupe(warnings + ["Pricing ad requires verified or client-provided commercial details before generation."])
     if brief_requires_verified and not has_client_price:
-        return ["The brief requested verified/client-provided pricing, but no verified price or offer was supplied in the brief."], []
-    return [], []
+        return ["The brief requested verified/client-provided pricing, but no verified price or offer was supplied in the brief."], warnings
+    return [], dedupe(warnings)
 
 
 def sanitize_copy_plan_for_policy(copy_plan: CopyPlan, intent: CreativeIntent) -> CopyPlan:
+    copy_plan.headline = remove_unsafe_commercial_claims(copy_plan.headline)
+    copy_plan.subheadline = remove_unsafe_commercial_claims(copy_plan.subheadline)
+    copy_plan.cta = remove_unsafe_commercial_claims(copy_plan.cta)
     if intent.content_job_id == "construction_update" and intent.construction_visual_mode == "visualized_progress_from_project_truth":
         copy_plan.headline = _sanitize_construction_copy(copy_plan.headline, intent)
         copy_plan.subheadline = _sanitize_construction_copy(copy_plan.subheadline, intent)

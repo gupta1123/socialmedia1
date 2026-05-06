@@ -12,8 +12,9 @@ import {
 import { getActiveProjectProfile, getFestival, getPostType, getProject } from "../lib/planning-repository.js";
 import { supabaseAdmin } from "../lib/supabase.js";
 import { env } from "../lib/config.js";
+import { generateFalImages, type FalGeneratedImage } from "../lib/fal.js";
 import { generateOpenAiImages } from "../lib/openai-images.js";
-import type { OpenAiGeneratedImage } from "../lib/openai-images.js";
+import type { OpenAiImageQuality } from "../lib/openai-images.js";
 import { downloadStorageBlob, ingestRemoteImageToStorage, uploadBufferToStorage, createSignedUrl } from "../lib/storage.js";
 import { buildStoragePath, randomId } from "../lib/utils.js";
 import type { AuthenticatedViewer } from "../lib/viewer.js";
@@ -53,6 +54,7 @@ const TextStrategySchema = z.enum([
 
 const ConstructionVisualModeSchema = z.enum(["auto", "actual_progress_reference", "visualized_progress_from_project_truth"]);
 const FestivalVisualScopeSchema = z.enum(["auto", "brand_only", "project_supported", "building_led"]);
+const CreativeV3RenderPresetSchema = z.enum(["v1_low", "v1_high", "v2_low", "v2_medium", "v2_high"]);
 
 const CreativeV3CompileRequestSchema = z.object({
   brandId: z.string().uuid(),
@@ -78,6 +80,7 @@ const CreativeV3CompileRequestSchema = z.object({
   visualTemplateId: z.string().optional().nullable(),
   visualTemplateIds: z.array(z.string()).default([]),
   selectedAssetIds: z.array(z.string().uuid()).default([]),
+  renderPreset: CreativeV3RenderPresetSchema.optional().nullable(),
   includeLogo: z.boolean().default(false),
   logoAssetId: z.string().uuid().optional().nullable(),
   additionalLogoAssetIds: z.array(z.string().uuid()).default([]),
@@ -91,7 +94,8 @@ const CreativeV3RenderRequestSchema = z.object({
   brandId: z.string().uuid(),
   projectId: z.string().uuid().optional().nullable(),
   variant: z.record(z.string(), z.unknown()),
-  count: z.number().int().min(1).max(3).default(1)
+  count: z.number().int().min(1).max(3).default(1),
+  renderPreset: CreativeV3RenderPresetSchema.optional().nullable()
 });
 
 const CreativeV3BrandPresetMutationSchema = z.object({
@@ -107,11 +111,16 @@ const CreativeV3BrandPresetMutationSchema = z.object({
 type CreativeV3CompileRequest = z.infer<typeof CreativeV3CompileRequestSchema>;
 type CreativeV3RenderRequest = z.infer<typeof CreativeV3RenderRequestSchema>;
 type CreativeV3BrandPresetMutation = z.infer<typeof CreativeV3BrandPresetMutationSchema>;
+type CreativeV3RenderPreset = z.infer<typeof CreativeV3RenderPresetSchema>;
+type CreativeV3RenderProvider = "fal" | "openai";
+type CreativeV3GeneratedImage = FalGeneratedImage;
 type CreativeV3GenerateJobInput = {
   type: "creative-v3-generate";
   body: CreativeV3CompileRequest;
   actorUserId: string | null;
 };
+
+const CREATIVE_V3_ASYNC_STALE_MS = 10 * 60 * 1000;
 
 const POST_TYPE_TO_CONTENT_JOB: Record<string, string> = {
   "project-launch": "project_launch",
@@ -124,6 +133,54 @@ const POST_TYPE_TO_CONTENT_JOB: Record<string, string> = {
   offer: "pricing_ad",
   testimonial: "testimonial_story"
 };
+
+function resolveCreativeV3RenderPreset(requestedPreset?: CreativeV3RenderPreset | null): CreativeV3RenderPreset {
+  if (env.CREATE_V3_ALLOW_CLIENT_RENDER_PRESET === "1" && requestedPreset) {
+    return requestedPreset;
+  }
+  return env.CREATE_V3_DEFAULT_RENDER_PRESET;
+}
+
+function resolveCreativeV3RenderConfig(renderPreset: CreativeV3RenderPreset): {
+  renderPreset: CreativeV3RenderPreset;
+  provider: CreativeV3RenderProvider;
+  model: string;
+  quality?: OpenAiImageQuality;
+} {
+  if (renderPreset === "v1_low") {
+    return {
+      renderPreset,
+      provider: "fal",
+      model: env.CREATE_V3_GOOGLE_LOW_MODEL
+    };
+  }
+
+  if (renderPreset === "v1_high") {
+    return {
+      renderPreset,
+      provider: "fal",
+      model: env.CREATE_V3_GOOGLE_HIGH_MODEL
+    };
+  }
+
+  const qualityByPreset: Record<Extract<CreativeV3RenderPreset, "v2_low" | "v2_medium" | "v2_high">, OpenAiImageQuality> = {
+    v2_low: "low",
+    v2_medium: "medium",
+    v2_high: "high"
+  };
+  const openAiPreset = renderPreset as Extract<CreativeV3RenderPreset, "v2_low" | "v2_medium" | "v2_high">;
+
+  return {
+    renderPreset,
+    provider: "openai",
+    model: env.CREATE_V3_OPENAI_MODEL || env.OPENAI_FINAL_MODEL,
+    quality: qualityByPreset[openAiPreset]
+  };
+}
+
+function resolveCreativeV3FalModelForReferences(model: string, referenceCount: number) {
+  return referenceCount === 0 ? model.replace(/\/edit\/?$/, "") : model;
+}
 
 const FORMAT_TO_NOTEBOOK: Record<string, string> = {
   portrait: "4:5",
@@ -784,6 +841,13 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isCreativeV3CompileUserInputError(message: string) {
+  return (
+    message.includes("does not belong") ||
+    message.includes("Choose a festival before creating a festive greeting.")
+  );
+}
+
 async function localizeCreativeV3EngineResponse(params: {
   engineResponse: unknown;
   body: CreativeV3CompileRequest;
@@ -1049,11 +1113,14 @@ async function runCreativeV3Compile(params: {
   const engineResponse = applyManualAdditionalLogoFallback({
     engineResponse: localizedEngineResponse,
     additionalLogoAssetIds,
-    primaryLogoAssetId: effectiveIncludeLogo ? logoAssetId : null
+    primaryLogoAssetId: effectiveIncludeLogo ? logoAssetId : null,
+    selectedPresetJson
   });
   const status = engineResponse && typeof engineResponse === "object" && "status" in engineResponse
     ? String((engineResponse as { status?: unknown }).status)
     : "failed";
+  const renderPreset = resolveCreativeV3RenderPreset(body.renderPreset ?? null);
+  const renderConfig = resolveCreativeV3RenderConfig(renderPreset);
 
   return {
     brand,
@@ -1064,11 +1131,15 @@ async function runCreativeV3Compile(params: {
     status,
     enginePayload,
     engineResponse,
+    renderPreset,
+    renderConfig,
     response: {
       request: {
         brandId: brand.id,
         projectId: project?.id ?? null,
         postTypeId: postType?.id ?? null,
+        renderPreset,
+        clientRenderPresetAllowed: env.CREATE_V3_ALLOW_CLIENT_RENDER_PRESET === "1",
         enginePayload
       },
       result: engineResponse
@@ -1080,6 +1151,7 @@ function applyManualAdditionalLogoFallback(params: {
   engineResponse: Record<string, any>;
   additionalLogoAssetIds: string[];
   primaryLogoAssetId: string | null;
+  selectedPresetJson?: Record<string, any> | null;
 }) {
   if (params.additionalLogoAssetIds.length === 0) {
     return params.engineResponse;
@@ -1091,7 +1163,8 @@ function applyManualAdditionalLogoFallback(params: {
   const patchedVariants = variants.map((variant) => patchVariantManualAdditionalLogos({
     variant: isPlainRecord(variant) ? variant : {},
     additionalLogoAssetIds: params.additionalLogoAssetIds,
-    primaryLogoAssetId: params.primaryLogoAssetId
+    primaryLogoAssetId: params.primaryLogoAssetId,
+    selectedPresetJson: params.selectedPresetJson ?? null
   }));
   return {
     ...params.engineResponse,
@@ -1103,20 +1176,47 @@ function patchVariantManualAdditionalLogos(params: {
   variant: Record<string, any>;
   additionalLogoAssetIds: string[];
   primaryLogoAssetId: string | null;
+  selectedPresetJson?: Record<string, any> | null;
 }) {
   const renderPackage = isPlainRecord(params.variant.render_package) ? params.variant.render_package : {};
   const logoAssetId = typeof renderPackage.logo_asset_id === "string" ? renderPackage.logo_asset_id : params.primaryLogoAssetId;
   const existingAdditionalLogoAssetIds = readStringArray(renderPackage.additional_logo_asset_ids);
   const existingProviderReferences = readRecordArray(renderPackage.provider_references);
-  const existingProviderReferenceIds = new Set(existingProviderReferences.map((item) => item.asset_id).filter((value): value is string => typeof value === "string"));
+  const requestedAdditionalLogoAssetIds = Array.from(new Set(params.additionalLogoAssetIds.filter((assetId) => assetId && assetId !== logoAssetId)));
+  const existingSecondaryLogoAssetId = typeof renderPackage.secondary_logo_asset_id === "string"
+    ? renderPackage.secondary_logo_asset_id
+    : null;
+  const presetSecondaryLogoRules = getPresetSecondaryLogoRules(params.selectedPresetJson);
+  const presetSecondaryLogoAssetId = presetSecondaryLogoRules && !existingSecondaryLogoAssetId
+    ? requestedAdditionalLogoAssetIds[0] ?? null
+    : presetSecondaryLogoRules && existingSecondaryLogoAssetId && requestedAdditionalLogoAssetIds.includes(existingSecondaryLogoAssetId)
+      ? existingSecondaryLogoAssetId
+      : null;
+  const existingSecondaryLogoRules = isPlainRecord(renderPackage.secondary_logo_rules)
+    ? renderPackage.secondary_logo_rules
+    : null;
+  const shouldApplyPresetSecondaryLogoRules = Boolean(
+    presetSecondaryLogoAssetId &&
+      (!existingSecondaryLogoAssetId || !secondaryLogoRulesMatchPreset(existingSecondaryLogoRules, presetSecondaryLogoRules))
+  );
+  const generatedPresetSecondaryLogoRules = presetSecondaryLogoAssetId && shouldApplyPresetSecondaryLogoRules
+    ? buildPresetSecondaryLogoRules(presetSecondaryLogoRules, presetSecondaryLogoAssetId)
+    : null;
+  const existingAdditionalLogoAssetIdsWithoutSecondary = existingAdditionalLogoAssetIds.filter((assetId) => (
+    assetId !== existingSecondaryLogoAssetId && assetId !== presetSecondaryLogoAssetId
+  ));
   const existingLogoIds = new Set([
     logoAssetId,
-    typeof renderPackage.secondary_logo_asset_id === "string" ? renderPackage.secondary_logo_asset_id : null,
-    ...existingAdditionalLogoAssetIds
+    existingSecondaryLogoAssetId,
+    presetSecondaryLogoAssetId,
+    ...existingAdditionalLogoAssetIdsWithoutSecondary
   ].filter((value): value is string => typeof value === "string" && value.length > 0));
-  const missingAdditionalLogoAssetIds = params.additionalLogoAssetIds.filter((assetId) => assetId && !existingLogoIds.has(assetId));
+  const missingAdditionalLogoAssetIds = requestedAdditionalLogoAssetIds.filter((assetId) => (
+    assetId !== presetSecondaryLogoAssetId && !existingLogoIds.has(assetId)
+  ));
+  const duplicateSecondaryLogoRemoved = existingAdditionalLogoAssetIdsWithoutSecondary.length !== existingAdditionalLogoAssetIds.length;
 
-  if (missingAdditionalLogoAssetIds.length === 0) {
+  if (!generatedPresetSecondaryLogoRules && missingAdditionalLogoAssetIds.length === 0 && !duplicateSecondaryLogoRemoved) {
     return params.variant;
   }
 
@@ -1124,20 +1224,29 @@ function patchVariantManualAdditionalLogos(params: {
     ? renderPackage.logo_rules.position
     : "top_left";
   const fallbackPositions = manualAdditionalLogoPositions(logoPosition);
-  const secondaryLogoAssetId = typeof renderPackage.secondary_logo_asset_id === "string"
-    ? renderPackage.secondary_logo_asset_id
-    : missingAdditionalLogoAssetIds[0] ?? null;
+  const secondaryLogoAssetId = existingSecondaryLogoAssetId ?? presetSecondaryLogoAssetId ?? missingAdditionalLogoAssetIds[0] ?? null;
   const addedRules = missingAdditionalLogoAssetIds.map((assetId, index) => ({
     required: true,
     asset_id: assetId,
-    position: fallbackPositions[Math.min(existingAdditionalLogoAssetIds.length + index, fallbackPositions.length - 1)],
+    position: fallbackPositions[Math.min(existingAdditionalLogoAssetIdsWithoutSecondary.length + index, fallbackPositions.length - 1)],
     source: "exact_asset_only",
     max_instances: 1,
     role: assetId === secondaryLogoAssetId ? "manual_secondary_logo" : `manual_additional_logo_${index + 1}`
   }));
+  const fallbackAdditionalLogoAssetIds = missingAdditionalLogoAssetIds.filter((assetId) => assetId !== secondaryLogoAssetId);
+  const fallbackAdditionalLogoRules = addedRules.filter((rule) => rule.asset_id !== secondaryLogoAssetId);
+  const normalizedExistingProviderReferences = existingProviderReferences.map((item) => (
+    secondaryLogoAssetId && item.asset_id === secondaryLogoAssetId
+      ? { ...item, role: "exact_secondary_logo_layer" }
+      : item
+  ));
+  const existingProviderReferenceIds = new Set(normalizedExistingProviderReferences.map((item) => item.asset_id).filter((value): value is string => typeof value === "string"));
   const providerReferences = [
-    ...existingProviderReferences,
-    ...missingAdditionalLogoAssetIds
+    ...normalizedExistingProviderReferences,
+    ...[
+      ...(secondaryLogoAssetId ? [secondaryLogoAssetId] : []),
+      ...fallbackAdditionalLogoAssetIds
+    ]
       .filter((assetId) => !existingProviderReferenceIds.has(assetId))
       .map((assetId) => ({
         asset_id: assetId,
@@ -1146,14 +1255,14 @@ function patchVariantManualAdditionalLogos(params: {
         composited_after: false
       }))
   ];
-  const additionalLogoAssetIds = Array.from(new Set([...existingAdditionalLogoAssetIds, ...missingAdditionalLogoAssetIds]));
+  const additionalLogoAssetIds = Array.from(new Set([...existingAdditionalLogoAssetIdsWithoutSecondary, ...fallbackAdditionalLogoAssetIds]));
   const additionalLogoRules = [
-    ...readRecordArray(renderPackage.additional_logo_rules),
-    ...addedRules
+    ...readRecordArray(renderPackage.additional_logo_rules).filter((rule) => rule.asset_id !== secondaryLogoAssetId),
+    ...fallbackAdditionalLogoRules
   ];
-  const secondaryLogoRules = isPlainRecord(renderPackage.secondary_logo_rules)
-    ? renderPackage.secondary_logo_rules
-    : addedRules.find((rule) => rule.asset_id === secondaryLogoAssetId) ?? { required: false };
+  const secondaryLogoRules = existingSecondaryLogoRules
+    ? (generatedPresetSecondaryLogoRules ?? existingSecondaryLogoRules)
+    : generatedPresetSecondaryLogoRules ?? addedRules.find((rule) => rule.asset_id === secondaryLogoAssetId) ?? { required: false };
   const patchedRenderPackage = {
     ...renderPackage,
     secondary_logo_asset_id: secondaryLogoAssetId,
@@ -1163,12 +1272,14 @@ function patchVariantManualAdditionalLogos(params: {
     provider_references: providerReferences,
     reference_image_ids: Array.from(new Set([
       ...readStringArray(renderPackage.reference_image_ids),
-      ...missingAdditionalLogoAssetIds
+      ...(secondaryLogoAssetId ? [secondaryLogoAssetId] : []),
+      ...fallbackAdditionalLogoAssetIds
     ]))
   };
   const layoutContract = isPlainRecord(params.variant.layout_contract) ? params.variant.layout_contract : {};
   const existingLayoutAdditionalLogos = Array.isArray(layoutContract.additional_logo_layers)
     ? layoutContract.additional_logo_layers.filter((item: unknown): item is Record<string, unknown> => isPlainRecord(item))
+      .filter((item) => item.asset_id !== secondaryLogoAssetId)
     : [];
   return {
     ...params.variant,
@@ -1178,6 +1289,7 @@ function patchVariantManualAdditionalLogos(params: {
       secondary_logo_layer: isPlainRecord(layoutContract.secondary_logo_layer)
         ? {
             ...layoutContract.secondary_logo_layer,
+            ...secondaryLogoRules,
             required: true,
             asset_id: secondaryLogoAssetId,
             source: "exact_asset_only",
@@ -1185,6 +1297,7 @@ function patchVariantManualAdditionalLogos(params: {
             position: typeof secondaryLogoRules.position === "string" ? secondaryLogoRules.position : fallbackPositions[0]
           }
         : {
+            ...secondaryLogoRules,
             required: true,
             asset_id: secondaryLogoAssetId,
             source: "exact_asset_only",
@@ -1193,7 +1306,7 @@ function patchVariantManualAdditionalLogos(params: {
           },
       additional_logo_layers: [
         ...existingLayoutAdditionalLogos,
-        ...addedRules.map((rule) => ({
+        ...fallbackAdditionalLogoRules.map((rule) => ({
           required: true,
           asset_id: rule.asset_id,
           source: "exact_asset_only",
@@ -1207,11 +1320,55 @@ function patchVariantManualAdditionalLogos(params: {
         ...(isPlainRecord(layoutContract.prompt_audit) ? layoutContract.prompt_audit : {}),
         manual_additional_logo_fallback: {
           applied: true,
-          asset_ids: missingAdditionalLogoAssetIds
+          asset_ids: missingAdditionalLogoAssetIds,
+          secondary_asset_id: secondaryLogoAssetId,
+          used_preset_secondary_rules: Boolean(generatedPresetSecondaryLogoRules)
         }
       }
     }
   };
+}
+
+function getPresetSecondaryLogoRules(presetJson?: Record<string, any> | null) {
+  if (!isPlainRecord(presetJson)) return null;
+  const rules = isPlainRecord(presetJson.secondary_logo)
+    ? presetJson.secondary_logo
+    : isPlainRecord(presetJson.secondary_logo_layer)
+      ? presetJson.secondary_logo_layer
+      : null;
+  return rules ? { ...rules } : null;
+}
+
+function buildPresetSecondaryLogoRules(rules: Record<string, any> | null, assetId: string) {
+  const position = typeof rules?.position === "string" && rules.position.trim() ? rules.position : "bottom_left";
+  return {
+    ...(rules ?? {}),
+    required: true,
+    asset_id: assetId,
+    position,
+    source: "exact_asset_only",
+    max_instances: 1,
+    role: typeof rules?.role === "string" ? rules.role : "preset_secondary_logo"
+  };
+}
+
+function secondaryLogoRulesMatchPreset(existing: Record<string, unknown> | null, preset: Record<string, unknown> | null) {
+  if (!existing || !preset) return false;
+  const keys = [
+    "position",
+    "size_mode",
+    "height_ratio",
+    "margin_left_ratio",
+    "margin_right_ratio",
+    "margin_top_ratio",
+    "margin_bottom_ratio",
+    "brand_mark",
+    "preserve_identity",
+  ];
+  return keys.every((key) => {
+    if (typeof preset[key] === "undefined") return true;
+    return existing[key] === preset[key];
+  });
 }
 
 function manualAdditionalLogoPositions(primaryLogoPosition: string) {
@@ -1229,6 +1386,7 @@ async function renderCreativeV3Variant(params: {
   projectId?: string | null;
   variant: Record<string, unknown>;
   count: number;
+  renderPreset?: CreativeV3RenderPreset | null;
 }) {
   const brand = await getBrand(params.brandId);
   const project = params.projectId ? await getProject(params.projectId) : null;
@@ -1236,9 +1394,8 @@ async function renderCreativeV3Variant(params: {
     throw new Error("Project does not belong to the selected brand/workspace");
   }
 
-  if (!env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is required for Creative V3 render.");
-  }
+  const renderPreset = resolveCreativeV3RenderPreset(params.renderPreset ?? null);
+  const renderConfig = resolveCreativeV3RenderConfig(renderPreset);
 
   const renderPackage =
     params.variant.render_package && typeof params.variant.render_package === "object"
@@ -1360,15 +1517,29 @@ async function renderCreativeV3Variant(params: {
     logoRules: isPlainRecord(renderPackage.logo_rules) ? renderPackage.logo_rules : null,
     secondaryLogoRules: isPlainRecord(renderPackage.secondary_logo_rules) ? renderPackage.secondary_logo_rules : null,
     additionalLogoRules,
+    contactRules: isPlainRecord(renderPackage.contact_rules) ? renderPackage.contact_rules : null,
   });
 
-  const result = await generateOpenAiImages({
-    model: env.OPENAI_FINAL_MODEL,
-    prompt: renderPrompt,
-    aspectRatio,
-    count: params.count,
-    referencePaths
-  });
+  const renderModel = renderConfig.provider === "fal"
+    ? resolveCreativeV3FalModelForReferences(renderConfig.model, referencePaths.length)
+    : renderConfig.model;
+
+  const result = renderConfig.provider === "openai"
+    ? await generateOpenAiImages({
+        model: renderModel,
+        prompt: renderPrompt,
+        aspectRatio,
+        count: params.count,
+        ...(renderConfig.quality ? { quality: renderConfig.quality } : {}),
+        referencePaths
+      })
+    : await generateFalImages({
+        model: renderModel,
+        prompt: renderPrompt,
+        aspectRatio,
+        count: params.count,
+        referencePaths
+      });
   const images = reraCompositeStoragePath
     ? await compositeReraBlockOnGeneratedImages({
         images: result.images,
@@ -1378,8 +1549,9 @@ async function renderCreativeV3Variant(params: {
     : result.images;
 
   return {
-    provider: "openai",
-    model: env.OPENAI_FINAL_MODEL,
+    provider: renderConfig.provider,
+    model: renderModel,
+    renderPreset: renderConfig.renderPreset,
     requestId: result.request_id,
     providerPrompt: renderPrompt,
     referenceAssetIds: requestedAssetIds,
@@ -1399,6 +1571,7 @@ function buildCreativeV3RendererPrompt(params: {
   logoRules?: Record<string, unknown> | null;
   secondaryLogoRules?: Record<string, unknown> | null;
   additionalLogoRules?: Array<Record<string, unknown>>;
+  contactRules?: Record<string, unknown> | null;
 }) {
   const roleNotes = ["Use the following provider prompt as the final art direction. Do not add contradictory text, logo, QR, contact, or factual claims beyond it."];
   if (params.hasLogoReference) {
@@ -1412,6 +1585,9 @@ function buildCreativeV3RendererPrompt(params: {
   }
   if (params.hasReraReference) {
     roleNotes.push("Leave a clean compact RERA compliance safe zone if requested; the exact RERA block is composited after generation. Never invent, redraw, or stylize a QR code.");
+  }
+  if (params.contactRules) {
+    roleNotes.push(compileContactRenderInstruction(params.contactRules));
   }
   return `${roleNotes.join("\n")}\n\n${params.prompt}`;
 }
@@ -1466,12 +1642,47 @@ function compileLogoRenderInstruction(logoRules?: Record<string, unknown> | null
 
 function compileSecondaryLogoRenderInstruction(logoRules?: Record<string, unknown> | null) {
   const position = typeof logoRules?.position === "string" ? logoRules.position : "top_left";
+  const heightRatio = readNumericRule(logoRules, "height_ratio");
+  const marginLeftRatio = readNumericRule(logoRules, "margin_left_ratio");
+  const marginTopRatio = readNumericRule(logoRules, "margin_top_ratio");
+  const marginRightRatio = readNumericRule(logoRules, "margin_right_ratio");
+  const marginBottomRatio = readNumericRule(logoRules, "margin_bottom_ratio");
+  const sizeText = heightRatio
+    ? `Secondary logo visual height should be about ${formatRatioPercent(heightRatio)} of the canvas height.`
+    : "Keep it visually subordinate to the primary project/logo mark.";
+  const marginText = formatLogoMargins(position, {
+    left: marginLeftRatio,
+    top: marginTopRatio,
+    right: marginRightRatio,
+    bottom: marginBottomRatio
+  });
+
   return [
     "Use the supplied secondary logo reference exactly once as a separate flat brand mark layer.",
     `Secondary logo position: ${formatLogoPosition(position)}.`,
-    "Keep it visually subordinate to the primary project/logo mark, with comfortable spacing and no overlap with RERA or headline areas.",
+    sizeText,
+    marginText,
+    "Keep it clearly spaced with no overlap with RERA, contact, or headline areas.",
     "Do not redraw, recolor, crop, merge, stylize, or place the secondary logo on the building facade."
-  ].join(" ");
+  ].filter(Boolean).join(" ");
+}
+
+function compileContactRenderInstruction(contactRules: Record<string, unknown>) {
+  const position = typeof contactRules.position === "string" ? contactRules.position : "bottom_footer";
+  const marginLeftRatio = readNumericRule(contactRules, "margin_left_ratio");
+  const marginTopRatio = readNumericRule(contactRules, "margin_top_ratio");
+  const marginRightRatio = readNumericRule(contactRules, "margin_right_ratio");
+  const marginBottomRatio = readNumericRule(contactRules, "margin_bottom_ratio");
+  return [
+    `If contact text is rendered, place it at ${formatLogoPosition(position)}.`,
+    formatLogoMargins(position, {
+      left: marginLeftRatio,
+      top: marginTopRatio,
+      right: marginRightRatio,
+      bottom: marginBottomRatio
+    }),
+    "Use only grounded contact values from the provider prompt; do not invent or add extra phone, WhatsApp, email, or website text."
+  ].filter(Boolean).join(" ");
 }
 
 function readNumericRule(rules: Record<string, unknown> | null | undefined, key: string) {
@@ -1501,6 +1712,15 @@ function formatLogoMargins(
   }
   if (position === "bottom_signature") {
     return `Keep about ${formatRatioPercent(margins.left ?? 0.05)} side margin and ${formatRatioPercent(margins.bottom ?? 0.04)} bottom margin from the canvas edge.`;
+  }
+  if (position === "bottom_left") {
+    return `Keep about ${formatRatioPercent(margins.left ?? 0.05)} left margin and ${formatRatioPercent(margins.bottom ?? 0.04)} bottom margin from the canvas edge.`;
+  }
+  if (position === "bottom_right") {
+    return `Keep about ${formatRatioPercent(margins.right ?? 0.05)} right margin and ${formatRatioPercent(margins.bottom ?? 0.04)} bottom margin from the canvas edge.`;
+  }
+  if (position === "bottom_center" || position === "bottom_footer") {
+    return `Keep about ${formatRatioPercent(margins.left ?? margins.right ?? 0.05)} side margin and ${formatRatioPercent(margins.bottom ?? 0.04)} bottom margin from the canvas edge.`;
   }
   return "Keep comfortable spacing from all canvas edges.";
 }
@@ -1538,6 +1758,10 @@ async function persistCreativeV3Outputs(params: {
 
   const now = new Date().toISOString();
   const firstVariant = params.renders[0]?.variant ?? {};
+  const firstRender = params.renders[0]?.render ?? null;
+  const resolvedRenderPreset = firstRender?.renderPreset ?? params.compiled.renderPreset;
+  const resolvedRenderProvider = firstRender?.provider ?? params.compiled.renderConfig.provider;
+  const resolvedRenderModel = firstRender?.model ?? params.compiled.renderConfig.model;
   const firstRenderPackage =
     firstVariant.render_package && typeof firstVariant.render_package === "object"
       ? firstVariant.render_package as Record<string, unknown>
@@ -1601,7 +1825,7 @@ async function persistCreativeV3Outputs(params: {
     seed_prompt: finalPrompt,
     final_prompt: finalPrompt,
     aspect_ratio: String(params.compiled.response.result?.format ?? params.compiled.enginePayload.format ?? "4:5"),
-    chosen_model: env.OPENAI_FINAL_MODEL,
+    chosen_model: resolvedRenderModel,
     template_type: "creative_v3",
     reference_strategy: "asset_reference_generation",
     reference_asset_ids: referenceAssetIds,
@@ -1609,6 +1833,8 @@ async function persistCreativeV3Outputs(params: {
       source: "creative_v3",
       content_job_id: params.compiled.response.result?.content_job_id ?? null,
       variation_strategy: params.compiled.response.result?.variation_strategy ?? null,
+      render_preset: resolvedRenderPreset,
+      render_provider: resolvedRenderProvider,
       selected_template_id: templateInfo.templateId,
       selected_template_db_id: safeTemplateDbId ?? templateInfo.dbId
     },
@@ -1640,15 +1866,24 @@ async function persistCreativeV3Outputs(params: {
     selected_template_id: safeTemplateDbId,
     job_type: "final",
     status: "completed",
-    provider: "openai",
-    provider_model: env.OPENAI_FINAL_MODEL,
+    provider: resolvedRenderProvider,
+    provider_model: resolvedRenderModel,
     provider_request_id: `creative-v3-${params.compileJobId}`,
     requested_count: totalImageCount,
-    request_payload: params.compiled.response.request,
+    request_payload: {
+      ...params.compiled.response.request,
+      renderPreset: resolvedRenderPreset,
+      renderProvider: resolvedRenderProvider
+    },
     webhook_payload: {
       source: "creative_v3",
+      render_preset: resolvedRenderPreset,
+      render_provider: resolvedRenderProvider,
       renders: params.renders.map((item) => ({
         variant_id: item.variantId,
+        render_preset: item.render.renderPreset,
+        provider: item.render.provider,
+        model: item.render.model,
         request_id: item.render.requestId,
         image_count: item.render.images.length
       }))
@@ -1707,6 +1942,9 @@ async function persistCreativeV3Outputs(params: {
           render_package: item.variant.render_package ?? null,
           reference_asset_ids: item.render.referenceAssetIds,
           reference_storage_paths: item.render.referenceStoragePaths,
+          render_preset: item.render.renderPreset,
+          provider: item.render.provider,
+          provider_model: item.render.model,
           provider_request_id: item.render.requestId,
           provider_prompt_used: item.render.providerPrompt,
           provider_reference_asset_ids: item.render.referenceAssetIds,
@@ -1947,7 +2185,7 @@ function extractCreativeV3TemplateInfo(variant: unknown): { templateId: string |
   return { templateId, dbId };
 }
 
-function extensionForGeneratedImage(image: OpenAiGeneratedImage) {
+function extensionForGeneratedImage(image: CreativeV3GeneratedImage) {
   const contentType = image.content_type?.toLowerCase() ?? "";
   if (contentType.includes("webp")) return "webp";
   if (contentType.includes("jpeg") || contentType.includes("jpg")) return "jpg";
@@ -1957,10 +2195,10 @@ function extensionForGeneratedImage(image: OpenAiGeneratedImage) {
 }
 
 async function compositeReraBlockOnGeneratedImages(params: {
-  images: OpenAiGeneratedImage[];
+  images: CreativeV3GeneratedImage[];
   reraCompositeStoragePath: string;
   reraRules: Record<string, unknown> | null;
-}): Promise<OpenAiGeneratedImage[]> {
+}): Promise<CreativeV3GeneratedImage[]> {
   const reraBlob = await downloadStorageBlob(params.reraCompositeStoragePath);
   const reraBuffer = Buffer.from(await reraBlob.arrayBuffer());
   return Promise.all(
@@ -2047,6 +2285,8 @@ async function processCreativeV3GenerateJobLocally(params: {
       throw new Error("Invalid Creative V3 async job input.");
     }
 
+    await touchCreativeV3GenerateJob(params.jobId);
+
     const viewer: AuthenticatedViewer = {
       userId: jobInput.actorUserId ?? "system"
     };
@@ -2055,6 +2295,8 @@ async function processCreativeV3GenerateJobLocally(params: {
       viewer,
       log: params.log
     });
+
+    await touchCreativeV3GenerateJob(params.jobId);
 
     await persistCreativeV3CompileRun({
       brand: compiled.brand,
@@ -2070,19 +2312,22 @@ async function processCreativeV3GenerateJobLocally(params: {
     const variants = ["ready", "ready_with_warnings"].includes(compiled.status) ? getCreativeV3Variants(compiled.response) : [];
     const renders = await Promise.all(
       variants.map(async (variant) => {
+        await touchCreativeV3GenerateJob(params.jobId);
         const variantId = typeof variant.variant_id === "string" ? variant.variant_id : randomId();
         return {
-        variantId,
-        variant,
-        render: await renderCreativeV3Variant({
-          brandId: jobInput.body.brandId,
-          projectId: jobInput.body.projectId ?? null,
-          variant: { ...variant, format: compiled.response.result?.format },
-          count: 1
-        })
-      };
+          variantId,
+          variant,
+          render: await renderCreativeV3Variant({
+            brandId: jobInput.body.brandId,
+            projectId: jobInput.body.projectId ?? null,
+            variant: { ...variant, format: compiled.response.result?.format },
+            count: 1,
+            renderPreset: jobInput.body.renderPreset ?? null
+          })
+        };
       })
     );
+    await touchCreativeV3GenerateJob(params.jobId);
     const persistedOutputs = await persistCreativeV3Outputs({
       compileJobId: params.jobId,
       actorUserId: jobInput.actorUserId,
@@ -2106,7 +2351,8 @@ async function processCreativeV3GenerateJobLocally(params: {
         completed_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
-      .eq("id", params.jobId);
+      .eq("id", params.jobId)
+      .eq("status", "processing");
   } catch (error) {
     params.log.error({ error, jobId: params.jobId }, "creative v3 async generation failed locally");
     await supabaseAdmin
@@ -2118,8 +2364,33 @@ async function processCreativeV3GenerateJobLocally(params: {
         },
         updated_at: new Date().toISOString()
       })
-      .eq("id", params.jobId);
+      .eq("id", params.jobId)
+      .eq("status", "processing");
   }
+}
+
+async function touchCreativeV3GenerateJob(jobId: string) {
+  await supabaseAdmin
+    .from("compile_jobs")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", jobId)
+    .eq("status", "processing");
+}
+
+function isCreativeV3GenerateJobStale(job: { status?: unknown; updated_at?: unknown; created_at?: unknown }) {
+  const status = typeof job.status === "string" ? job.status : "";
+  if (!["pending", "processing"].includes(status)) {
+    return false;
+  }
+  const timestamp = typeof job.updated_at === "string"
+    ? job.updated_at
+    : typeof job.created_at === "string"
+      ? job.created_at
+      : null;
+  if (!timestamp) {
+    return false;
+  }
+  return Date.now() - new Date(timestamp).getTime() > CREATIVE_V3_ASYNC_STALE_MS;
 }
 
 export async function registerCreativeV3Routes(app: FastifyInstance) {
@@ -2404,7 +2675,7 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
     } catch (error) {
       request.log.error({ error }, "creative v3 compile failed");
       const message = error instanceof Error ? error.message : "Creative V3 compile failed";
-      if (message.includes("does not belong")) {
+      if (isCreativeV3CompileUserInputError(message)) {
         return reply.badRequest(message);
       }
       return reply.code(503).send({
@@ -2430,7 +2701,8 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
         brandId: body.brandId,
         projectId: body.projectId ?? null,
         variant: body.variant,
-        count: body.count
+        count: body.count,
+        renderPreset: body.renderPreset ?? null
       });
     } catch (error) {
       request.log.error({ error }, "creative v3 render failed");
@@ -2510,6 +2782,29 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
 
     const brand = await getBrand(job.brand_id);
     await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
+
+    if (isCreativeV3GenerateJobStale(job)) {
+      const errorJson = {
+        message: "Creative V3 generation worker stopped or timed out before completion. Please retry the generation.",
+        stale: true,
+        previousStatus: job.status,
+        lastUpdatedAt: job.updated_at ?? job.created_at ?? null
+      };
+      await supabaseAdmin
+        .from("compile_jobs")
+        .update({
+          status: "failed",
+          error_json: errorJson,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", jobId)
+        .in("status", ["pending", "processing"]);
+      return {
+        status: "failed",
+        input: jobInput.body,
+        error: errorJson
+      };
+    }
 
     if (job.status === "completed") {
       return {

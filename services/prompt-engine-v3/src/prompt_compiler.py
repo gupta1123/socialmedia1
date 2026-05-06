@@ -32,6 +32,8 @@ def compile_image_prompt(
     copy_plan: Any = None,
 ) -> str:
     base = strip_internal_tokens(prompt or "")
+    base = remove_unsafe_commercial_claims(base)
+    base = repair_structural_change_requests(base)
     if not allow_price_claims:
         base = remove_price_claims(base)
     base = normalize_truth_language(base, asset)
@@ -111,6 +113,8 @@ def compile_final_provider_prompt(
         )
         prompt = " ".join(sentence_dedupe(sections))
         prompt = semantic_prompt_repair(prompt, context, asset, intent=intent)
+        prompt = remove_unsafe_commercial_claims(prompt)
+        prompt = repair_structural_change_requests(prompt, _intent_text(intent))
         prompt = sanitize_optional_layer_language(prompt, include_logo, include_rera_qr, bool(contact_values))
         if not allow_price_claims:
             prompt = remove_price_claims(prompt)
@@ -476,6 +480,53 @@ def remove_price_claims(text: str) -> str:
     return text.strip()
 
 
+def remove_unsafe_commercial_claims(text: str) -> str:
+    out = str(text or "")
+    replacements = [
+        (r"\b(?:with\s+)?guaranteed\s+returns?\b", "with verified project details"),
+        (r"\b(?:with\s+)?assured\s+(?:returns?|roi|appreciation|profits?)\b", "with verified project details"),
+        (r"\b(?:guaranteed|assured)\s+(?:roi|appreciation|profits?)\b", "verified project details"),
+    ]
+    for pattern, repl in replacements:
+        out = re.sub(pattern, repl, out, flags=re.I)
+    return re.sub(r"\s+", " ", out).strip()
+
+
+def repair_structural_change_requests(text: str, trigger_text: str = "") -> str:
+    out = str(text or "")
+    haystack = " ".join([out, trigger_text or ""]).lower()
+    risky = bool(
+        re.search(
+            r"\b(change|alter|redesign|modify|transform|enhance|make|turn)\b[^.]{0,120}\b(elevation|facade|façade|massing|tower design|architecture|building design|building taller|glass-heavy|more glass|reflective glass)\b",
+            haystack,
+            flags=re.I,
+        )
+        or re.search(r"\bglass[- ]heavy\s+facade\b|\bmore\s+glass\b|\bmore\s+reflective\s+glass\b", haystack, flags=re.I)
+    )
+    if not risky:
+        return re.sub(r"\s+", " ", out).strip()
+
+    replacements = [
+        (r"\b(?:change|alter|redesign|modify|transform)\s+(?:the\s+)?(?:elevation|facade|façade|massing|tower design|architecture|building design)\b[^.]*\.?", "Preserve the original building elevation, facade rhythm, material character, and architectural design. "),
+        (r"\b(?:make|turn)\s+(?:the\s+)?(?:building|tower)\s+[^.]*?\b(?:taller|grander|glass[- ]heavy|more glass|more reflective)\b[^.]*\.?", "Use crop, scale impression, lighting, and graphics for drama without changing the building. "),
+        (r"\b(?:with\s+a\s+)?(?:significantly\s+)?glass[- ]heavy\s+facade\b", "with the original facade material character"),
+        (r"\bmore\s+glass[- ]heavy\s+facade\b", "original facade material character"),
+        (r"\benhance(?:d)?\s+(?:the\s+)?glass\b[^.]*\.?", "Keep the existing glazing and material balance unchanged. "),
+        (r"\bglass\s+facade\s+is\s+enhanced\b[^.]*\.?", "Preserve the existing facade material character. "),
+    ]
+    for pattern, repl in replacements:
+        out = re.sub(pattern, repl, out, flags=re.I)
+
+    guard = (
+        "Architecture truth rule: do not change building elevation, tower height, massing, facade rhythm, "
+        "material character, balcony/window pattern, podium proportions, or tower count; use lighting, crop, "
+        "background graphics, and typography for visual variety only."
+    )
+    if "architecture truth rule:" not in out.lower():
+        out = out.rstrip() + " " + guard
+    return re.sub(r"\s+", " ", out).strip()
+
+
 def normalize_truth_language(text: str, asset: Dict[str, Any]) -> str:
     truth_status = str(asset.get("truth_status") or asset.get("truthStatus") or "").lower()
     if truth_status != "render":
@@ -548,7 +599,19 @@ def semantic_prompt_repair(text: str, context: Dict[str, Any], asset: Dict[str, 
         guard = "Construction visualization truth note: this is an under-construction visualization from approved project design, not an actual current site photo or verified latest progress report."
         if guard.lower() not in text.lower():
             text += " " + guard
+    text = repair_structural_change_requests(text, _intent_text(intent))
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _intent_text(intent: Any) -> str:
+    if intent is None:
+        return ""
+    pieces = [
+        getattr(intent, "brief_summary", ""),
+        getattr(intent, "creative_goal", ""),
+        " ".join(getattr(intent, "explicit_user_requests", []) or []),
+    ]
+    return " ".join(str(piece or "") for piece in pieces)
 
 
 def trim_prompt(text: str, max_chars: int) -> str:

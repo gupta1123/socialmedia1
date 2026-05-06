@@ -7771,6 +7771,204 @@
   grid-column: 3;
 }
 
+.create-v3-render-model-select {
+  position: relative;
+  z-index: 34;
+  grid-column: 1 / -1;
+}
+
+.create-v3-render-model-trigger {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: #f3f4f6;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  transition: background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.create-v3-render-model-trigger:hover,
+.create-v3-render-model-select.is-open .create-v3-render-model-trigger {
+  background: white;
+  box-shadow: 0 0 0 3px rgba(108, 87, 200, 0.09);
+}
+
+.create-v3-render-model-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 0.78rem;
+  font-weight: 850;
+  color: var(--ink);
+}
+
+.create-v3-render-model-name svg {
+  flex: 0 0 auto;
+}
+
+.create-v3-render-model-chevron {
+  flex: 0 0 auto;
+  color: var(--ink-soft);
+  transition: transform 0.18s ease;
+}
+
+.create-v3-render-model-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.create-v3-render-model-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  border: 1px solid color-mix(in srgb, var(--line-strong) 88%, transparent);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 42px rgba(31, 41, 55, 0.18);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  animation: create-v3-model-menu-in 0.15s ease-out both;
+}
+
+@keyframes create-v3-model-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.create-v3-render-model-header,
+.create-v3-render-model-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px;
+  align-items: center;
+  gap: 10px;
+}
+
+.create-v3-render-model-header {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: -0.01em;
+}
+
+.create-v3-render-model-header span:last-child {
+  text-align: right;
+}
+
+.create-v3-render-model-list {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+}
+
+.create-v3-render-model-group {
+  display: grid;
+  gap: 3px;
+}
+
+.create-v3-render-model-group + .create-v3-render-model-group {
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.create-v3-render-model-group-label {
+  padding: 3px 10px 4px;
+  color: var(--ink-muted);
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.create-v3-render-model-option {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.create-v3-render-model-option:hover {
+  background: var(--paper-soft);
+}
+
+.create-v3-render-model-option.is-selected {
+  background: color-mix(in srgb, var(--paper-soft) 74%, #fff);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.create-v3-render-model-option-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.create-v3-render-model-option-label strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.9rem;
+  font-weight: 850;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.create-v3-render-model-option-label svg,
+.create-v3-render-model-check-placeholder {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+}
+
+.create-v3-speed-dots {
+  display: inline-flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.create-v3-speed-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+.create-v3-speed-dots.is-green span.is-active {
+  background: #20b15a;
+}
+
+.create-v3-speed-dots.is-amber span.is-active {
+  background: #f5a51b;
+}
+
+.create-v3-speed-dots.is-orange span.is-active {
+  background: #ff6b1a;
+}
+
+.create-v3-speed-dots.is-red span.is-active {
+  background: #e11d2e;
+}
+
 .create-v3-stepper {
   display: flex;
   align-items: center;

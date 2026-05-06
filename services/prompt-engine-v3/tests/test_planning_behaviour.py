@@ -77,7 +77,14 @@ def test_preset_rules_drive_location_contact_secondary_logo_and_rera_trigger():
         "name": "Township Standard",
         "preset_json": {
             "logo": {"required": True, "position": "top_right", "brand_mark": "pwc_logo"},
-            "secondary_logo": {"required": True, "position": "top_left", "brand_mark": "pride_group_logo"},
+            "secondary_logo": {
+                "required": True,
+                "position": "top_left",
+                "brand_mark": "pride_group_logo",
+                "height_ratio": 0.045,
+                "margin_left_ratio": 0.05,
+                "margin_top_ratio": 0.04,
+            },
             "rera_qr": {
                 "required": False,
                 "position": "top_right",
@@ -89,7 +96,13 @@ def test_preset_rules_drive_location_contact_secondary_logo_and_rera_trigger():
                 "fallback_position_without_contact": "bottom_center",
                 "include_pin_icon": True,
             },
-            "contact": {"items": ["phone"], "position": "bottom_right", "include_if_grounded": True},
+            "contact": {
+                "items": ["phone"],
+                "position": "bottom_right",
+                "include_if_grounded": True,
+                "margin_right_ratio": 0.05,
+                "margin_bottom_ratio": 0.04,
+            },
         },
     }
     base = payload(
@@ -128,9 +141,13 @@ def test_preset_rules_drive_location_contact_secondary_logo_and_rera_trigger():
     variant = response.variants[0]
     assert variant.layout_contract["logo_layer"]["position"] == "top_right"
     assert variant.layout_contract["secondary_logo_layer"]["asset_id"] == "pride-logo"
+    assert variant.layout_contract["secondary_logo_layer"]["height_ratio"] == 0.045
+    assert variant.render_package.secondary_logo_rules["margin_left_ratio"] == 0.05
     assert variant.layout_contract["rera_qr_layer"]["required"] is True
     assert variant.layout_contract["rera_qr_layer"]["triggered_by_preset"] is True
     assert variant.layout_contract["contact_layer"]["position"] == "bottom_right"
+    assert variant.layout_contract["contact_layer"]["margin_right_ratio"] == 0.05
+    assert variant.render_package.contact_rules["margin_bottom_ratio"] == 0.04
     assert variant.layout_contract["location_layer"]["value"] == "Baner"
     assert variant.layout_contract["location_layer"]["position"] == "bottom_left"
     assert variant.render_package.secondary_logo_asset_id == "pride-logo"
@@ -190,8 +207,8 @@ def test_preset_can_require_multiple_additional_logo_layers():
     assert response.status in {"ready", "ready_with_warnings"}
     variant = response.variants[0]
     assert variant.render_package.secondary_logo_asset_id == "pride-logo"
-    assert variant.render_package.additional_logo_asset_ids == ["pride-logo", "partner-logo"]
-    assert variant.layout_contract["additional_logo_layers"][1]["asset_id"] == "partner-logo"
+    assert variant.render_package.additional_logo_asset_ids == ["partner-logo"]
+    assert variant.layout_contract["additional_logo_layers"][0]["asset_id"] == "partner-logo"
     assert any(ref.asset_id == "partner-logo" and ref.role == "exact_additional_logo_layer" for ref in variant.render_package.provider_references)
     assert "additional logo instruction" in variant.compiled_prompt.lower()
 
@@ -233,9 +250,10 @@ def test_manual_additional_logo_ids_work_without_preset():
     assert response.status in {"ready", "ready_with_warnings"}
     variant = response.variants[0]
     assert variant.render_package.logo_asset_id == "project-logo"
-    assert variant.render_package.additional_logo_asset_ids == ["developer-logo", "partner-logo"]
-    assert variant.layout_contract["additional_logo_layers"][0]["position"] == "top_right"
-    assert variant.layout_contract["additional_logo_layers"][1]["position"] == "bottom_left"
+    assert variant.render_package.secondary_logo_asset_id == "developer-logo"
+    assert variant.render_package.additional_logo_asset_ids == ["partner-logo"]
+    assert variant.layout_contract["secondary_logo_layer"]["position"] == "top_right"
+    assert variant.layout_contract["additional_logo_layers"][0]["position"] == "bottom_left"
     assert any(ref.asset_id == "developer-logo" and ref.role == "exact_secondary_logo_layer" for ref in variant.render_package.provider_references)
     assert any(ref.asset_id == "partner-logo" and ref.role == "exact_additional_logo_layer" for ref in variant.render_package.provider_references)
 

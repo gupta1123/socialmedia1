@@ -166,10 +166,12 @@ def normalize_additional_logo_rules(
     secondary_logo_asset_id: Optional[str],
     secondary_logo_rules: Optional[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    rules = [dict(rule) for rule in additional_logo_rules or [] if isinstance(rule, dict)]
-    if secondary_logo_asset_id and not any(rule.get("asset_id") == secondary_logo_asset_id for rule in rules):
-        rules.insert(0, {**(secondary_logo_rules or {}), "asset_id": secondary_logo_asset_id, "role": "secondary_logo"})
-    return rules
+    del secondary_logo_rules
+    return [
+        dict(rule)
+        for rule in additional_logo_rules or []
+        if isinstance(rule, dict) and rule.get("asset_id") != secondary_logo_asset_id
+    ]
 
 
 def additional_logo_ids_after_secondary(additional_logo_asset_ids: List[str], secondary_logo_asset_id: Optional[str]) -> List[str]:

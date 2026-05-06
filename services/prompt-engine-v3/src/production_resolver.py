@@ -10,6 +10,7 @@ from .presets import (
     preset_additional_logo_rules,
     preset_contact_items,
     preset_contact_position,
+    preset_contact_rules,
     preset_location_rules,
     preset_logo_position,
     preset_logo_rules,
@@ -33,7 +34,9 @@ def resolve_production_plan(
     # A user-provided logo is an explicit flat brand mark asset, not a project truth anchor.
     # Honor it even for brand-only/festival flows; if no explicit logo is provided, fall back
     # to the best logo available in the current context.
-    include_logo = bool(request.include_logo or request.logo_asset_id or preset_requires_logo(preset)) and "logo" not in intent.negative_requests
+    preset_logo_required = preset_requires_logo(preset)
+    explicit_logo_requested = bool(request.include_logo or request.logo_asset_id)
+    include_logo = bool(preset_logo_required or (explicit_logo_requested and "logo" not in intent.negative_requests))
     logo_asset_id = (request.logo_asset_id or _find_asset_id(context, "logo", preferred_project_id=request.project_id)) if include_logo else None
     rera_qr_asset_id = request.rera_qr_asset_id or _find_asset_id(context, "rera_qr", preferred_project_id=request.project_id)
     logo_position = preset_logo_position(preset)
@@ -54,6 +57,7 @@ def resolve_production_plan(
         explicit_items=request.contact_items,
         preset_items=preset_contact_items(preset),
         position=preset_contact_position(preset),
+        rules_extra=preset_contact_rules(preset),
     )
     location_plan = _resolve_location_plan(preset, fact_store, has_contact=bool(contact_plan.values))
     text_strategy = intent.text_strategy if intent.text_strategy != "auto" else "render_exact_text"

@@ -124,6 +124,11 @@ def preset_contact_position(preset: Dict[str, Any]) -> str:
     return str(contact.get("position") or "bottom_footer") if isinstance(contact, dict) else "bottom_footer"
 
 
+def preset_contact_rules(preset: Dict[str, Any]) -> Dict[str, Any]:
+    contact = preset_json(preset).get("contact") or preset_json(preset).get("contact_layer")
+    return dict(contact) if isinstance(contact, dict) else {}
+
+
 def preset_location_rules(preset: Dict[str, Any]) -> Dict[str, Any]:
     location = preset_json(preset).get("location") or preset_json(preset).get("location_layer")
     return dict(location) if isinstance(location, dict) else {}

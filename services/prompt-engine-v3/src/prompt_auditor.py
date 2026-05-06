@@ -4,7 +4,7 @@ import re
 from typing import Any, Dict, Iterable, List, Tuple
 
 from .planning_schemas import AssetDecision, CopyPlan, CreativeIntent, CreativeStrategy, ProductionPlan, TemplateConstraint, VariantConcept
-from .prompt_compiler import remove_price_claims, strip_internal_tokens
+from .prompt_compiler import remove_price_claims, remove_unsafe_commercial_claims, repair_structural_change_requests, strip_internal_tokens
 
 
 def dspy_available() -> bool:
@@ -53,7 +53,11 @@ def audit_and_repair_prompt(
             program = DspyPromptProgram()
             model_result = program.audit_and_repair_prompt(payload)
         except Exception as exc:
-            model_result = {"status": "fallback", "issues_found": [{"severity": "warning", "type": "prompt_auditor_error", "message": f"AI prompt auditor failed: {type(exc).__name__}: {exc}"}]}
+            model_result = {
+                "status": "fallback",
+                "issues_found": [],
+                "internal_warnings": [f"AI prompt auditor failed: {type(exc).__name__}: {exc}"],
+            }
     repaired_prompt = str(model_result.get("repaired_provider_prompt") or provider_prompt or "")
     repaired_negative = str(model_result.get("repaired_negative_prompt") or negative_prompt or "")
     issues = _coerce_issues(model_result.get("issues_found"))
@@ -144,6 +148,8 @@ def deterministic_repair(
     changes: List[str] = []
     text = strip_internal_tokens(prompt or "")
     neg = strip_internal_tokens(negative_prompt or "")
+    text = remove_unsafe_commercial_claims(text)
+    text = repair_structural_change_requests(text, getattr(intent, "brief_summary", ""))
 
     before_palette = text
     text = _ensure_brand_palette(text, context)
@@ -367,7 +373,7 @@ def _ensure_no_text_mode(text: str) -> str:
     text = re.sub(r"Text elements? will be[^.]*\.", "Reserve clean editable text zones without rendering text.", text, flags=re.I)
     text = re.sub(r"Branding will be visible but integrated[^.]*\.", "Use the supplied logo reference as the only visible brand mark; reserve all marketing copy for editable overlays.", text, flags=re.I)
     guard = (
-        "Text reserve-space rule: do not render any headline, subheadline, CTA, contact footer, poster text, captions, letters, numbers, labels, "
+        "Text reserve-space rule: no text / no typography; do not render any headline, subheadline, CTA, contact footer, poster text, captions, letters, numbers, labels, "
         "placeholder words, lorem ipsum, gibberish typography, or text-like marks. Leave clean editable text-safe zones for later overlay of headline, subheadline, CTA, and contact footer if requested."
     )
     if "text reserve-space rule:" not in text.lower():

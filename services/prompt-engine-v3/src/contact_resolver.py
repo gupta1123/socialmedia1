@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from .planning_schemas import CreativeIntent, GroundedFactStore, ResolvedContactPlan
 
@@ -14,6 +14,7 @@ def resolve_contact_plan(
     explicit_items: Iterable[str] = (),
     preset_items: Iterable[str] = (),
     position: str = "bottom_footer",
+    rules_extra: Optional[Dict[str, Any]] = None,
 ) -> ResolvedContactPlan:
     requested = _dedupe([*intent.contact_intent.requested_items, *explicit_items, *preset_items])
     requested = [item for item in requested if item in VALID_CONTACT_ITEMS]
@@ -40,6 +41,7 @@ def resolve_contact_plan(
         missing=missing,
         requires_client_review=requires_review,
         position=position,
+        rules_extra=rules_extra or {},
     )
 
 

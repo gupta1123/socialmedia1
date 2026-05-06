@@ -27,6 +27,7 @@ def assemble_prompt_sections(
     creative_kind = "brand festive greeting poster" if is_brand_only_festival else "real-estate social creative"
     sections = [
         f"Creative objective: Create a finished premium {output_format} {creative_kind} for {subject}. {strategy.primary_goal}",
+        _variant_route_section(concept, strategy, asset_decision, intent),
         f"Creative mode and hierarchy: {strategy.creative_mode.replace('_', ' ')}. Message hierarchy: {', '.join(strategy.message_hierarchy)}.",
         _brand_palette_section(context),
         _asset_section(asset_decision, intent),
@@ -40,6 +41,27 @@ def assemble_prompt_sections(
     if source_prompt:
         sections.append(f"Additional creative brief to honor: {source_prompt.rstrip('.') }.")
     return [s for s in sections if s.strip()]
+
+
+def _variant_route_section(concept: VariantConcept, strategy: CreativeStrategy, asset_decision: AssetDecision, intent: CreativeIntent) -> str:
+    label = _asset_safe_variant_label(concept.label or concept.variant_id or "Creative route", asset_decision, intent)
+    axis = concept.variation_axis or strategy.creative_mode or "visual route"
+    pieces = [
+        f"Variant route: {label} on the {axis.replace('_', ' ')} axis.",
+        f"Keep this option visually distinct: {concept.why_distinct}" if concept.why_distinct else "",
+        f"Copy angle: {concept.copy_strategy}" if concept.copy_strategy else "",
+    ]
+    return " ".join(piece for piece in pieces if piece)
+
+
+def _asset_safe_variant_label(label: str, asset_decision: AssetDecision, intent: CreativeIntent) -> str:
+    text = str(label or "").strip() or "Creative route"
+    lowered = text.lower()
+    if intent.content_job_id == "festive_greeting" and intent.festival_visual_scope == "brand_only":
+        return "Brand festive route" if any(term in lowered for term in ["tower", "facade", "building", "project"]) else text
+    if asset_decision.semantic_type in {"entrance", "lobby", "interior", "amenity"} and any(term in lowered for term in ["tower", "facade", "exterior", "building"]):
+        return "Asset-faithful selected template route"
+    return text
 
 
 
@@ -188,7 +210,7 @@ def _template_section(template: TemplateConstraint) -> str:
 def _text_section(production: ProductionPlan, copy_plan: CopyPlan) -> str:
     if production.text_treatment == "reserve_space" or production.text_strategy in {"reserve_editable_space", "no_text_visual_only"}:
         return (
-            "Text strategy: Do not render any poster text, captions, letters, numbers, CTA labels, placeholder words, or text-like marks. "
+            "Text strategy: no text and no typography. Do not render any poster text, captions, letters, numbers, CTA labels, placeholder words, or text-like marks. "
             "Create a clean key visual with intentional empty zones for editable text to be added later."
         )
     parts = []

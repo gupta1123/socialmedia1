@@ -52,12 +52,16 @@ def db_fact_strings(context: Dict[str, Any]) -> List[str]:
     facts: List[str] = []
     project = _dict(context.get("project"))
     profile = project_profile(context)
+    rera_block = _dict(context.get("rera_compliance_block"))
     for value in [
         project.get("name"),
         project.get("city"),
         project.get("micro_location"),
         profile.get("tagline"),
         profile.get("reraNumber"),
+        rera_block.get("registration_number"),
+        rera_block.get("authority_label"),
+        rera_block.get("website_url"),
         profile.get("startingPrice"),
         profile.get("latestUpdate"),
         profile.get("positioning"),

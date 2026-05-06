@@ -21,13 +21,14 @@ type OpenAiImageEditFile = {
   fileName?: string;
 };
 
-type OpenAiImageQuality = "auto" | "low" | "medium" | "high";
+export type OpenAiImageQuality = "auto" | "low" | "medium" | "high";
 
 type OpenAiRequestOptions = {
   model: string;
   prompt: string;
   aspectRatio: string;
   count: number;
+  quality?: OpenAiImageQuality;
   referencePaths?: string[];
 };
 
@@ -36,10 +37,11 @@ export async function generateOpenAiImages({
   prompt,
   aspectRatio,
   count,
+  quality = env.OPENAI_IMAGE_QUALITY,
   referencePaths = []
 }: OpenAiRequestOptions) {
   if (!env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is required when IMAGE_GENERATION_PROVIDER=openai");
+    throw new Error("OPENAI_API_KEY is required for OpenAI image generation");
   }
   const resolvedModel = model?.trim() || env.OPENAI_FINAL_MODEL || "gpt-image-2";
   if (!resolvedModel.trim()) {
@@ -53,6 +55,7 @@ export async function generateOpenAiImages({
           prompt,
           aspectRatio,
           count,
+          quality,
           referencePaths
         })
       : await fetch(`${resolveOpenAiBaseUrl()}/images/generations`, {
@@ -66,7 +69,7 @@ export async function generateOpenAiImages({
             prompt,
             n: count,
             size: resolveOpenAiImageSize(aspectRatio),
-            quality: env.OPENAI_IMAGE_QUALITY,
+            quality,
             output_format: env.OPENAI_IMAGE_OUTPUT_FORMAT,
             background: env.OPENAI_IMAGE_BACKGROUND
           })
@@ -161,12 +164,14 @@ async function submitOpenAiEditRequest({
   prompt,
   aspectRatio,
   count,
+  quality,
   referencePaths
 }: {
   model: string;
   prompt: string;
   aspectRatio: string;
   count: number;
+  quality: OpenAiImageQuality;
   referencePaths: string[];
 }) {
   const body = new FormData();
@@ -174,7 +179,7 @@ async function submitOpenAiEditRequest({
   body.append("prompt", prompt);
   body.append("n", String(count));
   body.append("size", resolveOpenAiImageSize(aspectRatio));
-  body.append("quality", env.OPENAI_IMAGE_QUALITY);
+  body.append("quality", quality);
   body.append("output_format", env.OPENAI_IMAGE_OUTPUT_FORMAT);
   body.append("background", env.OPENAI_IMAGE_BACKGROUND);
   if (supportsOpenAiInputFidelity(model)) {

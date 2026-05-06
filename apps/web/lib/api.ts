@@ -162,6 +162,7 @@ export type CreativeV3CompilePayload = {
   visualTemplateId?: string | null;
   visualTemplateIds?: string[];
   selectedAssetIds?: string[];
+  renderPreset?: CreativeV3RenderPreset | null;
   includeLogo?: boolean;
   logoAssetId?: string | null;
   additionalLogoAssetIds?: string[];
@@ -174,11 +175,15 @@ export type CreativeV3CompilePayload = {
   };
 };
 
+export type CreativeV3RenderPreset = "v1_low" | "v1_high" | "v2_low" | "v2_medium" | "v2_high";
+
 export type CreativeV3CompileResponse = {
   request: {
     brandId: string;
     projectId: string | null;
     postTypeId: string | null;
+    renderPreset?: CreativeV3RenderPreset;
+    clientRenderPresetAllowed?: boolean;
     enginePayload: Record<string, unknown>;
   };
   result: {
@@ -224,11 +229,13 @@ export type CreativeV3RenderPayload = {
   projectId?: string | null;
   variant: Record<string, unknown>;
   count?: number;
+  renderPreset?: CreativeV3RenderPreset | null;
 };
 
 export type CreativeV3RenderResponse = {
-  provider: "openai";
+  provider: "fal" | "openai";
   model: string;
+  renderPreset?: CreativeV3RenderPreset;
   requestId: string;
   providerPrompt?: string;
   referenceAssetIds: string[];

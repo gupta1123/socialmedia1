@@ -17,6 +17,7 @@ import {
   type CreativeV3CompilePayload,
   type CreativeV3GenerateAsyncStatus,
   type CreativeV3RenderResponse,
+  type CreativeV3RenderPreset,
   type CreativeV3VisualTemplate
 } from "../../../lib/api";
 import { useStudio } from "../studio-context";
@@ -24,6 +25,7 @@ import { useStudio } from "../studio-context";
 type CopyMode = "auto" | "manual";
 type TextTreatment = "render_text" | "reserve_space";
 type CreativeMode = NonNullable<CreativeV3CompilePayload["creativeMode"]>;
+type CreateV3SpeedTone = "green" | "amber" | "orange" | "red";
 type V3Variant = CreativeV3CompileResponse["result"]["variants"][number];
 type RefModalKind = "templates" | "all" | "exteriors" | "interiors" | "amenities" | "location" | "generated";
 type GenerationRun = {
@@ -39,6 +41,34 @@ const formatOptions = [
   { value: "landscape", label: "16:9", name: "Widescreen" },
   { value: "story", label: "9:16", name: "Social story" },
   { value: "portrait", label: "4:5", name: "Social post" }
+];
+const createV3RenderPresetValues: CreativeV3RenderPreset[] = ["v1_low", "v1_high", "v2_low", "v2_medium", "v2_high"];
+const showCreateV3RenderPresetSelector = process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_CREATE_V3_SHOW_RENDER_PRESET === "1";
+const createV3DefaultRenderPreset = parseCreateV3RenderPreset(process.env.NEXT_PUBLIC_CREATE_V3_DEFAULT_RENDER_PRESET) ?? "v2_high";
+const createV3RenderEngineOptions: Array<{
+  group: string;
+  options: Array<{
+    value: CreativeV3RenderPreset;
+    label: string;
+    speedLevel: number;
+    speedTone: CreateV3SpeedTone;
+  }>;
+}> = [
+  {
+    group: "V1",
+    options: [
+      { value: "v1_low", label: "Low", speedLevel: 4, speedTone: "green" },
+      { value: "v1_high", label: "High", speedLevel: 3, speedTone: "amber" }
+    ]
+  },
+  {
+    group: "V2",
+    options: [
+      { value: "v2_low", label: "Low", speedLevel: 3, speedTone: "amber" },
+      { value: "v2_medium", label: "Medium", speedLevel: 2, speedTone: "orange" },
+      { value: "v2_high", label: "High", speedLevel: 1, speedTone: "red" }
+    ]
+  }
 ];
 
 const contactOptions = ["phone", "email", "website", "whatsapp"] as const;
@@ -117,6 +147,7 @@ export default function CreateV3Page() {
   const [brief, setBrief] = useState("Create a premium real-estate launch post with a strong architectural visual and restrained copy.");
   const [audience, setAudience] = useState("Homebuyers and investors");
   const [format, setFormat] = useState("portrait");
+  const [renderPreset, setRenderPreset] = useState<CreativeV3RenderPreset>(createV3DefaultRenderPreset);
   const [variantCount, setVariantCount] = useState(2);
   const [variationStrategy, setVariationStrategy] = useState("auto");
   const [creativeMode, setCreativeMode] = useState<CreativeMode>("auto");
@@ -404,6 +435,7 @@ export default function CreateV3Page() {
       visualTemplateId: visualTemplateId || null,
       visualTemplateIds: visualTemplateId ? [visualTemplateId] : [],
       selectedAssetIds,
+      ...(showCreateV3RenderPresetSelector ? { renderPreset } : {}),
       includeLogo,
       logoAssetId: includeLogo ? logoAssetId || null : null,
       additionalLogoAssetIds,
@@ -469,6 +501,7 @@ export default function CreateV3Page() {
     setBrief(input.brief ?? "");
     setAudience(input.audience ?? "Homebuyers and investors");
     setFormat(input.format ?? "portrait");
+    setRenderPreset(parseCreateV3RenderPreset(input.renderPreset) ?? createV3DefaultRenderPreset);
     setVariantCount(input.variantCount ?? 1);
     setVariationStrategy(input.variationStrategy ?? "auto");
     setCreativeMode(input.creativeMode ?? "auto");
@@ -868,6 +901,12 @@ export default function CreateV3Page() {
         </details>
 
         <div className="create-v3-generate-area">
+          {showCreateV3RenderPresetSelector ? (
+            <CreateV3RenderPresetDropdown
+              onChange={setRenderPreset}
+              value={renderPreset}
+            />
+          ) : null}
           <div className="create-v3-generate-controls">
             <div className="create-v3-stepper" aria-label="Variant count">
               <button onClick={() => setVariantCount(Math.max(1, variantCount - 1))}>−</button>
@@ -1473,6 +1512,99 @@ function CreateV3SizeDropdown({
   );
 }
 
+function CreateV3RenderPresetDropdown({
+  value,
+  onChange
+}: {
+  value: CreativeV3RenderPreset;
+  onChange: (value: CreativeV3RenderPreset) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const currentGroup = createV3RenderEngineOptions.find((group) => group.options.some((option) => option.value === value));
+  const currentOption = currentGroup?.options.find((option) => option.value === value);
+  const currentLabel = currentGroup && currentOption ? `${currentGroup.group} ${currentOption.label}` : "V2 High";
+
+  return (
+    <div
+      className={`create-v3-render-model-select ${open ? "is-open" : ""}`}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setOpen(false);
+        }
+      }}
+    >
+      <button
+        aria-expanded={open}
+        className="create-v3-render-model-trigger"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        <span className="create-v3-render-model-name">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2 2 7l10 5 10-5-10-5Z" />
+            <path d="m2 17 10 5 10-5" />
+            <path d="m2 12 10 5 10-5" />
+          </svg>
+          {currentLabel}
+        </span>
+        <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" className={`create-v3-render-model-chevron ${open ? "is-open" : ""}`}>
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {open ? (
+        <div className="create-v3-render-model-menu" role="listbox">
+          <div className="create-v3-render-model-header">
+            <span>Model / Quality</span>
+            <span>Speed</span>
+          </div>
+          <div className="create-v3-render-model-list">
+            {createV3RenderEngineOptions.map((group) => (
+              <div className="create-v3-render-model-group" key={group.group}>
+                <div className="create-v3-render-model-group-label">{group.group}</div>
+                {group.options.map((option) => (
+                  <button
+                    aria-selected={option.value === value}
+                    className={`create-v3-render-model-option ${option.value === value ? "is-selected" : ""}`}
+                    key={option.value}
+                    onClick={() => {
+                      onChange(option.value);
+                      setOpen(false);
+                    }}
+                    role="option"
+                    type="button"
+                  >
+                    <span className="create-v3-render-model-option-label">
+                      {option.value === value ? (
+                        <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m20 6-11 11-5-5" />
+                        </svg>
+                      ) : (
+                        <span aria-hidden="true" className="create-v3-render-model-check-placeholder" />
+                      )}
+                      <strong>{option.label}</strong>
+                    </span>
+                    <CreateV3SpeedDots level={option.speedLevel} tone={option.speedTone} />
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CreateV3SpeedDots({ level, tone }: { level: number; tone: CreateV3SpeedTone }) {
+  return (
+    <span className={`create-v3-speed-dots is-${tone}`} aria-label={`Speed ${level} of 4`}>
+      {Array.from({ length: 4 }, (_, index) => (
+        <span className={index < level ? "is-active" : ""} key={index} />
+      ))}
+    </span>
+  );
+}
+
 function RatioIcon({ ratio }: { ratio: string }) {
   const vertical = ratio === "9:16" || ratio === "4:5";
   const wide = ratio === "16:9";
@@ -1482,6 +1614,12 @@ function RatioIcon({ ratio }: { ratio: string }) {
       className={`create-v3-ratio-icon ${vertical ? "is-vertical" : ""} ${wide ? "is-wide" : ""}`}
     />
   );
+}
+
+function parseCreateV3RenderPreset(value: unknown): CreativeV3RenderPreset | null {
+  return typeof value === "string" && createV3RenderPresetValues.includes(value as CreativeV3RenderPreset)
+    ? value as CreativeV3RenderPreset
+    : null;
 }
 
 function summarizePreset(preset: CreativeV3BrandPreset) {

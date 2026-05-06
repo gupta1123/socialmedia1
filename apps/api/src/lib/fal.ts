@@ -17,6 +17,20 @@ type FalMaskedFillResult = {
   height?: number;
 };
 
+export type FalGeneratedImage = {
+  url: string;
+  content_type?: string | null;
+  file_name?: string | null;
+};
+
+type FalGenerationOptions = {
+  model: string;
+  prompt: string;
+  aspectRatio: string;
+  count: number;
+  referencePaths?: string[];
+};
+
 type FalDirectEditOptions = {
   prompt: string;
   image: ImageEditFile;
@@ -26,7 +40,7 @@ type FalDirectEditOptions = {
 };
 
 type UntypedFalSubscribeClient = {
-  subscribe(endpointId: string, options: { input: Record<string, unknown>; logs?: boolean }): Promise<{ data: unknown }>;
+  subscribe(endpointId: string, options: { input: Record<string, unknown>; logs?: boolean }): Promise<{ data: unknown; requestId?: unknown }>;
 };
 
 fal.config({
@@ -186,6 +200,48 @@ export async function uploadStoragePathToFal(path: string) {
   });
 }
 
+export async function generateFalImages({
+  model,
+  prompt,
+  aspectRatio,
+  count,
+  referencePaths = []
+}: FalGenerationOptions) {
+  if (!env.FAL_KEY) {
+    throw new Error("FAL_KEY is required for Create V3 V1 image generation");
+  }
+
+  const referenceUrls = referencePaths.length > 0
+    ? await Promise.all(referencePaths.map((storagePath) => uploadStoragePathToFal(storagePath)))
+    : [];
+  const subscribeClient = fal as unknown as UntypedFalSubscribeClient;
+  const result = await subscribeClient.subscribe(model, {
+    input: {
+      ...buildFalGenerationInput({
+        model,
+        prompt,
+        aspectRatio,
+        numImages: count,
+        referenceUrls
+      }),
+      sync_mode: true
+    },
+    logs: false
+  });
+  const data = isRecord(result) && isRecord(result.data) ? result.data : null;
+  const images = extractFalGeneratedImages(data);
+  if (images.length === 0) {
+    throw new Error("Fal image generation returned no images");
+  }
+
+  return {
+    request_id: typeof result.requestId === "string"
+      ? result.requestId
+      : `fal-image-${Date.now()}`,
+    images
+  };
+}
+
 export async function applyFalDirectEdit({
   prompt,
   image,
@@ -233,6 +289,25 @@ export async function applyFalDirectEdit({
     ...(typeof width === "number" ? { width } : {}),
     ...(typeof height === "number" ? { height } : {})
   };
+}
+
+function extractFalGeneratedImages(data: Record<string, unknown> | null): FalGeneratedImage[] {
+  if (!data || !Array.isArray(data.images)) {
+    return [];
+  }
+
+  const images: FalGeneratedImage[] = [];
+  for (const image of data.images) {
+    if (!isRecord(image)) continue;
+    const url = resolveImageUrl(image);
+    if (!url) continue;
+    images.push({
+      url,
+      content_type: typeof image.content_type === "string" ? image.content_type : null,
+      file_name: typeof image.file_name === "string" ? image.file_name : null
+    });
+  }
+  return images;
 }
 
 function resolveImageUrl(value: Record<string, unknown>) {

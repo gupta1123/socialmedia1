@@ -43,6 +43,9 @@ def build_fact_store(context: Dict[str, Any], session_facts: List[SessionFactOve
     _add_direct(values, "brand_name", brand.get("name"), "brand.name")
     _add_direct(values, "city", project.get("city") or project_prof.get("city"), "project.city")
     _add_direct(values, "micro_location", project.get("micro_location") or project_prof.get("micro_location") or project_prof.get("location"), "project.micro_location")
+    rera_block = context.get("rera_compliance_block") if isinstance(context.get("rera_compliance_block"), dict) else {}
+    _add_direct(values, "rera", rera_block.get("registration_number"), "rera_compliance_block.registration_number")
+    _add_direct(values, "website", rera_block.get("website_url"), "rera_compliance_block.website_url")
 
     for source_name, profile in [("project.profile", project_prof), ("brand.profile", brand_prof)]:
         if not isinstance(profile, dict):
