@@ -10,8 +10,8 @@ import {
 
 describe("web workflow helpers", () => {
   it("routes queue actions to the correct next screen", () => {
-    expect(getQueueNextActionHref("task-1", "planned")).toBe("/studio/create?deliverableId=task-1");
-    expect(getQueueNextActionHref("task-1", "generating")).toBe("/studio/create?deliverableId=task-1");
+    expect(getQueueNextActionHref("task-1", "planned")).toBe("/studio/create-v3?deliverableId=task-1");
+    expect(getQueueNextActionHref("task-1", "generating")).toBe("/studio/create-v3?deliverableId=task-1");
     expect(getQueueNextActionHref("task-1", "review")).toBe("/studio/review?deliverableId=task-1");
     expect(getQueueNextActionHref("task-1", "approved")).toBe("/studio/deliverables/task-1?intent=schedule");
     expect(getQueueNextActionHref("task-1", "published")).toBe("/studio/deliverables/task-1");

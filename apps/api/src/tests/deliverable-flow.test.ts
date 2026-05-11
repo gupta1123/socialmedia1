@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { mapVerdictToApprovalAction, resolveApprovalState } from "../lib/deliverable-flow.js";
+
+process.env.SUPABASE_URL ??= "https://example.supabase.co";
+process.env.SUPABASE_ANON_KEY ??= "test-anon-key";
+process.env.SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
+
+const { mapVerdictToApprovalAction, resolveApprovalState } = await import("../lib/deliverable-flow.js");
 
 describe("deliverable feedback transitions", () => {
   it("maps off-brand feedback to a hard reject action", () => {

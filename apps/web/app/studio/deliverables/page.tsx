@@ -411,7 +411,7 @@ export default function DeliverablesPage() {
         className: "data-table-actions-cell",
         cell: (deliverable: DeliverableRecord) => (
           <div className="table-action-group">
-            <Link className="button button-ghost table-action-button" href={`/studio/create?deliverableId=${deliverable.id}`}>
+            <Link className="button button-ghost table-action-button" href={`/studio/create-v3?deliverableId=${deliverable.id}`}>
               Generate
             </Link>
           </div>

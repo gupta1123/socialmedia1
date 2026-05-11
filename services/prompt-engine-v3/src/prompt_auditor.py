@@ -30,6 +30,7 @@ def audit_and_repair_prompt(
     provider_prompt: str,
     negative_prompt: str,
     allowed_facts: Iterable[str] = (),
+    prompt_format: str = "legacy",
 ) -> Dict[str, Any]:
     payload = build_audit_payload(
         request=request,
@@ -44,6 +45,7 @@ def audit_and_repair_prompt(
         provider_prompt=provider_prompt,
         negative_prompt=negative_prompt,
         allowed_facts=list(allowed_facts),
+        prompt_format=prompt_format,
     )
     model_result: Dict[str, Any] = {}
     if dspy_available() and not _option(request, "disable_prompt_auditor"):
@@ -58,10 +60,13 @@ def audit_and_repair_prompt(
                 "issues_found": [],
                 "internal_warnings": [f"AI prompt auditor failed: {type(exc).__name__}: {exc}"],
             }
-    repaired_prompt = str(model_result.get("repaired_provider_prompt") or provider_prompt or "")
-    repaired_negative = str(model_result.get("repaired_negative_prompt") or negative_prompt or "")
     issues = _coerce_issues(model_result.get("issues_found"))
     changes = [str(item) for item in model_result.get("changes_made") or [] if str(item).strip()]
+    repaired_prompt = str(model_result.get("repaired_provider_prompt") or provider_prompt or "")
+    if prompt_format == "structured_v2" and not _looks_like_structured_prompt(repaired_prompt):
+        repaired_prompt = provider_prompt or ""
+        changes.append("Ignored non-structured AI prompt-auditor rewrite for structured_v2 prompt.")
+    repaired_negative = str(model_result.get("repaired_negative_prompt") or negative_prompt or "")
     prompt2, negative2, det_issues, det_changes = deterministic_repair(
         repaired_prompt,
         repaired_negative,
@@ -71,6 +76,7 @@ def audit_and_repair_prompt(
         asset_decision=asset_decision,
         copy_plan=copy_plan,
         allowed_facts=list(allowed_facts),
+        prompt_format=prompt_format,
     )
     issues.extend(det_issues)
     changes.extend(det_changes)
@@ -107,6 +113,7 @@ def build_audit_payload(**kwargs: Any) -> Dict[str, Any]:
                 "If construction visual mode is visualized_progress_from_project_truth, describe it as a construction-stage visualization, not an actual/current site photo.",
                 "If no selected asset exists, do not mention a supplied project reference image.",
                 "If text is rendered, include canonical exact_text_layers only; never rewrite, translate, append, or reintroduce stale visible copy. If contact is requested and grounded, include it as a canonical footer line.",
+                "If a selected/custom/curated palette is present in context, preserve that palette as the creative color direction; do not replace it with the brand profile palette. Logo colors remain protected.",
                 "If a logo asset is provided, the image model should use the supplied logo reference exactly once as a flat brand mark and must not invent, alter, duplicate, recolor, or place it on architecture. If a RERA QR is composited after generation, ask the image model to leave a clean zone, not reproduce the QR.",
             ],
         },
@@ -114,6 +121,7 @@ def build_audit_payload(**kwargs: Any) -> Dict[str, Any]:
         "festival_visual_scope": intent.festival_visual_scope,
         "construction_visual_mode": intent.construction_visual_mode,
         "construction_progress_percent": intent.construction_progress_percent,
+        "brief_intent_plan": intent.brief_intent_plan.model_dump(),
         "project_id": (context.get("project") or {}).get("id") if isinstance(context.get("project"), dict) else None,
         "brand": context.get("brand"),
         "project": context.get("project"),
@@ -121,7 +129,9 @@ def build_audit_payload(**kwargs: Any) -> Dict[str, Any]:
         "template": kwargs["template_constraint"].model_dump() if kwargs.get("template_constraint") else {},
         "strategy": kwargs["strategy"].model_dump() if kwargs.get("strategy") else {},
         "concept": kwargs["concept"].model_dump() if kwargs.get("concept") else {},
+        "creative_route": context.get("creative_route") if isinstance(context, dict) else {},
         "copy": copy_plan.as_contract(),
+        "prompt_format": kwargs.get("prompt_format") or "legacy",
         "text_strategy": production.text_strategy,
         "text_treatment": production.text_treatment,
         "logo": {"include": production.include_logo, "asset_id": production.logo_asset_id, "sent_to_model": True, "composited_after": False},
@@ -143,6 +153,7 @@ def deterministic_repair(
     asset_decision: AssetDecision,
     copy_plan: CopyPlan,
     allowed_facts: List[str],
+    prompt_format: str = "legacy",
 ) -> Tuple[str, str, List[Dict[str, str]], List[str]]:
     issues: List[Dict[str, str]] = []
     changes: List[str] = []
@@ -150,11 +161,18 @@ def deterministic_repair(
     neg = strip_internal_tokens(negative_prompt or "")
     text = remove_unsafe_commercial_claims(text)
     text = repair_structural_change_requests(text, getattr(intent, "brief_summary", ""))
+    is_structured = prompt_format == "structured_v2"
 
-    before_palette = text
-    text = _ensure_brand_palette(text, context)
-    if text != before_palette:
-        changes.append("Inserted brand palette instruction into final provider prompt.")
+    if not is_structured:
+        before_palette = text
+        text = _ensure_brand_palette(text, context)
+        if text != before_palette:
+            changes.append("Inserted brand palette instruction into final provider prompt.")
+    else:
+        before_palette = text
+        text = _enforce_selected_palette_for_structured(text, context)
+        if text != before_palette:
+            changes.append("Restored selected color palette instruction after prompt audit.")
 
     before = text
     text = remove_price_claims(text)
@@ -178,7 +196,30 @@ def deterministic_repair(
             changes.append("Repaired construction prompt to safe visualization language.")
             issues.append(_issue("warning", "construction_visualization_language_repaired", "Construction prompt was repaired to avoid claiming actual current progress."))
 
-    if production.text_treatment != "reserve_space":
+    if intent.brief_intent_plan.primary_visual_goal == "generated_lifestyle_scene":
+        before = text
+        text = _repair_generated_lifestyle_scene(text, intent, asset_decision)
+        neg = _remove_negative_items(neg, _requested_lifestyle_negative_removals(intent))
+        neg = _append_negative(neg, ["facade-only poster", "static tower crop", "selected reference as hero", "tower cutout as main visual"])
+        if text != before:
+            changes.append("Repaired prompt to prioritize the requested generated lifestyle scene over the selected reference asset.")
+            issues.append(_issue("warning", "lifestyle_scene_priority_repaired", "Brief requested a lifestyle scene; prompt was repaired so selected references are context grounding, not the hero visual."))
+
+    before_route_text, before_route_neg = text, neg
+    text, neg = _repair_creative_route_prompt(text, neg, context)
+    if text != before_route_text or neg != before_route_neg:
+        changes.append("Applied creative-route guardrails for grounded creative freedom.")
+        issues.append(_issue("warning", "creative_route_guardrails_applied", "Prompt was adjusted to preserve the selected creative route while keeping factual grounding."))
+
+    if is_structured:
+        if production.text_treatment == "reserve_space":
+            neg = _append_negative(neg, ["no text", "no typography", "no letters", "no numbers", "no labels", "no placeholder text"])
+        else:
+            before = text
+            text = _ensure_exact_text(text, copy_plan, production)
+            if text != before:
+                changes.append("Re-applied canonical exact visible text instructions for structured prompt.")
+    elif production.text_treatment != "reserve_space":
         before = text
         text = _ensure_exact_text(text, copy_plan, production)
         if text != before:
@@ -190,7 +231,9 @@ def deterministic_repair(
         if text != before:
             changes.append("Repaired reserve-space text instruction.")
 
-    if production.include_logo:
+    if is_structured:
+        pass
+    elif production.include_logo:
         before = text
         text = _model_logo_instruction(text, production)
         if text != before:
@@ -198,31 +241,31 @@ def deterministic_repair(
     else:
         text = _remove_positive_logo_language(text)
 
-    if production.secondary_logo.required:
+    if not is_structured and production.secondary_logo.required:
         before = text
         text = _secondary_logo_instruction(text, production)
         if text != before:
             changes.append("Inserted secondary logo placement instruction.")
 
-    if len(production.additional_logos) > 1:
+    if not is_structured and len(production.additional_logos) > 1:
         before = text
         text = _additional_logo_instruction(text, production)
         if text != before:
             changes.append("Inserted additional logo placement instructions.")
 
-    if production.include_rera_qr:
+    if not is_structured and production.include_rera_qr:
         before = text
         text = _composited_rera_instruction(text, production)
         if text != before:
             changes.append("Changed RERA QR instruction to deterministic compositing / safe zone behavior.")
 
-    if production.contact_plan.values:
+    if not is_structured and production.contact_plan.values:
         before = text
         text = _contact_position_instruction(text, production)
         if text != before:
             changes.append("Inserted contact placement instruction.")
 
-    if production.location_plan.required:
+    if not is_structured and production.location_plan.required:
         before = text
         text = _location_instruction(text, production)
         if text != before:
@@ -237,9 +280,183 @@ def deterministic_repair(
     return _clean(text), _clean(neg), issues, changes
 
 
+def _repair_generated_lifestyle_scene(text: str, intent: CreativeIntent, asset_decision: AssetDecision) -> str:
+    plan = intent.brief_intent_plan
+    if not plan.scene_subject:
+        return text
+    guard = (
+        f"Lifestyle scene priority: the main hero visual must show {plan.scene_subject}. "
+        "Use any supplied project/reference asset only as project/context grounding for identity and style; "
+        "do not recreate the selected reference as the main hero, facade crop, tower cutout, static architecture poster, or asset-only composition."
+    )
+    if plan.environment_required:
+        guard += " Include the requested setting cues: %s." % ", ".join(plan.environment_required[:6])
+    if plan.people_required:
+        guard += " People/family/couple presence is required when requested by the brief."
+    repaired = text
+    repaired = re.sub(
+        r"Do not generate (?:a |an )?(?:generated )?(?:lifestyle scene|scene)[^.]*\.\s*",
+        "",
+        repaired,
+        flags=re.I,
+    )
+    for item in _requested_lifestyle_negative_removals(intent):
+        if item.startswith("no "):
+            continue
+        if item.lower() in {"generated lifestyle scene", "lifestyle scene", "township", "sahyadri mountains", "golden hour", "peaceful"}:
+            repaired = re.sub(rf"\bdo not (?:show|include|use|create|generate)[^.]*{re.escape(item)}[^.]*\.\s*", "", repaired, flags=re.I)
+    for pattern in [
+        r"Use the supplied [^.]* asset as the factual (?:visual )?anchor\.\s*",
+        r"Use the supplied [^.]* asset as the factual hero visual\.\s*",
+        r"Use the supplied [^.]* as the truthful visual anchor[^.]*\.\s*",
+    ]:
+        repaired = re.sub(pattern, guard + " ", repaired, flags=re.I)
+    if "lifestyle scene priority:" not in repaired.lower():
+        repaired = f"{guard} {repaired}".strip()
+    if asset_decision.reference_role == "context_grounding" and "context grounding" not in repaired.lower():
+        repaired += " Selected references are context grounding only, not the final composition target."
+    return repaired
+
+
+def _requested_lifestyle_negative_removals(intent: CreativeIntent) -> List[str]:
+    plan = intent.brief_intent_plan
+    removals = ["no invented surroundings", "no invented factual project surroundings", "no random people", "generated lifestyle scene", "lifestyle scene"]
+    removals.extend(plan.environment_required)
+    removals.extend(plan.must_include)
+    if plan.scene_subject:
+        removals.extend(["family", "families", "couple", "people", "township", "mountains", "sahyadri mountains", "golden hour", "peaceful"])
+    return _dedupe([str(item) for item in removals if str(item).strip()])
+
+
+def _repair_creative_route_prompt(text: str, negative_prompt: str, context: Dict[str, Any]) -> Tuple[str, str]:
+    route = context.get("creative_route") if isinstance(context, dict) else {}
+    if not isinstance(route, dict) or not route.get("key"):
+        return text, negative_prompt
+    key = str(route.get("key") or "")
+    if key == "editorial_grounded_post":
+        return text, negative_prompt
+    mandatory = str(route.get("mandatory_mechanic") or "").strip()
+    abstract_allowed = bool(route.get("abstract_environment_allowed", False))
+    people_allowed = bool(route.get("people_allowed", False))
+    guard = ""
+    if key == "building_social_poster":
+        guard = (
+            "Creative route safety: one dominant poster device must visibly drive the composition; "
+            "use the building as a truthful poster object with cutout/crop/masking/layering/type interaction as appropriate, "
+            "not a simple building + logo + text layout."
+        )
+    elif key == "site_visit_lifestyle_invite":
+        guard = "Creative route safety: lifestyle experience and site-visit action must lead; project assets are grounding/context only, not a facade-only hero."
+    elif key == "site_visit_abstract_invitation":
+        guard = "Creative route safety: use a private-arrival, invitation, appointment, route, threshold, or access metaphor as the main visual idea."
+    elif key.startswith("festival_"):
+        guard = "Creative route safety: festival symbolism, respectful cultural mood, or festive lifestyle must lead; do not invent project events, offers, or physical decorations."
+    elif key == "grounded_abstract_post":
+        guard = "Creative route safety: one symbolic, graphic, or atmospheric idea must lead while approved facts remain exact."
+
+    out = text
+    out = _strip_route_incompatible_sentences(out, key)
+    if guard and guard.lower() not in out.lower():
+        out = f"{guard} {out}".strip()
+    if mandatory and mandatory.lower() not in out.lower():
+        out = f"{out.rstrip()} Mandatory creative mechanic: {mandatory}."
+
+    neg = negative_prompt
+    if abstract_allowed:
+        neg = _remove_negative_items(neg, ["no invented surroundings", "no abstract background", "no gradients", "no symbolic shapes", "no texture"])
+        neg = _append_negative(neg, ["no invented factual project surroundings", "no unsupported factual amenities", "no fake factual claims"])
+    if not people_allowed:
+        neg = _append_negative(neg, ["no random people"])
+    return out, neg
+
+
+def _strip_route_incompatible_sentences(text: str, key: str) -> str:
+    if not text or key == "editorial_grounded_post":
+        return text
+    bad_terms = {
+        "building_social_poster": ["magazine spread", "brochure", "basic flyer", "simple image window", "paper depth", "thin frame"],
+        "site_visit_lifestyle_invite": ["facade-only", "facade only", "tower cutout", "tower hero", "building as hero", "architecture-led hero", "magazine spread", "paper depth", "thin frame"],
+        "site_visit_abstract_invitation": ["magazine spread", "mimicking a high-end editorial layout", "delicate border", "thin frame", "thin_frame", "paper depth", "paper_depth", "hero shot", "significant portion of the layout", "premium serif typeface", "editorial aesthetic", "editorial site visit", "facade crop", "tower cutout"],
+        "grounded_abstract_post": ["proof orbit", "basic flyer"],
+    }
+    if key.startswith("festival_"):
+        bad = ["proof orbit", "pricing", "offer-led", "site visit", "rera block", "construction update"]
+    else:
+        bad = bad_terms.get(key, [])
+    if not bad:
+        return text
+    chunks = re.split(r"(?<=[.!?])\s+", text)
+    kept: List[str] = []
+    for chunk in chunks:
+        lowered = chunk.lower()
+        if any(term in lowered for term in bad) and not re.search(r"\b(avoid|do not|not |never|no )", lowered):
+            continue
+        kept.append(chunk)
+    return _clean(" ".join(kept))
+
+
+def _enforce_selected_palette_for_structured(text: str, context: Dict[str, Any]) -> str:
+    instruction = _selected_palette_instruction(context)
+    if not instruction:
+        return text
+    # Replace any existing Brand palette / Color palette section introduced by
+    # the AI auditor, including incorrect repairs from curated palettes to Brand
+    # Profile. If there is no section, append the canonical selected palette.
+    patterns = [
+        r"Brand palette:\s*[\s\S]*?(?=\s(?:Mood and negative constraints:|Render only this exact visible text:|Text reserve-space rule:|Brand, compliance, and contact rules:|$))",
+        r"Color palette (?:direction|lock):[^.]*\.[ ]*",
+        r"Brand color direction:[^.]*\.[ ]*",
+    ]
+    out = text
+    replaced = False
+    for pattern in patterns:
+        next_out, count = re.subn(pattern, "Brand palette:\n" + instruction + " ", out, flags=re.I)
+        if count:
+            out = next_out
+            replaced = True
+            break
+    if not replaced:
+        out = out.rstrip() + " Brand palette:\n" + instruction
+    return _clean(out)
+
+
+def _selected_palette_instruction(context: Dict[str, Any]) -> str:
+    selected = context.get("selected_color_palette") if isinstance(context.get("selected_color_palette"), dict) else {}
+    colors = _extract_palette_colors(selected.get("colors"))
+    if not colors:
+        return ""
+    mode = str(selected.get("mode") or "selected").lower()
+    strength = str(selected.get("strength") or "soft").lower()
+    name = str(selected.get("palette_name") or selected.get("paletteName") or selected.get("name") or selected.get("source") or "selected palette").strip()
+    prefix = "Color palette lock" if strength == "hard" else "Color palette direction"
+    source = "selected curated palette" if mode == "curated" else ("selected custom palette" if mode == "custom" else "selected palette")
+    return (
+        f"{prefix}: use these colors from the {name or source} as the main creative color direction — {', '.join(colors[:8])}. "
+        "Apply them to backgrounds, abstract graphic shapes, gradients, CTA surfaces, typography accents, and premium design layers. "
+        "Do not recolor supplied logos; preserve supplied logo colors and keep realistic people/buildings/photos truthful; do not overwrite this selected palette with the brand profile palette."
+    )
+
+
+def _extract_palette_colors(value: Any) -> List[str]:
+    if isinstance(value, str):
+        match = re.match(r"^#?[0-9a-fA-F]{6}$", value.strip())
+        return [("#" + value.strip().lstrip("#")).upper()] if match else []
+    if isinstance(value, list):
+        colors: List[str] = []
+        for item in value:
+            colors.extend(_extract_palette_colors(item))
+        return list(dict.fromkeys(colors))
+    if isinstance(value, dict):
+        colors: List[str] = []
+        for item in value.values():
+            colors.extend(_extract_palette_colors(item))
+        return list(dict.fromkeys(colors))
+    return []
+
 
 def _ensure_brand_palette(text: str, context: Dict[str, Any]) -> str:
-    if "brand color direction:" in str(text or "").lower():
+    lowered = str(text or "").lower()
+    if any(marker in lowered for marker in ["brand color direction:", "color palette direction:", "color palette lock:", "brand palette:"]):
         return text
     try:
         from .prompt_sections import _brand_palette_section
@@ -249,6 +466,17 @@ def _ensure_brand_palette(text: str, context: Dict[str, Any]) -> str:
     if not palette:
         return text
     return _clean((text or "").rstrip() + " " + palette)
+
+
+def _looks_like_structured_prompt(text: str) -> bool:
+    lowered = str(text or "").lower()
+    required = [
+        "creative objective:",
+        "asset truth:",
+        "brand, compliance, and contact rules:",
+    ]
+    has_text_section = "render only this exact visible text:" in lowered or "text rendering rule:" in lowered
+    return all(marker in lowered for marker in required) and has_text_section
 
 def _repair_brand_only_festival(text: str, copy_plan: CopyPlan, production: ProductionPlan) -> str:
     replacements = [
@@ -263,7 +491,7 @@ def _repair_brand_only_festival(text: str, copy_plan: CopyPlan, production: Prod
     intro = "No project or building image is required."
     if intro.lower() not in text.lower():
         text = intro + " " + text
-    guard = "Brand-only festive rule: do not introduce a building, tower, facade, project render, construction scene, amenity, RERA, pricing, possession, or project-specific claim unless explicitly requested."
+    guard = "Brand-only festive rule: do not introduce a building, tower, facade, project render, construction scene, amenity, pricing, possession, or project-specific claim unless explicitly requested."
     if guard.lower() not in text.lower():
         text += " " + guard
     return text
@@ -272,6 +500,7 @@ def _repair_brand_only_festival(text: str, copy_plan: CopyPlan, production: Prod
 def _repair_construction_visualization(text: str, intent: CreativeIntent) -> str:
     replacements = {
         r"\bactual current site photo(?:graph)?\b": "construction-stage visualization",
+        r"\bactual current site progress\b": "visualized construction stage",
         r"\bcurrent construction progress\b": "visualized construction stage",
         r"\bverified latest progress\b": "visualized construction stage",
         r"\blatest progress\b": "visualized construction stage",
@@ -294,9 +523,9 @@ def _repair_construction_visualization(text: str, intent: CreativeIntent) -> str
         flags=re.I,
     )
     guard = (
-        f"Construction visualization rule: reinterpret the supplied approved project design as approximately {intent.construction_progress_percent}% under construction. "
-        "Preserve the same architecture, tower count, massing, facade rhythm, balcony/window pattern, podium proportions, and perspective. "
-        "This is a construction-stage visualization based on the approved design, not an actual current site photograph or verified latest progress report."
+        f"Construction visualization rule: show approximately {intent.construction_progress_percent}% construction progress as a visualization from approved design; "
+        "preserve tower count, massing, facade rhythm, balcony/window pattern, podium proportions, and perspective. "
+        "This is not an actual current site photograph or verified latest progress report."
     )
     if "construction visualization rule" not in text.lower():
         text += " " + guard
@@ -311,7 +540,7 @@ def _strip_exact_text_blocks(text: str) -> str:
         return ""
     # Remove exact-text blocks even when another section follows them.
     text = re.sub(
-        r"Render only this exact visible text:[\s\S]*?(?=(?:Logo instruction:|Logo production rule:|RERA QR production rule:|Construction visualization rule:|Brand-only festive rule:|$))",
+        r"Render only this exact visible text:[\s\S]*?(?=(?:Brand, compliance, and contact rules:|Brand palette:|Mood and negative constraints:|Logo instruction:|Logo production rule:|RERA QR production rule:|Construction visualization rule:|Brand-only festive rule:|$))",
         "",
         text,
         flags=re.I,
@@ -366,7 +595,10 @@ def _ensure_exact_text(text: str, copy_plan: CopyPlan, production: ProductionPla
         return text
     text = _strip_exact_text_blocks(text)
     placement = _visible_text_placement_instruction(production)
-    lines = ["Render only this exact visible text:"] + [f'{label}: "{value}"' for label, value in non_empty] + [placement, "Do not render any other readable poster text. Do not translate or alter logo text, URL, phone, email, RERA number, or brand mark."]
+    protected = "Do not translate or alter logo text, URL, phone, email, or brand mark."
+    if production.include_rera_qr:
+        protected = "Do not translate or alter logo text, URL, phone, email, RERA number, or brand mark."
+    lines = ["Render only this exact visible text:"] + [f'{label}: "{value}"' for label, value in non_empty] + [placement, "Do not render any other readable poster text.", protected]
     return text.rstrip() + " " + " ".join(lines)
 
 
@@ -488,6 +720,24 @@ def _append_negative(negative: str, items: List[str]) -> str:
     lower = existing.lower()
     additions = [item for item in items if item.lower() not in lower]
     return _clean(", ".join([existing, *additions]) if existing else ", ".join(additions))
+
+
+def _remove_negative_items(negative: str, items: List[str]) -> str:
+    if not negative:
+        return ""
+    banned = {item.strip().lower() for item in items if item.strip()}
+    kept = []
+    for part in re.split(r",|;", negative):
+        clean = part.strip()
+        lowered = clean.lower()
+        if not clean:
+            continue
+        if lowered in banned:
+            continue
+        if any(banned_item and (banned_item in lowered or lowered in banned_item) for banned_item in banned):
+            continue
+        kept.append(clean)
+    return _clean(", ".join(kept))
 
 
 def _facts_present(facts: List[str], text: str) -> List[str]:

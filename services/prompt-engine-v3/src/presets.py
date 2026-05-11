@@ -26,8 +26,17 @@ def preset_requires_logo(preset: Dict[str, Any]) -> bool:
 
 
 def preset_requires_rera_qr(preset: Dict[str, Any]) -> bool:
+    if preset_rera_is_disabled(preset):
+        return False
     rera = preset_json(preset).get("rera_qr") or preset_json(preset).get("rera_qr_layer")
     return bool(isinstance(rera, dict) and rera.get("required"))
+
+
+def preset_rera_is_disabled(preset: Dict[str, Any]) -> bool:
+    rera = preset_json(preset).get("rera_qr") or preset_json(preset).get("rera_qr_layer")
+    if not isinstance(rera, dict):
+        return False
+    return rera.get("mode") == "disabled" or rera.get("enabled") is False or rera.get("disabled") is True
 
 
 def preset_logo_position(preset: Dict[str, Any]) -> str:
@@ -104,6 +113,8 @@ def preset_rera_position(preset: Dict[str, Any]) -> str:
 
 
 def preset_rera_trigger_fact_types(preset: Dict[str, Any]) -> List[str]:
+    if preset_rera_is_disabled(preset):
+        return []
     rera = preset_json(preset).get("rera_qr") or preset_json(preset).get("rera_qr_layer")
     if not isinstance(rera, dict):
         return []

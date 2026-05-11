@@ -860,9 +860,9 @@
 .dark .create-v3-ratio-btn,
 .dark .create-v3-segment,
 .dark .create-v3-layer-controls button {
-  background: #242426;
-  border-color: rgba(255, 255, 255, 0.11);
-  color: #dedee2;
+  background: #1e1e20;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #d1d1d6;
 }
 
 .dark .create-v3-reference-slot:hover,
@@ -952,9 +952,37 @@
 }
 
 .dark .create-v3-segment button.is-active {
-  background: rgba(255, 255, 255, 0.12);
-  color: #f4f4f5;
-  box-shadow: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.dark .create-v3-palette-strength,
+.dark .create-v3-palette-modes,
+.dark .create-v3-palette-preview,
+.dark .create-v3-palette-hex-input,
+.dark .create-v3-palette-remove,
+.dark .create-v3-palette-add {
+  background: #1e1e20;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .create-v3-palette-strength button,
+.dark .create-v3-palette-modes button,
+.dark .create-v3-palette-preview > small,
+.dark .create-v3-palette-hex-input {
+  color: #d9d9de;
+}
+
+.dark .create-v3-palette-strength button.is-active,
+.dark .create-v3-palette-modes button.is-active {
+  background: #ffffff;
+  color: #000000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.dark .create-v3-palette-color-input {
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .dark .create-v3-stepper button,

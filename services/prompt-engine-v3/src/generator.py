@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .asset_selector import (
     build_asset_decision,
@@ -11,11 +11,13 @@ from .asset_selector import (
     shortlist_assets,
     validate_ai_asset_selection,
 )
+from .brief_intent_planner import apply_brief_intent_plan, coerce_brief_intent_plan, plan_brief_intent
 from .concept_planner import concept_to_spec, plan_variant_concepts
 from .context_builder import build_context_pack, db_fact_strings, project_profile
 from .copy_planner import plan_copy
 from .copy_policy import price_allowed_for_request, visible_text_allowed
 from .creative_levers import CONTENT_JOBS, normalize_format
+from .creative_routes import infer_creative_route, route_debug_payload, style_reference_ids
 from .creative_strategy import plan_creative_strategy
 from .fact_store import build_fact_store, fact_strings_for_validation
 from .grounding import block_response, deterministic_gate, extract_session_fact_overrides
@@ -45,6 +47,35 @@ def compile_prompt(request: CompileRequest) -> CompileResponse:
     return compile_prompt_with_registry_planner(request)
 
 
+def resolve_prompt_format(request: CompileRequest) -> str:
+    options = request.options if isinstance(request.options, dict) else {}
+    raw = options.get("prompt_format") or options.get("promptFormat") or os.getenv("PROMPT_ENGINE_V3_PROMPT_FORMAT") or "structured_v2"
+    return "legacy" if str(raw).strip().lower() == "legacy" else "structured_v2"
+
+
+def refine_brief_intent_with_dspy(program: Any, request: CompileRequest, context: Dict[str, Any], intent: CreativeIntent) -> Tuple[CreativeIntent, Dict[str, Any]]:
+    options = request.options if isinstance(request.options, dict) else {}
+    if options.get("disable_brief_intent_ai") or options.get("disableBriefIntentAi"):
+        return intent, {}
+    try:
+        raw = program.plan_brief_visual_intent(request, context, intent.model_dump())
+        if not raw:
+            return intent, {}
+        model_plan = coerce_brief_intent_plan(raw, source="dspy_brief_visual_intent")
+        if model_plan.confidence <= 0:
+            return intent, raw
+        if (
+            intent.brief_intent_plan.primary_visual_goal == "generated_lifestyle_scene"
+            and model_plan.primary_visual_goal != "generated_lifestyle_scene"
+        ):
+            raw["ignored_reason"] = "AI brief visual intent cannot downgrade deterministic lifestyle-scene detection."
+            raw["kept_plan"] = intent.brief_intent_plan.model_dump()
+            return intent, raw
+        return apply_brief_intent_plan(intent, model_plan), raw
+    except Exception as exc:
+        return intent, {"error": f"{type(exc).__name__}: {exc}", "fallback": intent.brief_intent_plan.model_dump()}
+
+
 def compile_prompt_with_dspy(request: CompileRequest) -> CompileResponse:
     from .dspy_engine import DspyPromptProgram, coerce_content_job
 
@@ -58,6 +89,7 @@ def compile_prompt_with_dspy(request: CompileRequest) -> CompileResponse:
     context["session_fact_overrides"] = [fact.model_dump() for fact in session_facts]
     fact_store = build_fact_store(context, session_facts)
     intent = resolve_creative_intent(request, context, content_job_id)
+    intent = apply_brief_intent_plan(intent, plan_brief_intent(request, context, intent))
     commercial_errors, commercial_warnings = commercial_pricing_guard(request, context, content_job_id, session_facts)
     if commercial_errors:
         return CompileResponse(
@@ -88,6 +120,8 @@ def compile_prompt_with_dspy(request: CompileRequest) -> CompileResponse:
             context["session_fact_overrides"] = [fact.model_dump() for fact in session_facts]
             fact_store = build_fact_store(context, session_facts)
             intent = resolve_creative_intent(request, context, content_job_id)
+            intent = apply_brief_intent_plan(intent, plan_brief_intent(request, context, intent))
+    intent, dspy_brief_intent = refine_brief_intent_with_dspy(program, request, context, intent)
 
     production = resolve_production_plan(request=request, context=context, intent=intent, fact_store=fact_store)
     candidates = shortlist_assets(request, context, content_job_id, intent=intent, limit=20)
@@ -95,7 +129,7 @@ def compile_prompt_with_dspy(request: CompileRequest) -> CompileResponse:
     asset_selection_context = build_asset_selection_context(request, content_job_id, candidates, intent=intent)
     raw_asset_selection = program.select_hero_asset(request, content_job_id, candidates, asset_selection_context) if candidates else {}
     selected_asset, asset_selection = validate_ai_asset_selection(raw_asset_selection, request, candidates, fallback_asset)
-    asset_decision = build_asset_decision(selected_asset, asset_selection)
+    asset_decision = build_asset_decision(selected_asset, asset_selection, intent=intent)
     templates = context.get("visual_templates") if isinstance(context.get("visual_templates"), list) else []
     variant_plan = program.make_variant_plan(request, content_job_id, selected_asset, templates)
     variant_specs = coerce_variant_plan(variant_plan, request, content_job_id, templates)
@@ -114,7 +148,7 @@ def compile_prompt_with_dspy(request: CompileRequest) -> CompileResponse:
     for index, planned_concept in enumerate(concepts):
         planned_spec = concept_to_spec(planned_concept)
         variant_asset = asset_for_spec(request, candidates, selected_asset, planned_spec, index)
-        variant_asset_decision = build_asset_decision(variant_asset, variant_asset.get("selection") or asset_selection)
+        variant_asset_decision = build_asset_decision(variant_asset, variant_asset.get("selection") or asset_selection, intent=intent)
         variant_template = resolve_template_constraint(template_by_id(templates, planned_spec.get("selected_template_id")), variant_asset_decision)
         variant_strategy = plan_creative_strategy(intent=intent, production=production, asset_decision=variant_asset_decision, template=variant_template)
         variant_concept = plan_variant_concepts(
@@ -169,6 +203,7 @@ def compile_prompt_with_dspy(request: CompileRequest) -> CompileResponse:
             "engine": "prompt-engine-v4-dspy-planned",
             "intent": intent.model_dump(),
             "dspy_intent": dspy_intent,
+            "dspy_brief_intent": dspy_brief_intent,
             "production_plan": production.model_dump(),
             "asset_selection": asset_selection,
             "asset_selection_context": asset_selection_context,
@@ -192,6 +227,7 @@ def compile_prompt_with_registry_planner(request: CompileRequest) -> CompileResp
     context["session_fact_overrides"] = [fact.model_dump() for fact in session_facts]
     fact_store = build_fact_store(context, session_facts)
     intent = resolve_creative_intent(request, context, content_job_id)
+    intent = apply_brief_intent_plan(intent, plan_brief_intent(request, context, intent))
     commercial_errors, commercial_warnings = commercial_pricing_guard(request, context, content_job_id, session_facts)
     if commercial_errors:
         return CompileResponse(
@@ -208,7 +244,7 @@ def compile_prompt_with_registry_planner(request: CompileRequest) -> CompileResp
     production = resolve_production_plan(request=request, context=context, intent=intent, fact_store=fact_store)
     candidates = shortlist_assets(request, context, content_job_id, limit=20, intent=intent)
     asset = select_registry_asset(request, context, content_job_id, intent=intent)
-    asset_decision = build_asset_decision(asset, asset.get("selection") or {})
+    asset_decision = build_asset_decision(asset, asset.get("selection") or {}, intent=intent)
     specs = registry_variant_plan(request, content_job_id, context.get("visual_templates", []))
     specs = attach_preferred_assets(specs, request, candidates, asset)
     first_template = template_by_id(context.get("visual_templates", []), specs[0].get("selected_template_id") if specs else None)
@@ -226,7 +262,7 @@ def compile_prompt_with_registry_planner(request: CompileRequest) -> CompileResp
     for index, planned_concept in enumerate(concepts):
         planned_spec = concept_to_spec(planned_concept)
         variant_asset = asset_for_spec(request, candidates, asset, planned_spec, index)
-        variant_asset_decision = build_asset_decision(variant_asset, variant_asset.get("selection") or asset.get("selection") or {})
+        variant_asset_decision = build_asset_decision(variant_asset, variant_asset.get("selection") or asset.get("selection") or {}, intent=intent)
         variant_template = resolve_template_constraint(template_by_id(context.get("visual_templates", []), planned_spec.get("selected_template_id")), variant_asset_decision)
         variant_strategy = plan_creative_strategy(intent=intent, production=production, asset_decision=variant_asset_decision, template=variant_template)
         variant_concept = plan_variant_concepts(
@@ -414,12 +450,13 @@ def build_variant_output(
         runtime_context["session_fact_overrides"] = [fact.model_dump() if hasattr(fact, "model_dump") else fact for fact in session_facts]
     if intent is None:
         intent = resolve_creative_intent(request, runtime_context, content_job_id)
+        intent = apply_brief_intent_plan(intent, plan_brief_intent(request, runtime_context, intent))
     if fact_store is None:
         fact_store = build_fact_store(runtime_context, session_facts)  # type: ignore[arg-type]
     if production is None:
         production = resolve_production_plan(request=request, context=runtime_context, intent=intent, fact_store=fact_store)
     if asset_decision is None:
-        asset_decision = build_asset_decision(asset, asset_selection or asset.get("selection") or {})
+        asset_decision = build_asset_decision(asset, asset_selection or asset.get("selection") or {}, intent=intent)
     template = template_by_id(runtime_context.get("visual_templates", []), spec.get("selected_template_id"))
     if not template and not isinstance(runtime_context.get("content_job"), dict):
         template = template_by_id(context.get("visual_templates", []), spec.get("selected_template_id"))
@@ -427,6 +464,9 @@ def build_variant_output(
         template_constraint = resolve_template_constraint(template, asset_decision)
     if strategy is None:
         strategy = plan_creative_strategy(intent=intent, production=production, asset_decision=asset_decision, template=template_constraint)
+    creative_route = infer_creative_route(request, intent, asset_decision, runtime_context)
+    runtime_context["creative_route"] = route_debug_payload(creative_route)
+    runtime_context["style_reference_asset_ids"] = style_reference_ids(request, runtime_context, asset_decision.selected_asset_id)
     raw_direction = raw_output.get("creative_direction") if isinstance(raw_output.get("creative_direction"), dict) else {}
     creative_direction = locked_template_direction(request, template, spec, raw_direction)
     if concept is None:
@@ -465,6 +505,7 @@ def build_variant_output(
     raw_prompt = append_variant_distinction(raw_prompt, spec)
     raw_prompt = remove_unsafe_commercial_claims(raw_prompt)
     raw_prompt = repair_structural_change_requests(raw_prompt, getattr(intent, "brief_summary", request.brief))
+    prompt_format = resolve_prompt_format(request)
     compiled_prompt = compile_image_prompt(
         raw_prompt,
         runtime_context,
@@ -486,6 +527,7 @@ def build_variant_output(
         template_constraint=template_constraint,
         concept=concept,
         copy_plan=copy_plan,
+        prompt_format=prompt_format,
     )
     negative_prompt = clean_negative_prompt(str(raw_output.get("negative_prompt") or default_negative_prompt()), content_job_id)
     if production.text_treatment == "reserve_space":
@@ -507,6 +549,7 @@ def build_variant_output(
         provider_prompt=compiled_prompt,
         negative_prompt=negative_prompt,
         allowed_facts=allowed_facts_for_audit,
+        prompt_format=prompt_format,
     )
     compiled_prompt = str(prompt_audit.get("repaired_provider_prompt") or compiled_prompt)
     negative_prompt = str(prompt_audit.get("repaired_negative_prompt") or negative_prompt)
@@ -574,6 +617,9 @@ def build_variant_output(
         asset_selection=asset_selection or asset.get("selection") or {},
         template_contract=template_constraint.model_dump(),
         text_treatment=production.text_treatment,
+        prompt_format=prompt_format,
+        style_reference_ids=runtime_context.get("style_reference_asset_ids", []),
+        creative_route=runtime_context.get("creative_route", {}),
     )
     if production.text_treatment != "reserve_space":
         footer = contact_footer_text(production)
@@ -626,11 +672,14 @@ def build_variant_output(
         layout_contract={
             "mode": "single_post",
             "renderer_policy": "Provider prompt is final art direction; exact assets/data must stay grounded and must not be invented.",
+            "prompt_format": prompt_format,
             "preset_key": production.preset_id,
             "preset_name": production.preset_name,
             "intent": intent.model_dump(),
             "creative_strategy": strategy.model_dump(),
             "variant_concept": concept.model_dump(),
+            "creative_route": runtime_context.get("creative_route"),
+            "style_reference_asset_ids": runtime_context.get("style_reference_asset_ids", []),
             "prompt_audit": {key: value for key, value in prompt_audit.items() if key != "raw_model_result"},
             "asset_visual_summary": render_package.asset_visual_summary,
             "asset_selection": render_package.asset_selection,
@@ -833,6 +882,9 @@ def infer_content_job_id(request: CompileRequest) -> str:
     if request.content_job_id:
         return request.content_job_id
     text = (request.brief or "").lower()
+    festival_terms = ["diwali", "deepavali", "holi", "eid", "ramadan", "navratri", "dussehra", "dusshera", "christmas", "ganesh", "ganesh chaturthi", "onam", "pongal", "makar sankranti", "sankranti", "akshaya tritiya", "gudi padwa", "raksha bandhan", "rakhi", "festival", "festive greeting", "wishes"]
+    if request.festival_id or any(re.search(r"\b" + re.escape(term).replace(r"\ ", r"\s+") + r"\b", text) for term in festival_terms):
+        return "festive_greeting"
     if any(term in text for term in ["amenity", "pool", "gym", "clubhouse", "lounge", "garden", "terrace", "kids play", "basketball"]):
         return "amenity_spotlight"
     if any(term in text for term in ["site visit", "visit this weekend", "book a visit", "schedule visit"]):
@@ -875,7 +927,13 @@ def dedupe(values: List[str]) -> List[str]:
 
 
 def default_negative_prompt() -> str:
-    return "No facade signage, no distorted architecture, no invented surroundings, no duplicate brand marks, no fake compliance marks, no unsupported facts."
+    return (
+        "No facade signage, no distorted architecture, no invented factual project surroundings, "
+        "no unsupported amenities, no fake people/events, no duplicate brand marks, "
+        "no fake compliance marks, no unsupported facts. Abstract poster backgrounds, "
+        "brand-color fields, atmospheric gradients, symbolic shapes, texture, and non-factual "
+        "graphic devices are allowed when requested."
+    )
 
 
 def clean_negative_prompt(value: str, content_job_id: str = "") -> str:

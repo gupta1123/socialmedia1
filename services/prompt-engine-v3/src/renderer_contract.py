@@ -62,6 +62,9 @@ def build_render_package(
     asset_selection: Optional[Dict[str, Any]] = None,
     template_contract: Optional[Dict[str, Any]] = None,
     text_treatment: str = "render_text",
+    prompt_format: str = "legacy",
+    style_reference_ids: Optional[List[str]] = None,
+    creative_route: Optional[Dict[str, Any]] = None,
 ) -> RenderPackage:
     logo_rules = {
         "required": include_logo,
@@ -95,6 +98,17 @@ def build_render_package(
         provider_references.append({"asset_id": asset_id, "role": "exact_additional_logo_layer", "sent_to_model": True, "composited_after": False})
     if include_rera_qr and rera_qr_asset_id:
         provider_references.append({"asset_id": rera_qr_asset_id, "role": "exact_rera_qr_layer", "sent_to_model": False, "composited_after": True})
+    excluded_reference_ids = {str(asset.get("asset_id") or ""), str(logo_asset_id or ""), str(secondary_logo_asset_id or ""), str(rera_qr_asset_id or "")}
+    excluded_reference_ids.update(str(x) for x in additional_logo_asset_ids if x)
+    for ref_id in style_reference_ids or []:
+        ref_id = str(ref_id or "").strip()
+        if not ref_id or ref_id in excluded_reference_ids:
+            continue
+        provider_references.append({"asset_id": ref_id, "role": "style_reference_only", "sent_to_model": True, "composited_after": False})
+
+    creative_route = creative_route or {}
+    people_allowed = bool(creative_route.get("people_allowed", False))
+    abstract_env_allowed = bool(creative_route.get("abstract_environment_allowed", True))
 
     return RenderPackage(
         project_asset_ids=[asset.get("asset_id")] if asset.get("asset_id") else [],
@@ -104,6 +118,7 @@ def build_render_package(
         rera_qr_asset_id=rera_qr_asset_id if include_rera_qr else None,
         reference_image_ids=[ref["asset_id"] for ref in provider_references if ref.get("sent_to_model") and ref.get("asset_id")],
         provider_references=provider_references,
+        prompt_format=prompt_format,
         image_model_mode="asset_reference_generation" if asset.get("asset_id") else "text_to_image_generation",
         format=output_format,
         # `prompt` is what downstream image providers should use; keep the raw model
@@ -135,7 +150,11 @@ def build_render_package(
         truth_rules={
             "preserve_source_geometry": True,
             "no_facade_text_added": True,
-            "no_unseen_surroundings": True,
+            "no_unseen_factual_surroundings": True,
+            "abstract_poster_environment_allowed": abstract_env_allowed,
+            "people_allowed": people_allowed,
+            "grounding_mode": creative_route.get("grounding_mode"),
+            "creative_route": creative_route.get("key"),
             "no_generated_logo_or_qr": not (include_logo or bool(secondary_logo_asset_id) or bool(additional_logo_asset_ids)),
             "no_fake_logo": True,
             "no_generated_qr": True,
@@ -151,13 +170,14 @@ def build_render_package(
             "fake_price",
             "facade_signage",
             "unsupported_asset_details",
+            *([] if people_allowed else ["random_people"]),
             *(
                 ["rendered_text", "placeholder_text", "gibberish_typography"]
                 if text_treatment == "reserve_space"
                 else []
             ),
         ],
-        renderer_policy="Provider prompt is final art direction; exact assets/data must stay grounded and must not be invented.",
+        renderer_policy="Provider prompt is final art direction; exact assets/data must stay grounded. Route-approved abstract, lifestyle, festival, or poster treatments may be used only when they do not imply unsupported factual project features.",
     )
 
 

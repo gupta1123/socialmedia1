@@ -722,6 +722,44 @@ def test_brand_palette_is_in_final_provider_prompt():
     assert "do not oversaturate or recolor the supplied logo" in prompt.lower()
 
 
+def test_custom_locked_palette_is_in_final_provider_prompt():
+    ctx = {
+        **payload()["context"],
+        "selected_color_palette": {
+            "mode": "custom",
+            "strength": "hard",
+            "colors": ["#111111", "#F4EFE7", "#C6A15B"],
+        },
+    }
+    response = compile_prompt(CompileRequest(**payload(context=ctx, options={"disable_dspy": True, "disable_prompt_auditor": True})))
+    assert response.status in {"ready", "ready_with_warnings"}
+    prompt = response.variants[0].render_package.provider_prompt
+    assert "Color palette lock:" in prompt
+    assert "#111111" in prompt
+    assert "#F4EFE7" in prompt
+    assert "#C6A15B" in prompt
+    assert "Do not recolor supplied logos" in prompt
+
+
+def test_curated_palette_is_in_final_provider_prompt():
+    ctx = {
+        **payload()["context"],
+        "selected_color_palette": {
+            "mode": "curated",
+            "strength": "soft",
+            "palette_name": "Editorial Ivory Navy",
+            "colors": ["#F7F1E8", "#102A4C", "#D6AE55"],
+        },
+    }
+    response = compile_prompt(CompileRequest(**payload(context=ctx, options={"disable_dspy": True, "disable_prompt_auditor": True})))
+    assert response.status in {"ready", "ready_with_warnings"}
+    prompt = response.variants[0].render_package.provider_prompt
+    assert "Color palette direction:" in prompt
+    assert "Editorial Ivory Navy" in prompt
+    assert "#F7F1E8" in prompt
+    assert "#102A4C" in prompt
+
+
 def test_creative_direction_changes_visible_copy_depth():
     context = payload()["context"]
     context = {
@@ -760,3 +798,232 @@ def test_creative_direction_changes_visible_copy_depth():
     assert image_led.text_policy["text_strategy"] == "minimal_text"
     assert "support_copy" not in image_led.render_package.exact_text_layers
     assert "proof_point_1" not in image_led.render_package.exact_text_layers
+
+
+def test_structured_prompt_mode_dedupes_palette_logo_text_and_contact_sections():
+    ctx = {
+        **payload()["context"],
+        "selected_color_palette": {
+            "mode": "curated",
+            "strength": "soft",
+            "palette_name": "Sage Marble",
+            "colors": ["#F5F4EE", "#A8B7A2", "#526B5B", "#D7CEC2", "#1E2A22"],
+        },
+        "assets": [
+            *payload()["context"]["assets"],
+            {
+                "asset_id": "project-logo",
+                "label": "Project logo",
+                "role": "logo",
+                "storage_path": "project-logo.png",
+                "metadata": {"assetClass": "project_logo"},
+            },
+            {
+                "asset_id": "developer-logo",
+                "label": "Developer logo",
+                "role": "logo",
+                "storage_path": "developer-logo.png",
+                "metadata": {"assetClass": "brand_logo"},
+            },
+        ],
+    }
+    response = compile_prompt(
+        CompileRequest(
+            **payload(
+                brief="Create a premium site visit post for Prescon Midtown Bay.",
+                include_logo=True,
+                logo_asset_id="project-logo",
+                additional_logo_asset_ids=["developer-logo"],
+                contact_items=["phone"],
+                context=ctx,
+                options={"disable_dspy": True, "disable_prompt_auditor": True, "prompt_format": "structured_v2"},
+            )
+        )
+    )
+    assert response.status in {"ready", "ready_with_warnings"}
+    variant = response.variants[0]
+    prompt = variant.render_package.provider_prompt
+    assert variant.render_package.prompt_format == "structured_v2"
+    assert variant.layout_contract["prompt_format"] == "structured_v2"
+    assert prompt.count("Color palette direction:") == 1
+    assert prompt.count("Render only this exact visible text:") == 1
+    assert prompt.count("Logo instruction:") == 1
+    assert prompt.count("Secondary logo instruction:") == 1
+    assert prompt.count("Contact placement instruction:") == 1
+    assert "Footer:" in prompt
+    assert len(prompt) < 3300
+
+
+def test_structured_prompt_mode_has_no_rera_or_qr_language_when_disabled():
+    response = compile_prompt(
+        CompileRequest(
+            **payload(
+                brief="Create a premium project launch post with no compliance block.",
+                options={"disable_dspy": True, "disable_prompt_auditor": True, "prompt_format": "structured_v2"},
+            )
+        )
+    )
+    assert response.status in {"ready", "ready_with_warnings"}
+    prompt = response.variants[0].render_package.provider_prompt
+    assert "RERA" not in prompt
+    assert "QR" not in prompt
+
+
+def test_structured_prompt_mode_includes_rera_once_when_enabled():
+    ctx = {
+        **payload()["context"],
+        "assets": [
+            *payload()["context"]["assets"],
+            {
+                "asset_id": "rera-1",
+                "label": "RERA QR",
+                "role": "rera_qr",
+                "storage_path": "rera.png",
+                "metadata": {"assetClass": "rera_qr"},
+            },
+        ],
+    }
+    response = compile_prompt(
+        CompileRequest(
+            **payload(
+                brief="Create a premium project launch post.",
+                include_rera_qr=True,
+                rera_qr_asset_id="rera-1",
+                context=ctx,
+                options={"disable_dspy": True, "disable_prompt_auditor": True, "prompt_format": "structured_v2"},
+            )
+        )
+    )
+    assert response.status in {"ready", "ready_with_warnings"}
+    prompt = response.variants[0].render_package.provider_prompt
+    assert prompt.count("RERA QR production rule:") == 1
+    assert "Never invent, redraw, or stylize a QR code." in prompt
+
+
+def test_disabled_preset_rera_policy_blocks_rera_even_with_trigger_fields():
+    preset = {
+        "preset_id": "no_rera",
+        "name": "No RERA Preset",
+        "preset_json": {
+            "rera_qr": {
+                "enabled": False,
+                "required": True,
+                "trigger_required_when_fact_types": ["project", "typology", "pricing"],
+            },
+        },
+    }
+    ctx = {
+        **payload()["context"],
+        "brand_presets": [preset],
+        "assets": [
+            *payload()["context"]["assets"],
+            {
+                "asset_id": "rera-1",
+                "label": "RERA QR",
+                "role": "rera_qr",
+                "storage_path": "rera.png",
+                "metadata": {"assetClass": "rera_qr"},
+            },
+        ],
+    }
+    response = compile_prompt(
+        CompileRequest(
+            **payload(
+                brief="Create a project launch post mentioning 2 BHK homes.",
+                brand_preset_id=preset["preset_id"],
+                include_rera_qr=True,
+                rera_qr_asset_id="rera-1",
+                context=ctx,
+                options={"disable_dspy": True, "disable_prompt_auditor": True, "prompt_format": "structured_v2"},
+            )
+        )
+    )
+    assert response.status in {"ready", "ready_with_warnings"}
+    variant = response.variants[0]
+    assert variant.layout_contract["rera_qr_layer"]["required"] is False
+    assert variant.render_package.rera_qr_asset_id is None
+    assert "RERA" not in variant.render_package.provider_prompt
+    assert "QR" not in variant.render_package.provider_prompt
+
+
+def test_structured_prompt_mode_uses_semantic_asset_truth_rules():
+    interior = compile_prompt(
+        CompileRequest(
+            **payload(
+                brief="Create a project launch post but show a warm interior for families.",
+                options={"disable_dspy": True, "disable_prompt_auditor": True, "prompt_format": "structured_v2"},
+            )
+        )
+    ).variants[0].render_package.provider_prompt
+    exterior = compile_prompt(
+        CompileRequest(
+            **payload(
+                brief="Create a premium exterior launch post.",
+                options={"disable_dspy": True, "disable_prompt_auditor": True, "prompt_format": "structured_v2"},
+            )
+        )
+    ).variants[0].render_package.provider_prompt
+
+    assert "room/arrival layout" in interior
+    assert "tower height" not in interior
+    assert "facade rhythm" not in interior.lower()
+    assert "tower form" in exterior
+    assert "balcony/window rhythm" in exterior
+
+
+def test_lifestyle_site_visit_brief_overrides_selected_reference_as_hero():
+    brief = (
+        "Create a premium site visit invite with a clear visit CTA and grounded project context. "
+        "Objective: Nurture existing leads to take action and book a site visit this weekend at Pride World City, "
+        "Miami Phase, Charholi, Pune. Target Audience: Warm leads already aware of the project, urban professionals "
+        "and families from Mumbai/Pune looking for a peaceful, modern home investment. Key Message: See it to believe "
+        "it, join us for an exclusive site visit this weekend. Visual Direction: Aspirational lifestyle shot, show the "
+        "lifestyle, not just the structure. Imagine a happy couple or family walking through a lush, modern township "
+        "with the Sahyadri mountains in the background. Warm golden hour lighting. Feels premium yet approachable."
+    )
+    response = compile_prompt(
+        CompileRequest(
+            **payload(
+                content_job_id="site_visit",
+                brief=brief,
+                selected_asset_ids=["exterior-1"],
+                options={"disable_dspy": True, "disable_prompt_auditor": True, "prompt_format": "structured_v2"},
+            )
+        )
+    )
+    assert response.status in {"ready", "ready_with_warnings"}
+    variant = response.variants[0]
+    plan = variant.layout_contract["intent"]["brief_intent_plan"]
+    prompt = variant.render_package.provider_prompt.lower()
+
+    assert plan["primary_visual_goal"] == "generated_lifestyle_scene"
+    assert plan["reference_role"] == "context_grounding"
+    assert "happy couple or family" in prompt
+    assert "lush, modern township" in prompt
+    assert "sahyadri mountains" in prompt
+    assert "context grounding" in prompt
+    assert "not recreate the selected reference as the main hero" in prompt
+    assert "factual visual anchor" not in prompt
+    assert "facade-only poster" in variant.render_package.negative_prompt
+    assert "no invented surroundings" not in variant.render_package.negative_prompt.lower()
+
+
+def test_explicit_selected_asset_hero_brief_keeps_reference_as_truth_anchor():
+    response = compile_prompt(
+        CompileRequest(
+            **payload(
+                brief="Use the selected building image as the hero and create a premium exterior launch post.",
+                selected_asset_ids=["exterior-1"],
+                options={"disable_dspy": True, "disable_prompt_auditor": True, "prompt_format": "structured_v2"},
+            )
+        )
+    )
+    assert response.status in {"ready", "ready_with_warnings"}
+    variant = response.variants[0]
+    plan = variant.layout_contract["intent"]["brief_intent_plan"]
+    prompt = variant.render_package.provider_prompt.lower()
+
+    assert plan["primary_visual_goal"] == "selected_asset_hero"
+    assert plan["reference_role"] == "hero_truth_anchor"
+    assert "asset truth:" in prompt
+    assert "context grounding" not in prompt

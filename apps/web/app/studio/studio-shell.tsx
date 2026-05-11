@@ -32,19 +32,6 @@ const primaryNavigation = [
   //     </svg>
   //   )
   // },
-  // {
-  //   href: "/studio/create?mode=ad-hoc",
-  //   label: "Create post",
-  //   matchPath: "/studio/create",
-  //   icon: (
-  //     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-  //       <path d="M12 5v14" />
-  //       <path d="M5 12h14" />
-  //       <path d="M18.5 5.5 20 4" />
-  //       <path d="M4 20l1.5-1.5" />
-  //     </svg>
-  //   )
-  // },
   {
     href: "/studio/create-v3",
     label: "Create",
@@ -342,13 +329,13 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
     title: "Brands",
     subtitle: "Manage brand identities and switch your active workspace context.",
   },
-  "/studio/create": {
-    title: "Create",
-    subtitle: "Start from a post task or open an empty brief to create post options.",
-  },
   "/studio/create-v3": {
     title: "Create images",
     subtitle: "Generate polished real-estate post options from a project brief, brand assets, and selected references.",
+  },
+  "/studio/linkedin-carousel": {
+    title: "LinkedIn Carousel Builder",
+    subtitle: "Build editable real-estate document carousels from verified project inputs.",
   },
   "/studio/ai-edit": {
     title: "Editor",
@@ -478,10 +465,10 @@ function ShellFrame({ children }: { children: React.ReactNode }) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const topbarMenuRef = useRef<HTMLDivElement>(null);
   const isCreateRoute =
-    pathname === "/studio/create" ||
-    pathname.startsWith("/studio/create/") ||
     pathname === "/studio/create-v3" ||
-    pathname.startsWith("/studio/create-v3/");
+    pathname.startsWith("/studio/create-v3/") ||
+    pathname === "/studio/linkedin-carousel" ||
+    pathname.startsWith("/studio/linkedin-carousel/");
   const isEditorRoute = pathname === "/studio/ai-edit" || pathname.startsWith("/studio/ai-edit/");
   const isOutputRoute = pathname === "/studio/outputs" || pathname.startsWith("/studio/outputs/");
   const isCalendarRoute = pathname === "/studio/calendar" || pathname.startsWith("/studio/calendar/");
@@ -1038,7 +1025,7 @@ function resolvePageMeta(pathname: string) {
 
 function groupAppNavigation(items: any[]) {
   const home = items.filter((item) => item.href === "/studio");
-  const creativeHrefs = new Set(["/studio/create?mode=ad-hoc", "/studio/create-v3", "/studio/ai-edit"]);
+  const creativeHrefs = new Set(["/studio/create-v3", "/studio/linkedin-carousel", "/studio/ai-edit"]);
   const workHrefs = new Set(["/studio/review", "/studio/gallery", "/studio/brand-kit"]);
   const adminHrefs = new Set(["/studio/workspace-admin", "/studio/admin"]);
 
@@ -1059,10 +1046,10 @@ function groupAppNavigation(items: any[]) {
 
 function resolveBootstrapMode(pathname: string) {
   if (
-    pathname === "/studio/create" ||
-    pathname.startsWith("/studio/create/") ||
     pathname === "/studio/create-v3" ||
-    pathname.startsWith("/studio/create-v3/")
+    pathname.startsWith("/studio/create-v3/") ||
+    pathname === "/studio/linkedin-carousel" ||
+    pathname.startsWith("/studio/linkedin-carousel/")
   ) {
     return "create" as const;
   }

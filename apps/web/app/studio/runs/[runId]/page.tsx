@@ -49,9 +49,7 @@ export default function RunDetailPage() {
     sessionToken,
     pendingAction,
     pendingTargetKey,
-    leaveFeedback,
-    generateFinalImagesForPackage,
-    generateSeedsForPackage
+    leaveFeedback
   } = useStudio();
   const [detail, setDetail] = useState<CreativeRunDetail | null>(null);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRecord[]>([]);
@@ -64,7 +62,7 @@ export default function RunDetailPage() {
         <Link className="button button-ghost" href="/studio/runs">
           Back to runs
         </Link>
-        <Link className="button button-primary" href="/studio/create">
+        <Link className="button button-primary" href="/studio/create-v3">
           Start another run
         </Link>
       </>
@@ -121,27 +119,6 @@ export default function RunDetailPage() {
     [leaveFeedback, loadRun]
   );
 
-  const handleGenerateDirections = useCallback(async () => {
-    if (!detail) return;
-
-    const ok = await generateSeedsForPackage(detail.promptPackage.id);
-    if (ok) {
-      await loadRun();
-    }
-  }, [detail, generateSeedsForPackage, loadRun]);
-
-  const handleGenerateFinals = useCallback(
-    async (selectedTemplateId?: string) => {
-      if (!detail) return;
-
-      const ok = await generateFinalImagesForPackage(detail.promptPackage.id, selectedTemplateId);
-      if (ok) {
-        await loadRun();
-      }
-    },
-    [detail, generateFinalImagesForPackage, loadRun]
-  );
-
   if (loading) {
     return <PanelSkeleton />;
   }
@@ -162,14 +139,10 @@ export default function RunDetailPage() {
   const pendingFinals = detail.finalOutputs.filter((output) => output.reviewState === "pending_review");
   const resolvedFinals = detail.finalOutputs.filter((output) => output.reviewState !== "pending_review");
   const hasRunningJobs = detail.jobs.some((job) => job.status === "queued" || job.status === "processing");
-  const canGenerateReferenceFinal = detail.promptPackage.referenceAssetIds.length > 0;
-  const isV2Run =
-    detail.promptPackage.compilerTrace.endpoint === "/api/creative/compile-v2" ||
-    detail.promptPackage.compilerTrace.pipeline === "v2-notebook-two-agent" ||
-    detail.promptPackage.compilerTrace.v2PostOptionGeneration === true;
   const seedTemplateLabelById = new Map(detail.seedTemplates.map((template) => [template.id, template.label]));
-  const seedPendingKey = `promptPackage:${detail.promptPackage.id}:seeds`;
-  const referenceFinalPendingKey = `promptPackage:${detail.promptPackage.id}:references`;
+  const createMoreHref = detail.promptPackage.deliverableId
+    ? `/studio/create-v3?deliverableId=${detail.promptPackage.deliverableId}`
+    : "/studio/create-v3";
 
   return (
     <div className="page-stack brand-detail-page">
@@ -184,44 +157,16 @@ export default function RunDetailPage() {
             <p className="brand-detail-goal">{detail.run.goal}</p>
           </div>
           <div className="run-hero-actions">
-            <button
-              className="button button-ghost"
-              disabled={pendingTargetKey === seedPendingKey}
-              onClick={() => void handleGenerateDirections()}
-              type="button"
-            >
-              {pendingAction === "generate-seeds" && pendingTargetKey === seedPendingKey
-                ? isV2Run
-                  ? "Generating options…"
-                  : "Exploring styles…"
-                : isV2Run
-                  ? "Generate options"
-                  : "Explore styles"}
-            </button>
-            {!isV2Run ? (
-              <button
-                className="button button-primary"
-                disabled={pendingTargetKey === referenceFinalPendingKey || !canGenerateReferenceFinal}
-                onClick={() => void handleGenerateFinals()}
-                title={!canGenerateReferenceFinal ? "Upload references if you want to create options from brand references" : ""}
-                type="button"
-              >
-                {pendingAction === "generate-finals" && pendingTargetKey === referenceFinalPendingKey
-                  ? "Creating options…"
-                  : "Create with references"}
-              </button>
-            ) : null}
+            <Link className="button button-primary" href={createMoreHref}>
+              Create more in V3
+            </Link>
           </div>
         </div>
       </header>
 
       {hasRunningJobs ? (
         <div className="status-banner" style={{ marginBottom: "24px" }}>
-          <span>
-            {isV2Run
-              ? "This run is still processing. New post options will appear here automatically."
-              : "This run is still processing. New styles and post options will appear here automatically."}
-          </span>
+          <span>This run is still processing. New post options will appear here automatically.</span>
         </div>
       ) : null}
 
@@ -351,28 +296,11 @@ export default function RunDetailPage() {
             ) : (
               <div className="empty-state">
                 <strong>No post options yet</strong>
-                <p>
-                  {isV2Run
-                    ? "Generate options to create finished post candidates from this prompt package."
-                    : "Explore styles below or create options directly from your selected references."}
-                </p>
+                <p>Create options directly from your selected references.</p>
                 <div className="hero-actions">
-                <button className="button button-primary" onClick={() => void handleGenerateDirections()} type="button">
-                  {pendingAction === "generate-seeds" && pendingTargetKey === seedPendingKey
-                    ? isV2Run
-                      ? "Generating options…"
-                      : "Exploring styles…"
-                    : isV2Run
-                      ? "Generate options"
-                      : "Explore styles"}
-                </button>
-                {!isV2Run && canGenerateReferenceFinal ? (
-                  <button className="button button-ghost" onClick={() => void handleGenerateFinals()} type="button">
-                    {pendingAction === "generate-finals" && pendingTargetKey === referenceFinalPendingKey
-                      ? "Creating options…"
-                      : "Create with references"}
-                  </button>
-                ) : null}
+                <Link className="button button-primary" href={createMoreHref}>
+                  Create options in V3
+                </Link>
               </div>
               </div>
             )}
@@ -419,16 +347,9 @@ export default function RunDetailPage() {
                         <strong>{template.label}</strong>
                       </div>
                       <div className="review-card-actions">
-                        <button
-                          className="button button-primary"
-                          disabled={pendingTargetKey === `template:${template.id}:finals`}
-                          onClick={() => void handleGenerateFinals(template.id)}
-                          type="button"
-                        >
-                          {pendingAction === "generate-finals" && pendingTargetKey === `template:${template.id}:finals`
-                            ? "Creating…"
-                            : "Create options"}
-                        </button>
+                        <Link className="button button-primary" href={createMoreHref}>
+                          Create options in V3
+                        </Link>
                       </div>
                     </div>
                   </article>
@@ -438,11 +359,9 @@ export default function RunDetailPage() {
               <div className="empty-state">
                 <strong>No style options yet</strong>
                 <p>Explore styles first if you want a few different visual routes before creating more options.</p>
-                <button className="button button-primary" onClick={() => void handleGenerateDirections()} type="button">
-                  {pendingAction === "generate-seeds" && pendingTargetKey === seedPendingKey
-                    ? "Exploring styles…"
-                    : "Explore styles"}
-                </button>
+                <Link className="button button-primary" href={createMoreHref}>
+                  Create options in V3
+                </Link>
               </div>
             )}
             </article>
@@ -500,7 +419,7 @@ export default function RunDetailPage() {
             <h3>Generation logic</h3>
             <div className="property-list">
               <PromptSection
-                label={isV2Run ? "Primary option prompt" : "Final production prompt"}
+                label="Final production prompt"
                 content={detail.promptPackage.finalPrompt}
               />
             </div>

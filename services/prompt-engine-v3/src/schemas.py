@@ -65,6 +65,11 @@ class CompileRequest(BaseModel):
         "brand_led",
         "graphic_led",
     ] = "auto"
+    # Optional frontend overrides for the creative routing layer. These do not replace
+    # deterministic truth rules; they decide which grounded creative grammar to use.
+    creative_output_mode: Optional[str] = None
+    grounding_mode: Optional[str] = None
+    abstraction_level: Optional[float] = Field(default=None, ge=0, le=4)
     text_strategy: Literal[
         "auto",
         "render_exact_text",
@@ -85,6 +90,8 @@ class CompileRequest(BaseModel):
     visual_template_ids: List[str] = Field(default_factory=list)
     brand_preset_id: Optional[str] = None
     selected_asset_ids: List[str] = Field(default_factory=list)
+    reference_asset_ids: List[str] = Field(default_factory=list)
+    style_reference_asset_ids: List[str] = Field(default_factory=list)
     include_logo: bool = False
     logo_asset_id: Optional[str] = None
     additional_logo_asset_ids: List[str] = Field(default_factory=list)
@@ -144,6 +151,7 @@ class RenderPackage(BaseModel):
     additional_logo_asset_ids: List[str] = Field(default_factory=list)
     rera_qr_asset_id: Optional[str] = None
     reference_image_ids: List[str] = Field(default_factory=list)
+    prompt_format: str = "legacy"
     image_model_mode: str = "asset_reference_generation"
     format: str = "4:5"
     prompt: str = ""

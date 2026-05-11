@@ -15,12 +15,18 @@ import { env } from "../lib/config.js";
 import { generateFalImages, type FalGeneratedImage } from "../lib/fal.js";
 import { generateOpenAiImages } from "../lib/openai-images.js";
 import type { OpenAiImageQuality } from "../lib/openai-images.js";
-import { downloadStorageBlob, ingestRemoteImageToStorage, uploadBufferToStorage, createSignedUrl } from "../lib/storage.js";
+import { createSignedUrl, downloadStorageBlob, ingestRemoteImageToStorage, removeStorageObjects, uploadBufferToStorage } from "../lib/storage.js";
 import { buildStoragePath, randomId } from "../lib/utils.js";
 import type { AuthenticatedViewer } from "../lib/viewer.js";
 import { createThumbnailFromStorageOrNull } from "../lib/thumbnails.js";
 import { ensurePostVersionForOutput } from "../lib/deliverable-flow.js";
 import { localizeCreativeV3PromptCopy } from "../lib/prompt-localization.js";
+import {
+  isInsufficientWorkspaceCreditsError,
+  releaseWorkspaceCreditReservation,
+  reserveWorkspaceCredits,
+  settleWorkspaceCreditReservation
+} from "../lib/credits.js";
 
 const CopySchema = z.object({
   headline: z.string().optional().nullable(),
@@ -59,6 +65,7 @@ const CreativeV3RenderPresetSchema = z.enum(["v1_low", "v1_high", "v2_low", "v2_
 
 const CreativeV3CompileRequestSchema = z.object({
   brandId: z.string().uuid(),
+  deliverableId: z.string().uuid().optional().nullable(),
   projectId: z.string().uuid().optional().nullable(),
   postTypeId: z.string().uuid().optional().nullable(),
   festivalId: z.string().uuid().optional().nullable(),
@@ -91,13 +98,7 @@ const CreativeV3CompileRequestSchema = z.object({
   options: z.record(z.string(), z.unknown()).default({})
 });
 
-const CreativeV3RenderRequestSchema = z.object({
-  brandId: z.string().uuid(),
-  projectId: z.string().uuid().optional().nullable(),
-  variant: z.record(z.string(), z.unknown()),
-  count: z.number().int().min(1).max(3).default(1),
-  renderPreset: CreativeV3RenderPresetSchema.optional().nullable()
-});
+const CREATIVE_V3_GENERATION_JOBS_TABLE = "creative_v3_generation_jobs";
 
 const CreativeV3BrandPresetMutationSchema = z.object({
   brandId: z.string().uuid(),
@@ -110,7 +111,6 @@ const CreativeV3BrandPresetMutationSchema = z.object({
 });
 
 type CreativeV3CompileRequest = z.infer<typeof CreativeV3CompileRequestSchema>;
-type CreativeV3RenderRequest = z.infer<typeof CreativeV3RenderRequestSchema>;
 type CreativeV3BrandPresetMutation = z.infer<typeof CreativeV3BrandPresetMutationSchema>;
 type CreativeV3RenderPreset = z.infer<typeof CreativeV3RenderPresetSchema>;
 type CreativeV3RenderProvider = "fal" | "openai";
@@ -177,6 +177,86 @@ function resolveCreativeV3RenderConfig(renderPreset: CreativeV3RenderPreset): {
     model: env.CREATE_V3_OPENAI_MODEL || env.OPENAI_FINAL_MODEL,
     quality: qualityByPreset[openAiPreset]
   };
+}
+
+function creativeV3GenerationCreditAmount(requestedVariantCount: number) {
+  const units = Math.max(0, Math.trunc(requestedVariantCount));
+  return units * Math.max(0, env.CREDITS_FINAL_PER_IMAGE);
+}
+
+function insufficientCreativeV3CreditsMessage(error: unknown) {
+  if (isInsufficientWorkspaceCreditsError(error)) {
+    if (typeof error.required === "number" && typeof error.available === "number") {
+      return `Not enough credits. Required ${error.required}, available ${error.available}.`;
+    }
+
+    return "Not enough credits for this V3 generation.";
+  }
+
+  return "Not enough credits for this V3 generation.";
+}
+
+async function reserveCreativeV3GenerationCredits(params: {
+  workspaceId: string;
+  jobId: string;
+  actorUserId: string | null;
+  requestedVariantCount: number;
+}) {
+  const amount = creativeV3GenerationCreditAmount(params.requestedVariantCount);
+  if (amount <= 0) {
+    return null;
+  }
+
+  const reservation = await reserveWorkspaceCredits({
+    workspaceId: params.workspaceId,
+    source: "creative_v3_generation",
+    sourceRef: params.jobId,
+    amount,
+    actorUserId: params.actorUserId,
+    metadata: {
+      endpoint: "/api/creative-v3/generate-async",
+      requestedVariantCount: params.requestedVariantCount
+    }
+  });
+
+  return reservation.reservationId;
+}
+
+async function settleCreativeV3ReservationIfPresent(
+  reservationId: string | null | undefined,
+  metadata?: Record<string, unknown>
+) {
+  if (!reservationId) {
+    return;
+  }
+
+  await settleWorkspaceCreditReservation({
+    reservationId,
+    metadata: metadata ?? {}
+  });
+}
+
+async function releaseCreativeV3ReservationIfPresent(params: {
+  reservationId: string | null | undefined;
+  actorUserId: string | null;
+  note: string;
+  metadata?: Record<string, unknown>;
+  log?: FastifyBaseLogger;
+}) {
+  if (!params.reservationId) {
+    return;
+  }
+
+  try {
+    await releaseWorkspaceCreditReservation({
+      reservationId: params.reservationId,
+      actorUserId: params.actorUserId,
+      note: params.note,
+      metadata: params.metadata ?? {}
+    });
+  } catch (error) {
+    params.log?.warn({ error, reservationId: params.reservationId }, "failed to release creative v3 credit reservation");
+  }
 }
 
 function resolveCreativeV3FalModelForReferences(model: string, referenceCount: number) {
@@ -900,6 +980,62 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function normalizeCreativeV3ColorPaletteOption(params: {
+  raw: unknown;
+  selectedPresetJson: Record<string, any>;
+  brandProfile: unknown;
+}) {
+  const raw = isPlainObject(params.raw) ? params.raw : {};
+  const mode = ["auto", "brand", "preset", "curated", "custom"].includes(String(raw.mode))
+    ? String(raw.mode)
+    : "auto";
+  const strength = raw.strength === "hard" || raw.locked === true ? "hard" : "soft";
+  const customColors = extractCreativeV3PaletteColors(raw.colors);
+  const brandColors = extractCreativeV3PaletteColors(extractCreativeV3PaletteSource(params.brandProfile));
+  const presetColors = extractCreativeV3PaletteColors(extractCreativeV3PaletteSource(params.selectedPresetJson));
+  const colors = mode === "custom" || mode === "curated"
+    ? customColors
+    : mode === "brand"
+      ? brandColors
+      : mode === "preset"
+        ? presetColors
+        : [];
+  return {
+    mode,
+    strength,
+    locked: strength === "hard",
+    source: mode,
+    palette_id: typeof raw.paletteId === "string" ? raw.paletteId : null,
+    palette_name: typeof raw.paletteName === "string" ? raw.paletteName : null,
+    colors: colors.slice(0, 8)
+  };
+}
+
+function extractCreativeV3PaletteSource(value: unknown): unknown {
+  if (!isPlainObject(value)) return null;
+  return value.palette ?? value.colorPalette ?? value.colors ?? null;
+}
+
+function extractCreativeV3PaletteColors(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return Array.from(new Set(value.map(normalizeCreativeV3HexColor).filter((color): color is string => Boolean(color))));
+  }
+  if (!isPlainObject(value)) {
+    const color = normalizeCreativeV3HexColor(value);
+    return color ? [color] : [];
+  }
+  return Array.from(new Set(
+    Object.values(value).flatMap((item) => extractCreativeV3PaletteColors(item))
+  ));
+}
+
+function normalizeCreativeV3HexColor(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/^#?([0-9a-fA-F]{6})$/);
+  const hex = match?.[1];
+  return hex ? `#${hex.toUpperCase()}` : null;
+}
+
 async function runCreativeV3Compile(params: {
   body: CreativeV3CompileRequest;
   viewer: AuthenticatedViewer;
@@ -1010,6 +1146,11 @@ async function runCreativeV3Compile(params: {
   });
   const effectiveAssetVariation = body.variantCount > 1 && body.assetVariation && selectedAssetIds.length === 0;
   const effectiveTextStrategy = resolveEffectiveTextStrategy(body);
+  const selectedColorPalette = normalizeCreativeV3ColorPaletteOption({
+    raw: body.options.colorPalette ?? body.options.color_palette,
+    selectedPresetJson,
+    brandProfile: brandProfileVersion?.profile ?? null
+  });
 
   const enginePayload = {
     capability: "image_prompt_generation",
@@ -1057,7 +1198,8 @@ async function runCreativeV3Compile(params: {
         : "render_text",
       construction_visual_mode: body.constructionVisualMode,
       construction_progress_percent: body.constructionProgressPercent,
-      festival_visual_scope: body.festivalVisualScope
+      festival_visual_scope: body.festivalVisualScope,
+      color_palette: selectedColorPalette
     },
     context: {
       brand: {
@@ -1113,6 +1255,7 @@ async function runCreativeV3Compile(params: {
         : null,
       brand_presets: brandPresets,
       selected_brand_preset: selectedPreset ?? null,
+      selected_color_palette: selectedColorPalette,
       visual_templates: visualTemplates
     }
   };
@@ -1152,6 +1295,7 @@ async function runCreativeV3Compile(params: {
     brandProfileVersion,
     project,
     postType,
+    requestBody: body,
     visualTemplates,
     status,
     enginePayload,
@@ -1161,6 +1305,7 @@ async function runCreativeV3Compile(params: {
     response: {
       request: {
         brandId: brand.id,
+        deliverableId: body.deliverableId ?? null,
         projectId: project?.id ?? null,
         postTypeId: postType?.id ?? null,
         renderPreset,
@@ -1486,6 +1631,7 @@ function patchResolvedPromptFields(renderPackage: Record<string, unknown>, patch
 
 function patchResolvedPromptText(value: string, patch: ResolvedPromptPatch) {
   let next = value;
+  const isStructuredPrompt = next.includes("Brand, compliance, and contact rules:");
   if (patch.websiteReplacement) {
     next = next.split(patch.websiteReplacement.from).join(patch.websiteReplacement.to);
   }
@@ -1497,7 +1643,9 @@ function patchResolvedPromptText(value: string, patch: ResolvedPromptPatch) {
       .replace(/Primary logo must be placed at top[-_ ]right/gi, `Primary logo must be placed at ${positionText}`)
       .replace(/Primary logo must be placed at top[-_ ]left/gi, `Primary logo must be placed at ${positionText}`)
       .replace(/supplied logo reference exactly once as a separate flat brand mark at top[-_ ]right/gi, `supplied logo reference exactly once as a separate flat brand mark at ${positionText}`)
-      .replace(/supplied logo reference exactly once as a separate flat brand mark at top[-_ ]left/gi, `supplied logo reference exactly once as a separate flat brand mark at ${positionText}`);
+      .replace(/supplied logo reference exactly once as a separate flat brand mark at top[-_ ]left/gi, `supplied logo reference exactly once as a separate flat brand mark at ${positionText}`)
+      .replace(/primary logo reference exactly once as a separate flat brand mark at top[-_ ]right/gi, `primary logo reference exactly once as a separate flat brand mark at ${positionText}`)
+      .replace(/primary logo reference exactly once as a separate flat brand mark at top[-_ ]left/gi, `primary logo reference exactly once as a separate flat brand mark at ${positionText}`);
   }
   if (patch.secondaryLogoPosition) {
     const positionText = formatLogoPosition(patch.secondaryLogoPosition);
@@ -1506,7 +1654,9 @@ function patchResolvedPromptText(value: string, patch: ResolvedPromptPatch) {
       .replace(/Secondary logo position:\s*top[-_ ]left/gi, `Secondary logo position: ${positionText}`)
       .replace(/secondary logo reference exactly once at top right/gi, `secondary logo reference exactly once at ${positionText}`)
       .replace(/secondary logo reference exactly once at top_right/gi, `secondary logo reference exactly once at ${positionText}`)
-      .replace(/secondary logo reference exactly once at top left/gi, `secondary logo reference exactly once at ${positionText}`);
+      .replace(/secondary logo reference exactly once at top left/gi, `secondary logo reference exactly once at ${positionText}`)
+      .replace(/secondary logo reference exactly once as a separate flat brand mark at top[-_ ]right/gi, `secondary logo reference exactly once as a separate flat brand mark at ${positionText}`)
+      .replace(/secondary logo reference exactly once as a separate flat brand mark at top[-_ ]left/gi, `secondary logo reference exactly once as a separate flat brand mark at ${positionText}`);
   }
 
   const overrideLines: string[] = [];
@@ -1514,13 +1664,14 @@ function patchResolvedPromptText(value: string, patch: ResolvedPromptPatch) {
     overrideLines.push(`Primary logo must be placed at ${formatLogoPosition(patch.logoPosition)}.`);
   }
   if (patch.secondaryLogoPosition) {
-    overrideLines.push(`Secondary logo must be placed at ${formatLogoPosition(patch.secondaryLogoPosition)} with clear spacing from the primary logo and RERA block.`);
+    overrideLines.push(`Secondary logo must be placed at ${formatLogoPosition(patch.secondaryLogoPosition)} with clear spacing from the primary logo and any approved contact/compliance areas.`);
   }
   if (patch.websiteReplacement) {
     overrideLines.push(`Footer/contact website must use ${patch.websiteReplacement.to}; MahaRERA URLs belong only inside the RERA compliance block.`);
   }
 
   if (overrideLines.length === 0) return next;
+  if (isStructuredPrompt) return next;
   return `${next}\n\nResolved brand/compliance layout, highest priority: ${overrideLines.join(" ")}`;
 }
 
@@ -2057,8 +2208,10 @@ async function renderCreativeV3Variant(params: {
   const additionalLogoRules = Array.from(new Set(additionalLogoAssetIds))
     .filter((assetId) => assetId !== renderPackage.secondary_logo_asset_id && hasModelReferenceForAsset(assetId))
     .map((assetId) => additionalLogoRulesByAssetId.get(assetId) ?? { asset_id: assetId });
+  const promptFormat = typeof renderPackage.prompt_format === "string" ? renderPackage.prompt_format : "legacy";
   const renderPrompt = buildCreativeV3RendererPrompt({
     prompt,
+    promptFormat,
     hasProjectReference: Array.isArray(renderPackage.project_asset_ids) && renderPackage.project_asset_ids.length > 0,
     hasLogoReference,
     hasSecondaryLogoReference,
@@ -2113,6 +2266,7 @@ async function renderCreativeV3Variant(params: {
 
 function buildCreativeV3RendererPrompt(params: {
   prompt: string;
+  promptFormat?: string;
   hasProjectReference: boolean;
   hasLogoReference: boolean;
   hasSecondaryLogoReference: boolean;
@@ -2123,6 +2277,15 @@ function buildCreativeV3RendererPrompt(params: {
   additionalLogoRules?: Array<Record<string, unknown>>;
   contactRules?: Record<string, unknown> | null;
 }) {
+  if (params.promptFormat === "structured_v2") {
+    const roleNotes = [
+      "Use the provider prompt below as the final art direction. Follow its exact text, asset, logo, contact, compliance, and factual constraints. Do not add contradictory claims or invented visible text."
+    ];
+    if (params.hasReraReference) {
+      roleNotes.push("If a RERA compliance zone is requested, leave it clean; the exact RERA block is composited after generation. Never invent or draw a QR code.");
+    }
+    return `${roleNotes.join("\n")}\n\n${params.prompt}`;
+  }
   const roleNotes = ["Use the following provider prompt as the final art direction. Do not add contradictory text, logo, QR, contact, or factual claims beyond it."];
   if (params.hasLogoReference) {
     roleNotes.push(compileLogoRenderInstruction(params.logoRules));
@@ -2301,6 +2464,7 @@ function readRecordArray(value: unknown) {
 async function persistCreativeV3Outputs(params: {
   compileJobId: string;
   actorUserId: string | null;
+  creditReservationId?: string | null;
   compiled: Awaited<ReturnType<typeof runCreativeV3Compile>>;
   renders: Array<{
     variantId: string;
@@ -2342,12 +2506,24 @@ async function persistCreativeV3Outputs(params: {
   const creativeRequestId = randomId();
   const promptPackageId = randomId();
   const creativeJobId = randomId();
-  const deliverableId = await createCreativeV3ReviewDeliverable({
+  const uploadedStoragePaths: string[] = [];
+  const deliverableTarget = await createCreativeV3ReviewDeliverable({
     compiled: params.compiled,
     compileJobId: params.compileJobId,
     promptPackageId,
     createdBy: params.actorUserId
   });
+  const deliverableId = deliverableTarget.deliverableId;
+  const cleanupDeliverableId = deliverableTarget.created ? deliverableId : null;
+  const cleanupExistingDeliverable = deliverableTarget.created
+    ? null
+    : {
+        deliverableId,
+        previousStatus: deliverableTarget.previousStatus ?? "planned",
+        previousLatestPostVersionId: deliverableTarget.previousLatestPostVersionId,
+        previousApprovedPostVersionId: deliverableTarget.previousApprovedPostVersionId
+      };
+  const createdPostVersionIds: string[] = [];
 
   const { error: requestError } = await supabaseAdmin.from("creative_requests").insert({
     id: creativeRequestId,
@@ -2366,6 +2542,7 @@ async function persistCreativeV3Outputs(params: {
     created_by: params.actorUserId
   });
   if (requestError) {
+    await cleanupCreativeV3Persistence({ deliverableId: cleanupDeliverableId, existingDeliverable: cleanupExistingDeliverable, creativeRequestId, promptPackageId, creativeJobId, postVersionIds: createdPostVersionIds, storagePaths: uploadedStoragePaths });
     throw requestError;
   }
 
@@ -2407,6 +2584,7 @@ async function persistCreativeV3Outputs(params: {
     created_by: params.actorUserId
   });
   if (packageError) {
+    await cleanupCreativeV3Persistence({ deliverableId: cleanupDeliverableId, existingDeliverable: cleanupExistingDeliverable, creativeRequestId, promptPackageId, creativeJobId, postVersionIds: createdPostVersionIds, storagePaths: uploadedStoragePaths });
     throw packageError;
   }
 
@@ -2429,6 +2607,7 @@ async function persistCreativeV3Outputs(params: {
     provider_model: resolvedRenderModel,
     provider_request_id: `creative-v3-${params.compileJobId}`,
     requested_count: totalImageCount,
+    credit_reservation_id: params.creditReservationId ?? null,
     request_payload: {
       ...params.compiled.response.request,
       renderPreset: resolvedRenderPreset,
@@ -2452,78 +2631,137 @@ async function persistCreativeV3Outputs(params: {
     created_by: params.actorUserId
   });
   if (jobError) {
+    await cleanupCreativeV3Persistence({ deliverableId: cleanupDeliverableId, existingDeliverable: cleanupExistingDeliverable, creativeRequestId, promptPackageId, creativeJobId, postVersionIds: createdPostVersionIds, storagePaths: uploadedStoragePaths });
     throw jobError;
   }
 
   const persisted: Array<{ variantId: string; outputIds: string[] }> = [];
   let outputIndex = 0;
-  for (const item of params.renders) {
-    const outputIds: string[] = [];
-    for (const image of item.render.images) {
-      const outputId = randomId();
-      const storagePath = buildStoragePath({
-        workspaceId: params.compiled.brand.workspaceId,
-        brandId: params.compiled.brand.id,
-        section: "outputs",
-        id: creativeJobId,
-        fileName: `${outputId}.${extensionForGeneratedImage(image)}`
-      });
-      await ingestRemoteImageToStorage(storagePath, image.url);
-      const thumbnail = await createThumbnailFromStorageOrNull(storagePath, {
-        source: "creative_v3_output",
-        mimeType: image.content_type ?? "image/png"
-      });
-      const { error: outputError } = await supabaseAdmin.from("creative_outputs").insert({
-        id: outputId,
-        workspace_id: params.compiled.brand.workspaceId,
-        brand_id: params.compiled.brand.id,
-        deliverable_id: deliverableId,
-        project_id: params.compiled.project?.id ?? null,
-        post_type_id: params.compiled.postType?.id ?? null,
-        creative_template_id: safeTemplateDbId,
-        calendar_item_id: null,
-        job_id: creativeJobId,
-        post_version_id: null,
-        kind: "final",
-        storage_path: storagePath,
-        thumbnail_storage_path: thumbnail?.thumbnailStoragePath ?? null,
-        thumbnail_width: thumbnail?.thumbnailWidth ?? null,
-        thumbnail_height: thumbnail?.thumbnailHeight ?? null,
-        thumbnail_bytes: thumbnail?.thumbnailBytes ?? null,
-        provider_url: image.url.startsWith("data:") ? null : image.url,
-        output_index: outputIndex,
-        review_state: "pending_review",
-        metadata_json: {
-          source: "creative_v3",
-          compile_job_id: params.compileJobId,
-          variant_id: item.variantId,
-          variant: item.variant,
-          render_package: item.variant.render_package ?? null,
-          reference_asset_ids: item.render.referenceAssetIds,
-          reference_storage_paths: item.render.referenceStoragePaths,
-          render_preset: item.render.renderPreset,
-          provider: item.render.provider,
-          provider_model: item.render.model,
-          provider_request_id: item.render.requestId,
-          provider_prompt_used: item.render.providerPrompt,
-          provider_reference_asset_ids: item.render.referenceAssetIds,
-          provider_reference_storage_paths: item.render.referenceStoragePaths,
-          selected_template_id: extractCreativeV3TemplateInfo(item.variant).templateId,
-          selected_template_db_id: extractCreativeV3TemplateInfo(item.variant).dbId
-        },
-        created_by: params.actorUserId
-      });
-      if (outputError) {
-        throw outputError;
+  try {
+    for (const item of params.renders) {
+      const outputIds: string[] = [];
+      for (const image of item.render.images) {
+        const outputId = randomId();
+        const storagePath = buildStoragePath({
+          workspaceId: params.compiled.brand.workspaceId,
+          brandId: params.compiled.brand.id,
+          section: "outputs",
+          id: creativeJobId,
+          fileName: `${outputId}.${extensionForGeneratedImage(image)}`
+        });
+        await ingestRemoteImageToStorage(storagePath, image.url);
+        uploadedStoragePaths.push(storagePath);
+        const thumbnail = await createThumbnailFromStorageOrNull(storagePath, {
+          source: "creative_v3_output",
+          mimeType: image.content_type ?? "image/png"
+        });
+        if (thumbnail?.thumbnailStoragePath) {
+          uploadedStoragePaths.push(thumbnail.thumbnailStoragePath);
+        }
+        const { error: outputError } = await supabaseAdmin.from("creative_outputs").insert({
+          id: outputId,
+          workspace_id: params.compiled.brand.workspaceId,
+          brand_id: params.compiled.brand.id,
+          deliverable_id: deliverableId,
+          project_id: params.compiled.project?.id ?? null,
+          post_type_id: params.compiled.postType?.id ?? null,
+          creative_template_id: safeTemplateDbId,
+          calendar_item_id: null,
+          job_id: creativeJobId,
+          post_version_id: null,
+          kind: "final",
+          storage_path: storagePath,
+          thumbnail_storage_path: thumbnail?.thumbnailStoragePath ?? null,
+          thumbnail_width: thumbnail?.thumbnailWidth ?? null,
+          thumbnail_height: thumbnail?.thumbnailHeight ?? null,
+          thumbnail_bytes: thumbnail?.thumbnailBytes ?? null,
+          provider_url: image.url.startsWith("data:") ? null : image.url,
+          output_index: outputIndex,
+          review_state: "pending_review",
+          metadata_json: {
+            source: "creative_v3",
+            compile_job_id: params.compileJobId,
+            variant_id: item.variantId,
+            variant: item.variant,
+            render_package: item.variant.render_package ?? null,
+            reference_asset_ids: item.render.referenceAssetIds,
+            reference_storage_paths: item.render.referenceStoragePaths,
+            render_preset: item.render.renderPreset,
+            provider: item.render.provider,
+            provider_model: item.render.model,
+            provider_request_id: item.render.requestId,
+            provider_prompt_used: item.render.providerPrompt,
+            provider_reference_asset_ids: item.render.referenceAssetIds,
+            provider_reference_storage_paths: item.render.referenceStoragePaths,
+            color_palette: isPlainObject(params.compiled.enginePayload.options)
+              ? params.compiled.enginePayload.options.color_palette ?? null
+              : null,
+            selected_template_id: extractCreativeV3TemplateInfo(item.variant).templateId,
+            selected_template_db_id: extractCreativeV3TemplateInfo(item.variant).dbId
+          },
+          created_by: params.actorUserId
+        });
+        if (outputError) {
+          throw outputError;
+        }
+        const postVersion = await ensurePostVersionForOutput(outputId, { status: "in_review", createdBy: params.actorUserId });
+        createdPostVersionIds.push(postVersion.id);
+        outputIds.push(outputId);
+        outputIndex += 1;
       }
-      await ensurePostVersionForOutput(outputId, { status: "in_review", createdBy: params.actorUserId });
-      outputIds.push(outputId);
-      outputIndex += 1;
+      persisted.push({ variantId: item.variantId, outputIds });
     }
-    persisted.push({ variantId: item.variantId, outputIds });
+  } catch (error) {
+    await cleanupCreativeV3Persistence({ deliverableId: cleanupDeliverableId, existingDeliverable: cleanupExistingDeliverable, creativeRequestId, promptPackageId, creativeJobId, postVersionIds: createdPostVersionIds, storagePaths: uploadedStoragePaths });
+    throw error;
   }
 
   return persisted;
+}
+
+async function cleanupCreativeV3Persistence(params: {
+  deliverableId?: string | null;
+  existingDeliverable?: {
+    deliverableId: string;
+    previousStatus: string;
+    previousLatestPostVersionId: string | null;
+    previousApprovedPostVersionId: string | null;
+  } | null;
+  creativeRequestId: string;
+  promptPackageId: string;
+  creativeJobId: string;
+  postVersionIds: string[];
+  storagePaths: string[];
+}) {
+  const cleanupOperations: PromiseLike<unknown>[] = [];
+  if (params.postVersionIds.length > 0) {
+    cleanupOperations.push(
+      supabaseAdmin.from("post_version_assets").delete().in("post_version_id", params.postVersionIds),
+      supabaseAdmin.from("post_versions").delete().in("id", params.postVersionIds)
+    );
+  }
+  cleanupOperations.push(
+    supabaseAdmin.from("creative_outputs").delete().eq("job_id", params.creativeJobId),
+    supabaseAdmin.from("creative_jobs").delete().eq("id", params.creativeJobId),
+    supabaseAdmin.from("prompt_packages").delete().eq("id", params.promptPackageId),
+    supabaseAdmin.from("creative_requests").delete().eq("id", params.creativeRequestId)
+  );
+  if (params.deliverableId) {
+    cleanupOperations.push(supabaseAdmin.from("deliverables").delete().eq("id", params.deliverableId));
+  } else if (params.existingDeliverable) {
+    cleanupOperations.push(
+      supabaseAdmin
+        .from("deliverables")
+        .update({
+          status: params.existingDeliverable.previousStatus,
+          latest_post_version_id: params.existingDeliverable.previousLatestPostVersionId,
+          approved_post_version_id: params.existingDeliverable.previousApprovedPostVersionId
+        })
+        .eq("id", params.existingDeliverable.deliverableId)
+    );
+  }
+  await Promise.allSettled(cleanupOperations);
+  await removeStorageObjects(params.storagePaths).catch(() => null);
 }
 
 async function createCreativeV3ReviewDeliverable(params: {
@@ -2534,6 +2772,44 @@ async function createCreativeV3ReviewDeliverable(params: {
 }) {
   if (!params.compiled.postType?.id) {
     throw new Error("A post type is required before Creative V3 outputs can be sent to Review.");
+  }
+
+  const requestedDeliverableId = params.compiled.requestBody.deliverableId ?? null;
+  if (requestedDeliverableId) {
+    const { data, error } = await supabaseAdmin
+      .from("deliverables")
+      .select("id, workspace_id, brand_id, post_type_id, status, latest_post_version_id, approved_post_version_id")
+      .eq("id", requestedDeliverableId)
+      .maybeSingle();
+    if (error) {
+      throw error;
+    }
+    const row = data as {
+      id: string;
+      workspace_id: string;
+      brand_id: string;
+      post_type_id: string;
+      status: string;
+      latest_post_version_id: string | null;
+      approved_post_version_id: string | null;
+    } | null;
+    if (!row) {
+      throw new Error("Selected post task was not found.");
+    }
+    if (row.workspace_id !== params.compiled.brand.workspaceId || row.brand_id !== params.compiled.brand.id) {
+      throw new Error("Selected post task does not belong to this brand workspace.");
+    }
+    if (row.post_type_id !== params.compiled.postType.id) {
+      throw new Error("Selected post task post type does not match this generation.");
+    }
+
+    return {
+      deliverableId: requestedDeliverableId,
+      created: false,
+      previousStatus: row.status,
+      previousLatestPostVersionId: row.latest_post_version_id,
+      previousApprovedPostVersionId: row.approved_post_version_id
+    };
   }
 
   const deliverableId = randomId();
@@ -2587,7 +2863,13 @@ async function createCreativeV3ReviewDeliverable(params: {
     throw error;
   }
 
-  return deliverableId;
+  return {
+    deliverableId,
+    created: true,
+    previousStatus: null,
+    previousLatestPostVersionId: null,
+    previousApprovedPostVersionId: null
+  };
 }
 
 function buildCreativeV3DeliverableTitle(compiled: Awaited<ReturnType<typeof runCreativeV3Compile>>) {
@@ -2725,6 +3007,31 @@ function collectReferenceAssetIds(variants: Array<Record<string, unknown>>) {
   return Array.from(ids);
 }
 
+function assertCreativeV3CanGenerateImages(compiled: Awaited<ReturnType<typeof runCreativeV3Compile>>) {
+  if (!compiled.brandProfileVersion?.id) {
+    throw new Error("Active brand profile is required before Creative V3 image generation.");
+  }
+
+  if (!compiled.postType?.id) {
+    throw new Error("A post type is required before Creative V3 image generation.");
+  }
+
+  if (!["ready", "ready_with_warnings"].includes(compiled.status)) {
+    const validation = isPlainRecord(compiled.response.result?.validation)
+      ? compiled.response.result.validation
+      : null;
+    const errors = Array.isArray(validation?.errors)
+      ? validation.errors.map(String).filter(Boolean)
+      : [];
+    throw new Error(errors[0] ?? `Creative V3 compile returned ${compiled.status}; no images were generated.`);
+  }
+
+  const variants = getCreativeV3Variants(compiled.response);
+  if (variants.length === 0) {
+    throw new Error("Creative V3 compile returned no renderable variants.");
+  }
+}
+
 
 async function resolveExistingCreativeTemplateId(templateDbId: string | null): Promise<string | null> {
   if (!templateDbId || !z.string().uuid().safeParse(templateDbId).success) {
@@ -2838,9 +3145,10 @@ async function processCreativeV3GenerateJobLocally(params: {
   log: FastifyBaseLogger;
 }) {
   const { data: claimedJob, error: claimError } = await supabaseAdmin
-    .from("compile_jobs")
+    .from(CREATIVE_V3_GENERATION_JOBS_TABLE)
     .update({
       status: "processing",
+      locked_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     })
     .eq("id", params.jobId)
@@ -2857,19 +3165,22 @@ async function processCreativeV3GenerateJobLocally(params: {
     return;
   }
 
+  const reservationId = (claimedJob as { credit_reservation_id?: string | null }).credit_reservation_id ?? null;
+  let jobInput: CreativeV3GenerateJobInput | null = null;
   try {
-    const jobInput = claimedJob.input_brief as CreativeV3GenerateJobInput;
+    jobInput = (claimedJob as { input_json?: unknown }).input_json as CreativeV3GenerateJobInput;
     if (!jobInput || jobInput.type !== "creative-v3-generate") {
       throw new Error("Invalid Creative V3 async job input.");
     }
+    const activeJobInput = jobInput;
 
     await touchCreativeV3GenerateJob(params.jobId);
 
     const viewer: AuthenticatedViewer = {
-      userId: jobInput.actorUserId ?? "system"
+      userId: activeJobInput.actorUserId ?? "system"
     };
     const compiled = await runCreativeV3Compile({
-      body: jobInput.body,
+      body: activeJobInput.body,
       viewer,
       log: params.log
     });
@@ -2883,11 +3194,12 @@ async function processCreativeV3GenerateJobLocally(params: {
       status: compiled.status,
       enginePayload: compiled.enginePayload,
       engineResponse: compiled.engineResponse,
-      createdBy: jobInput.actorUserId,
+      createdBy: activeJobInput.actorUserId,
       log: params.log
     });
 
-    const variants = ["ready", "ready_with_warnings"].includes(compiled.status) ? getCreativeV3Variants(compiled.response) : [];
+    assertCreativeV3CanGenerateImages(compiled);
+    const variants = getCreativeV3Variants(compiled.response);
     const renders = await Promise.all(
       variants.map(async (variant) => {
         await touchCreativeV3GenerateJob(params.jobId);
@@ -2896,11 +3208,11 @@ async function processCreativeV3GenerateJobLocally(params: {
           variantId,
           variant,
           render: await renderCreativeV3Variant({
-            brandId: jobInput.body.brandId,
-            projectId: jobInput.body.projectId ?? null,
+            brandId: activeJobInput.body.brandId,
+            projectId: activeJobInput.body.projectId ?? null,
             variant: { ...variant, format: compiled.response.result?.format },
             count: 1,
-            renderPreset: jobInput.body.renderPreset ?? null
+            renderPreset: activeJobInput.body.renderPreset ?? null
           })
         };
       })
@@ -2908,17 +3220,37 @@ async function processCreativeV3GenerateJobLocally(params: {
     await touchCreativeV3GenerateJob(params.jobId);
     const persistedOutputs = await persistCreativeV3Outputs({
       compileJobId: params.jobId,
-      actorUserId: jobInput.actorUserId,
+      actorUserId: activeJobInput.actorUserId,
+      creditReservationId: reservationId,
       compiled,
       renders
     });
     const outputIdsByVariant = new Map(persistedOutputs.map((item) => [item.variantId, item.outputIds]));
+    const totalImageCount = renders.reduce((sum, item) => sum + item.render.images.length, 0);
+    if (totalImageCount > 0) {
+      await settleCreativeV3ReservationIfPresent(reservationId, {
+        endpoint: "/api/creative-v3/generate-async",
+        status: "completed",
+        generatedImageCount: totalImageCount
+      });
+    } else {
+      await releaseCreativeV3ReservationIfPresent({
+        reservationId,
+        actorUserId: activeJobInput.actorUserId,
+        note: "creative v3 generation completed without images",
+        metadata: {
+          endpoint: "/api/creative-v3/generate-async",
+          reason: "no_images"
+        },
+        log: params.log
+      });
+    }
 
     await supabaseAdmin
-      .from("compile_jobs")
+      .from(CREATIVE_V3_GENERATION_JOBS_TABLE)
       .update({
         status: "completed",
-        result: {
+        result_json: {
           compile: compiled.response,
           renders: renders.map((item) => ({
             variantId: item.variantId,
@@ -2933,8 +3265,18 @@ async function processCreativeV3GenerateJobLocally(params: {
       .eq("status", "processing");
   } catch (error) {
     params.log.error({ error, jobId: params.jobId }, "creative v3 async generation failed locally");
+    await releaseCreativeV3ReservationIfPresent({
+      reservationId,
+      actorUserId: jobInput?.actorUserId ?? null,
+      note: "creative v3 generation failed",
+      metadata: {
+        endpoint: "/api/creative-v3/generate-async",
+        reason: "generation_failed"
+      },
+      log: params.log
+    });
     await supabaseAdmin
-      .from("compile_jobs")
+      .from(CREATIVE_V3_GENERATION_JOBS_TABLE)
       .update({
         status: "failed",
         error_json: {
@@ -2949,7 +3291,7 @@ async function processCreativeV3GenerateJobLocally(params: {
 
 async function touchCreativeV3GenerateJob(jobId: string) {
   await supabaseAdmin
-    .from("compile_jobs")
+    .from(CREATIVE_V3_GENERATION_JOBS_TABLE)
     .update({ updated_at: new Date().toISOString() })
     .eq("id", jobId)
     .eq("status", "processing");
@@ -3264,38 +3606,6 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
     }
   });
 
-  app.post("/api/creative-v3/render", { preHandler: app.authenticate }, async (request, reply) => {
-    const viewer = request.viewer;
-    if (!viewer) {
-      return reply.unauthorized();
-    }
-
-    const body = CreativeV3RenderRequestSchema.parse(request.body);
-    const brand = await getBrand(body.brandId);
-    await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
-
-    try {
-      return await renderCreativeV3Variant({
-        brandId: body.brandId,
-        projectId: body.projectId ?? null,
-        variant: body.variant,
-        count: body.count,
-        renderPreset: body.renderPreset ?? null
-      });
-    } catch (error) {
-      request.log.error({ error }, "creative v3 render failed");
-      const message = error instanceof Error ? error.message : "Creative V3 render failed";
-      if (message.includes("does not belong") || message.includes("does not include a prompt")) {
-        return reply.badRequest(message);
-      }
-      return reply.code(503).send({
-        statusCode: 503,
-        error: "Service Unavailable",
-        message
-      });
-    }
-  });
-
   app.post("/api/creative-v3/generate-async", { preHandler: app.authenticate }, async (request, reply) => {
     const viewer = request.viewer;
     if (!viewer) {
@@ -3307,24 +3617,59 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
     await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor"], request.log);
 
     const jobId = randomId();
+    let reservationId: string | null = null;
+    try {
+      reservationId = await reserveCreativeV3GenerationCredits({
+        workspaceId: brand.workspaceId,
+        jobId,
+        actorUserId: viewer.userId,
+        requestedVariantCount: body.variantCount
+      });
+    } catch (error) {
+      if (isInsufficientWorkspaceCreditsError(error)) {
+        return reply.code(402).send({
+          statusCode: 402,
+          error: "Payment Required",
+          message: insufficientCreativeV3CreditsMessage(error)
+        });
+      }
+      request.log.error({ error }, "failed to reserve creative v3 generation credits");
+      return reply.code(503).send({
+        statusCode: 503,
+        error: "Service Unavailable",
+        message: "Unable to reserve credits for Creative V3 generation."
+      });
+    }
+
     const jobInput: CreativeV3GenerateJobInput = {
       type: "creative-v3-generate",
       body,
       actorUserId: viewer.userId
     };
     const { error: jobError } = await supabaseAdmin
-      .from("compile_jobs")
+      .from(CREATIVE_V3_GENERATION_JOBS_TABLE)
       .insert({
         id: jobId,
         workspace_id: brand.workspaceId,
         brand_id: brand.id,
         status: "pending",
-        input_brief: jobInput,
-        session_token: request.headers.authorization?.replace("Bearer ", "") || ""
+        input_json: jobInput,
+        actor_user_id: viewer.userId,
+        credit_reservation_id: reservationId
       });
 
     if (jobError) {
       request.log.error({ error: jobError }, "failed to create creative v3 async job");
+      await releaseCreativeV3ReservationIfPresent({
+        reservationId,
+        actorUserId: viewer.userId,
+        note: "creative v3 job insert failed",
+        metadata: {
+          endpoint: "/api/creative-v3/generate-async",
+          reason: "job_insert_failed"
+        },
+        log: request.log
+      });
       return reply.code(500).send({ error: "Failed to create Creative V3 job" });
     }
 
@@ -3344,7 +3689,7 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
 
     const { jobId } = request.params as { jobId: string };
     const { data: job, error: jobError } = await supabaseAdmin
-      .from("compile_jobs")
+      .from(CREATIVE_V3_GENERATION_JOBS_TABLE)
       .select("*")
       .eq("id", jobId)
       .maybeSingle();
@@ -3353,7 +3698,7 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
       return reply.notFound();
     }
 
-    const jobInput = job.input_brief as Partial<CreativeV3GenerateJobInput> | null;
+    const jobInput = job.input_json as Partial<CreativeV3GenerateJobInput> | null;
     if (!jobInput || jobInput.type !== "creative-v3-generate") {
       return reply.notFound();
     }
@@ -3362,25 +3707,22 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
     await assertWorkspaceRole(viewer, brand.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
 
     if (isCreativeV3GenerateJobStale(job)) {
-      const errorJson = {
-        message: "Creative V3 generation worker stopped or timed out before completion. Please retry the generation.",
-        stale: true,
-        previousStatus: job.status,
-        lastUpdatedAt: job.updated_at ?? job.created_at ?? null
-      };
       await supabaseAdmin
-        .from("compile_jobs")
+        .from(CREATIVE_V3_GENERATION_JOBS_TABLE)
         .update({
-          status: "failed",
-          error_json: errorJson,
+          status: "pending",
+          locked_at: null,
           updated_at: new Date().toISOString()
         })
         .eq("id", jobId)
         .in("status", ["pending", "processing"]);
+      void processCreativeV3GenerateJobLocally({
+        jobId,
+        log: request.log.child({ jobId, route: "creative-v3-generate-async-reclaim" })
+      });
       return {
-        status: "failed",
-        input: jobInput.body,
-        error: errorJson
+        status: "processing",
+        input: jobInput.body
       };
     }
 
@@ -3388,7 +3730,7 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
       return {
         status: "completed",
         input: jobInput.body,
-        result: job.result
+        result: job.result_json
       };
     }
 
@@ -3400,6 +3742,13 @@ export async function registerCreativeV3Routes(app: FastifyInstance) {
           message: "Creative V3 generation failed."
         }
       };
+    }
+
+    if (job.status === "pending") {
+      void processCreativeV3GenerateJobLocally({
+        jobId,
+        log: request.log.child({ jobId, route: "creative-v3-generate-async-resume" })
+      });
     }
 
     return { status: job.status as "pending" | "processing", input: jobInput.body };

@@ -118,6 +118,20 @@ class IntentOutput(BaseModel):
     risk_notes: List[str] = Field(default_factory=list)
 
 
+class BriefIntentOutput(BaseModel):
+    primary_visual_goal: str = "selected_asset_hero"
+    reference_role: str = "hero_truth_anchor"
+    visual_priority: str = ""
+    scene_subject: str = ""
+    people_required: bool = False
+    environment_required: List[str] = Field(default_factory=list)
+    must_include: List[str] = Field(default_factory=list)
+    must_avoid: List[str] = Field(default_factory=list)
+    grounded_facts: List[str] = Field(default_factory=list)
+    copy_goal: str = ""
+    confidence: float = 0.0
+
+
 class AssetSelectionOutput(BaseModel):
     selected_asset_id: str = ""
     confidence: float = 0.0
@@ -294,6 +308,26 @@ class SelectHeroAsset(dspy.Signature):
     )
 
 
+class ResolveBriefVisualIntent(dspy.Signature):
+    """Classify the user's actual visual ask before asset/template planning.
+
+    Decide whether selected references should be the hero image or only context grounding.
+    If the brief asks for a generated scene with people/family/couple/lifestyle/township/environment,
+    return primary_visual_goal generated_lifestyle_scene and reference_role context_grounding unless the user explicitly says
+    to use the selected/supplied image as the hero. Preserve compliance/factual constraints; do not invent facts.
+    """
+
+    request_json: str = dspy.InputField()
+    project_context_json: str = dspy.InputField()
+    preliminary_intent_json: str = dspy.InputField()
+    brief_intent_json: BriefIntentOutput = dspy.OutputField(
+        desc=(
+            "JSON object with primary_visual_goal, reference_role, visual_priority, scene_subject, "
+            "people_required, environment_required, must_include, must_avoid, grounded_facts, copy_goal, confidence."
+        )
+    )
+
+
 class GenerateVariantPlan(dspy.Signature):
     """Plan up to three visually distinct but grounded single-post variants.
 
@@ -382,6 +416,7 @@ class DspyPromptProgram:
         # some providers return without the final output field, causing parse-only
         # failures and unnecessary fallback to the deterministic planner.
         self.resolve_intent = dspy.Predict(ResolveCreativeIntent)
+        self.resolve_brief_visual_intent = dspy.Predict(ResolveBriefVisualIntent)
         self.select_asset = dspy.Predict(SelectHeroAsset)
         self.plan_variants = dspy.Predict(GenerateVariantPlan)
         self.generate_prompt = dspy.Predict(GenerateImagePrompt)
@@ -396,6 +431,15 @@ class DspyPromptProgram:
             request_json=json.dumps(_request_for_model(request), ensure_ascii=False),
             project_context_json=json.dumps(_project_context_for_model(context), ensure_ascii=False),
             available_content_jobs_json=json.dumps(CONTENT_JOBS, ensure_ascii=False),
+        )
+
+    def plan_brief_visual_intent(self, request: CompileRequest, context: Dict[str, Any], preliminary_intent: Dict[str, Any]) -> Dict[str, Any]:
+        return self._predict_json(
+            self.resolve_brief_visual_intent,
+            "brief_intent_json",
+            request_json=json.dumps(_request_for_model(request), ensure_ascii=False),
+            project_context_json=json.dumps(_project_context_for_model(context), ensure_ascii=False),
+            preliminary_intent_json=json.dumps(preliminary_intent, ensure_ascii=False),
         )
 
     def select_hero_asset(self, request: CompileRequest, content_job_id: str, assets: List[Dict[str, Any]], asset_selection_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

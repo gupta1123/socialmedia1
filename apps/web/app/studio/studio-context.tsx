@@ -16,14 +16,9 @@ import type {
 import {
   type BootstrapMode,
   bootstrapSession,
-  compileCreativeV2,
-  compileCreativeV2Async,
   createBrand,
   creativeFlowVersion,
   defaultStyleVariationCount,
-  generateFinals,
-  generateOptions,
-  getCompileV2AsyncStatus,
   styleVariationLimit,
   getCreativeJob,
   isUnauthorizedApiError,
@@ -31,12 +26,7 @@ import {
   submitFeedback,
   uploadBrandAsset
 } from "../../lib/api";
-import { shouldUseAsyncCompileByDefault } from "../../lib/compile-mode";
 import { supabase } from "../../lib/supabase-browser";
-
-const ASYNC_COMPILE_POLL_INTERVAL_MS = 2000;
-const ASYNC_COMPILE_TIMEOUT_MS = 600_000;
-const ASYNC_COMPILE_MAX_POLLS = Math.ceil(ASYNC_COMPILE_TIMEOUT_MS / ASYNC_COMPILE_POLL_INTERVAL_MS);
 
 const defaultProfile: BrandProfile = {
   identity: {
@@ -166,11 +156,6 @@ type StudioContextValue = {
     projectId?: string | null,
     options?: { reraNumber?: string }
   ) => Promise<boolean>;
-  compilePromptPackage: (options?: { silentSuccess?: boolean }) => Promise<PromptPackage | null>;
-  generateSeeds: () => Promise<void>;
-  generateSeedsForPackage: (promptPackageId: string, promptPackageOverride?: PromptPackage) => Promise<boolean>;
-  generateFinalImages: (selectedTemplateId?: string) => Promise<void>;
-  generateFinalImagesForPackage: (promptPackageId: string, selectedTemplateId?: string) => Promise<boolean>;
   leaveFeedback: (outputId: string, verdict: OutputVerdict, comment?: string) => Promise<FeedbackResult | null>;
   signOut: () => Promise<void>;
 };
@@ -469,7 +454,7 @@ export function StudioProvider({
   );
 
   useEffect(() => {
-    if (pathname.startsWith("/studio/create") || pathname.startsWith("/studio/runs/")) {
+    if (pathname.startsWith("/studio/create-v3") || pathname.startsWith("/studio/runs/")) {
       return;
     }
 
@@ -769,160 +754,6 @@ export function StudioProvider({
     }
   }
 
-  async function compilePromptPackage(options?: { silentSuccess?: boolean; useAsync?: boolean }) {
-    if (!sessionToken || !activeBrandId) return null;
-
-    setPendingAction("compile-prompt");
-    setPendingTargetKey("brief-compile");
-
-    try {
-      const basePayload = {
-        ...briefForm,
-        ...(briefForm.copyMode === "auto"
-          ? {
-              offer: "",
-              exactText: "",
-            }
-          : {}),
-        brandId: activeBrandId,
-        referenceAssetIds: briefForm.selectedReferenceAssetIds
-      };
-
-      const useAsyncV2 = options?.useAsync ?? shouldUseAsyncCompileByDefault({
-        apiUrl: process.env.NEXT_PUBLIC_API_URL ?? null,
-        envValue: process.env.NEXT_PUBLIC_USE_ASYNC_COMPILE ?? null
-      });
-
-      if (useAsyncV2) {
-        // Use async endpoint with polling to avoid Heroku 30s timeout
-        const { jobId } = await compileCreativeV2Async(sessionToken, {
-          ...basePayload,
-          variationCount: styleVariationCount
-        });
-        setMessage("Compiling prompt (async)...");
-
-        for (let i = 0; i < ASYNC_COMPILE_MAX_POLLS; i++) {
-          await new Promise((resolve) => setTimeout(resolve, ASYNC_COMPILE_POLL_INTERVAL_MS));
-          const status = await getCompileV2AsyncStatus(sessionToken, jobId);
-
-          if (status.status === "completed" && status.result) {
-            setPromptPackage(status.result);
-            setMessage("Prompt package compiled.");
-            return status.result;
-          }
-
-          if (status.status === "failed") {
-            const err = status.error as { message?: string } | undefined;
-            throw new Error(err?.message || "Async compile failed");
-          }
-        }
-
-        throw new Error(`Compile timed out after ${Math.round(ASYNC_COMPILE_TIMEOUT_MS / 1000)}s`);
-      }
-
-      const payload = await compileCreativeV2(sessionToken, {
-        ...basePayload,
-        variationCount: styleVariationCount
-      });
-      setPromptPackage(payload);
-      if (!options?.silentSuccess) {
-        setMessage("Prompt package compiled.");
-      }
-      return payload;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Prompt compilation failed");
-      return null;
-    } finally {
-      setPendingAction(null);
-      setPendingTargetKey(null);
-    }
-  }
-
-  async function generateSeeds() {
-    if (!promptPackage) return;
-    await generateSeedsForPackage(promptPackage.id, promptPackage);
-  }
-
-  async function generateSeedsForPackage(promptPackageId: string, promptPackageOverride?: PromptPackage) {
-    if (!sessionToken) {
-      return false;
-    }
-
-    setPendingAction("generate-seeds");
-    setPendingTargetKey(`promptPackage:${promptPackageId}:seeds`);
-
-    try {
-      const activePromptPackage =
-        promptPackageOverride?.id === promptPackageId
-          ? promptPackageOverride
-          : promptPackage?.id === promptPackageId
-            ? promptPackage
-            : null;
-      if (activePromptPackage) {
-        await generateOptions(sessionToken, {
-          promptPackage: activePromptPackage,
-          variationCount: styleVariationCount
-        });
-        setPromptPackage((current) =>
-          current?.id === promptPackageId
-            ? {
-                ...current,
-                compilerTrace: {
-                  ...current.compilerTrace,
-                  persisted: true,
-                  v2PostOptionGeneration: true
-                }
-              }
-            : current
-        );
-      }
-      setMessage("Generating post options. Results will appear here automatically.");
-
-      return true;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Seed generation failed");
-      return false;
-    } finally {
-      setPendingAction(null);
-      setPendingTargetKey(null);
-    }
-  }
-
-  async function generateFinalImages(selectedTemplateId?: string) {
-    if (!promptPackage) return;
-    await generateFinalImagesForPackage(promptPackage.id, selectedTemplateId);
-  }
-
-  async function generateFinalImagesForPackage(promptPackageId: string, selectedTemplateId?: string) {
-    if (!sessionToken) {
-      return false;
-    }
-
-    setPendingAction("generate-finals");
-    setPendingTargetKey(
-      selectedTemplateId
-        ? `template:${selectedTemplateId}:finals`
-        : `promptPackage:${promptPackageId}:references`
-    );
-
-    try {
-      await generateFinals(sessionToken, {
-        promptPackageId,
-        selectedTemplateId,
-        count: 2
-      });
-      setMessage("Creating options. Results will appear here automatically.");
-
-      return true;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Final generation failed");
-      return false;
-    } finally {
-      setPendingAction(null);
-      setPendingTargetKey(null);
-    }
-  }
-
   async function leaveFeedback(outputId: string, verdict: OutputVerdict, comment?: string) {
     if (!sessionToken) {
       return null;
@@ -1001,11 +832,6 @@ export function StudioProvider({
         createBrandRecord,
         uploadReference,
         uploadBrandAssetFile,
-        compilePromptPackage,
-        generateSeeds,
-        generateSeedsForPackage,
-        generateFinalImages,
-        generateFinalImagesForPackage,
         leaveFeedback,
         signOut
       }}

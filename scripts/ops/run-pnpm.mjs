@@ -27,10 +27,14 @@ function runCandidate(index) {
     process.exit(1);
   }
 
-  const child = spawn(candidate.command, candidate.args, {
+  const spawnOptions = {
     stdio: "inherit",
     env: process.env
-  });
+  };
+  const child =
+    process.platform === "win32"
+      ? spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", commandLineForCmd(candidate)], spawnOptions)
+      : spawn(candidate.command, candidate.args, spawnOptions);
 
   child.on("error", (error) => {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
@@ -48,6 +52,24 @@ function runCandidate(index) {
       return;
     }
 
+    if (process.platform === "win32" && code === 9009) {
+      runCandidate(index + 1);
+      return;
+    }
+
     process.exit(code ?? 1);
   });
+}
+
+function commandLineForCmd(candidate) {
+  return [candidate.command, ...candidate.args].map(quoteCmdArg).join(" ");
+}
+
+function quoteCmdArg(value) {
+  const text = String(value);
+  if (/^[A-Za-z0-9_@%+=:,./\\-]+$/.test(text)) {
+    return text;
+  }
+
+  return `"${text.replace(/(["^&|<>])/g, "^$1")}"`;
 }

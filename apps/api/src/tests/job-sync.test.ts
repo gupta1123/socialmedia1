@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { extractFalImages, serializeProviderError, shouldMarkJobFailed } from "../lib/job-sync.js";
+
+process.env.SUPABASE_URL ??= "https://example.supabase.co";
+process.env.SUPABASE_ANON_KEY ??= "test-anon-key";
+process.env.SUPABASE_SERVICE_ROLE_KEY ??= "test-service-role-key";
+
+const { extractFalImages, serializeProviderError, shouldMarkJobFailed } = await import("../lib/job-sync.js");
 
 describe("extractFalImages", () => {
   it("reads queue results from the official result.data.images shape", () => {

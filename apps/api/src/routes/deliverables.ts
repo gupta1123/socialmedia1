@@ -23,7 +23,6 @@ import {
 import { assertWorkspaceRole, getActiveBrandProfile, getBrand, getPrimaryWorkspace } from "../lib/repository.js";
 import {
   applyApprovalDecision,
-  compileDeliverablePromptPackage,
   ensurePostVersionForOutput
 } from "../lib/deliverable-flow.js";
 import {
@@ -694,21 +693,6 @@ export async function registerDeliverableRoutes(app: FastifyInstance) {
     }
 
     return reply.status(204).send();
-  });
-
-  app.post("/api/deliverables/:deliverableId/compile", { preHandler: app.authenticate }, async (request, reply) => {
-    const viewer = request.viewer;
-    if (!viewer) {
-      return reply.unauthorized();
-    }
-
-    const deliverable = await getDeliverable((request.params as { deliverableId: string }).deliverableId);
-    await assertWorkspaceRole(viewer, deliverable.workspaceId, ["owner", "admin", "editor", "viewer"], request.log);
-    const promptPackage = await compileDeliverablePromptPackage({
-      deliverableId: deliverable.id,
-      viewerUserId: viewer.userId
-    });
-    return promptPackage;
   });
 
   app.get("/api/deliverables/:deliverableId/post-versions", { preHandler: app.authenticate }, async (request, reply) => {

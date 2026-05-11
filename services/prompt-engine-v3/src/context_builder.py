@@ -8,12 +8,25 @@ from .schemas import CompileRequest
 
 def build_context_pack(request: CompileRequest, content_job_id: str) -> Dict[str, Any]:
     context = request.context if isinstance(request.context, dict) else {}
+    options = request.options if isinstance(request.options, dict) else {}
     brand = _dict(context.get("brand"))
     project = _dict(context.get("project"))
     post_type = _dict(context.get("post_type"))
     festival = _dict(context.get("festival"))
     assets = [_dict(asset) for asset in context.get("assets", []) if isinstance(asset, dict)]
     output_format = normalize_format(request.format)
+    selected_color_palette = _dict(context.get("selected_color_palette"))
+    # Frontend normally sends curated/custom palette choice under options.colorPalette.
+    # Treat that as a first-class creative input rather than forcing every palette
+    # through the brand profile. Context still wins if it already contains a
+    # normalized selected_color_palette.
+    if not selected_color_palette:
+        selected_color_palette = _dict(options.get("colorPalette") or options.get("color_palette"))
+    if selected_color_palette and "palette_name" not in selected_color_palette:
+        if selected_color_palette.get("paletteName"):
+            selected_color_palette = {**selected_color_palette, "palette_name": selected_color_palette.get("paletteName")}
+        elif selected_color_palette.get("name"):
+            selected_color_palette = {**selected_color_palette, "palette_name": selected_color_palette.get("name")}
     return {
         "brand": brand,
         "project": project,
@@ -21,10 +34,12 @@ def build_context_pack(request: CompileRequest, content_job_id: str) -> Dict[str
         "festival": festival,
         "assets": assets,
         "brand_presets": _list(context.get("brand_presets")),
+        "selected_color_palette": selected_color_palette,
         "visual_templates": templates_for_job(content_job_id, output_format, context.get("visual_templates")),
         "rera_compliance_block": _dict(context.get("rera_compliance_block")),
         "content_job": CONTENT_JOBS.get(content_job_id, {}),
         "format": output_format,
+        "source_brief": request.brief,
     }
 
 

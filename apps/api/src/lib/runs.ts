@@ -479,11 +479,10 @@ function getLatestStyleSeedJobIds(jobs: JobRow[], promptPackage: PromptPackageRo
       .map((job) => job.id);
   }
 
-  const isV2StyleSeedPackage =
-    promptPackage.compiler_trace?.v2StyleSeedGeneration === true ||
-    (Array.isArray(promptPackage.compiler_trace?.variations) && promptPackage.compiler_trace.variations.length > 0);
+  const hasGeneratedStyleVariations =
+    Array.isArray(promptPackage.compiler_trace?.variations) && promptPackage.compiler_trace.variations.length > 0;
 
-  if (!isV2StyleSeedPackage) {
+  if (!hasGeneratedStyleVariations) {
     return [latestSeedJob.id];
   }
 
@@ -504,10 +503,10 @@ function getLatestFinalJobIds(jobs: JobRow[]) {
     return [];
   }
 
-  const latestBatchId = getV2OptionBatchId(latestFinalJob);
+  const latestBatchId = getOptionBatchId(latestFinalJob);
   if (latestBatchId) {
     return sortedRenderableJobs
-      .filter((job) => getV2OptionBatchId(job) === latestBatchId)
+      .filter((job) => getOptionBatchId(job) === latestBatchId)
       .sort(compareJobsChronologically)
       .map((job) => job.id);
   }
@@ -520,9 +519,9 @@ function getJobBatchId(job: JobRow) {
   return payload && typeof payload.styleSeedBatchId === "string" ? payload.styleSeedBatchId : null;
 }
 
-function getV2OptionBatchId(job: JobRow) {
+function getOptionBatchId(job: JobRow) {
   const payload = job.request_payload;
-  return payload && typeof payload.v2OptionBatchId === "string" ? payload.v2OptionBatchId : null;
+  return payload && typeof payload.optionBatchId === "string" ? payload.optionBatchId : null;
 }
 
 function compareJobsChronologically(left: JobRow, right: JobRow) {

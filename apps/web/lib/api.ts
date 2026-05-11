@@ -41,7 +41,6 @@ import type {
   CreativeRunSummary,
   CreativeTemplateDetail,
   CreativeTemplateRecord,
-  CreativeBrief,
   DeliverableDetail,
   DeliverableRecord,
   EditorSaveOutputResponse,
@@ -50,14 +49,12 @@ import type {
   FestivalRecord,
   FeedbackRequest,
   FeedbackResult,
-  FinalGenerationRequest,
   CreatePostingWindowInput,
   HomeOverview,
   PlanOverview,
   PostVersionRecord,
   PostTypeRecord,
   PostingWindowRecord,
-  PromptPackage,
   ProjectDetail,
   ProjectReraRegistrationRecord,
   ProjectRecord,
@@ -87,7 +84,6 @@ import type {
   WorkspaceMemberRecord,
   WorkspaceMemberRoleUpdateResponse,
   WorkspaceMemberUpsertResponse,
-  StyleSeedRequest
 } from "@image-lab/contracts";
 
 const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -137,27 +133,9 @@ export type PlanningTemplateOption = {
   format: CreativeTemplateRecord["format"];
 };
 
-export type CompileCreativeV2Payload = CreativeBrief & {
-  variationCount?: number;
-};
-
-export type GenerateOptionsRequest = {
-  promptPackage: PromptPackage;
-  variationCount?: number;
-};
-
-export type GenerateOptionsResponse = {
-  promptPackageId: string;
-  jobs: Array<{
-    id: string;
-    variationId: string;
-    variationTitle: string;
-    requestId: string | null;
-  }>;
-};
-
 export type CreativeV3CompilePayload = {
   brandId: string;
+  deliverableId?: string | null;
   projectId?: string | null;
   postTypeId?: string | null;
   brief: string;
@@ -207,6 +185,7 @@ export type CreativeV3RenderPreset = "v1_low" | "v1_high" | "v2_low" | "v2_mediu
 export type CreativeV3CompileResponse = {
   request: {
     brandId: string;
+    deliverableId?: string | null;
     projectId: string | null;
     postTypeId: string | null;
     renderPreset?: CreativeV3RenderPreset;
@@ -249,14 +228,6 @@ export type CreativeV3CompileResponse = {
     };
     debug?: Record<string, unknown>;
   };
-};
-
-export type CreativeV3RenderPayload = {
-  brandId: string;
-  projectId?: string | null;
-  variant: Record<string, unknown>;
-  count?: number;
-  renderPreset?: CreativeV3RenderPreset | null;
 };
 
 export type CreativeV3RenderResponse = {
@@ -1090,12 +1061,6 @@ export function deleteDeliverable(token: string, deliverableId: string) {
   });
 }
 
-export function compileDeliverable(token: string, deliverableId: string) {
-  return request<PromptPackage>(`/api/deliverables/${deliverableId}/compile`, token, {
-    method: "POST"
-  });
-}
-
 export function getDeliverablePostVersions(token: string, deliverableId: string) {
   return request<PostVersionRecord[]>(`/api/deliverables/${deliverableId}/post-versions`, token);
 }
@@ -1628,24 +1593,8 @@ export function deleteBrandAsset(token: string, brandId: string, assetId: string
   });
 }
 
-export function compileCreativeV2(token: string, payload: CompileCreativeV2Payload) {
-  return request<PromptPackage>("/api/creative/compile-v2", token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-}
-
 export function compileCreativeV3(token: string, payload: CreativeV3CompilePayload) {
   return request<CreativeV3CompileResponse>("/api/creative-v3/compile", token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-}
-
-export function renderCreativeV3(token: string, payload: CreativeV3RenderPayload) {
-  return request<CreativeV3RenderResponse>("/api/creative-v3/render", token, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
@@ -1716,45 +1665,6 @@ export function updateCreativeV3BrandPreset(
 export function deleteCreativeV3BrandPreset(token: string, brandId: string, presetId: string) {
   return request<void>(withQuery(`/api/creative-v3/brand-presets/${presetId}`, { brandId }), token, {
     method: "DELETE"
-  });
-}
-
-export function compileCreativeV2Async(token: string, payload: CompileCreativeV2Payload) {
-  return request<{ jobId: string; status: string }>("/api/creative/compile-v2-async", token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-}
-
-export function getCompileV2AsyncStatus(token: string, jobId: string) {
-  return request<{ status: string; result?: PromptPackage; error?: unknown }>(
-    `/api/creative/compile-v2-async/${jobId}`,
-    token
-  );
-}
-
-export function generateStyleSeeds(token: string, payload: StyleSeedRequest) {
-  return request<{ id: string; requestId: string | null }>("/api/creative/style-seeds", token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-}
-
-export function generateOptions(token: string, payload: GenerateOptionsRequest) {
-  return request<GenerateOptionsResponse>("/api/creative/options", token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-}
-
-export function generateFinals(token: string, payload: FinalGenerationRequest) {
-  return request<{ id: string; requestId: string | null }>("/api/creative/finals", token, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
   });
 }
 

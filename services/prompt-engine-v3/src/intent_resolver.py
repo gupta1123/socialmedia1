@@ -21,11 +21,11 @@ SEMANTIC_KEYWORDS: List[Tuple[str, List[str]]] = [
 STYLE_HINTS: List[Tuple[str, List[str]]] = [
     ("museum_editorial", ["museum", "gallery", "exhibition", "curated"]),
     ("luxury_editorial", ["luxury", "premium", "quiet luxury", "editorial", "magazine"]),
-    ("bold_campaign", ["bold", "campaign", "loud", "impact", "dominant"]),
+    ("bold_campaign", ["bold", "campaign", "loud", "impact", "dominant", "scroll-stopping", "scroll stopping", "instagram", "social media", "poster", "not boxy", "canva"]),
     ("minimal", ["minimal", "clean", "simple", "white space", "whitespace"]),
     ("festive", ["diwali", "eid", "navratri", "christmas", "festival", "festive"]),
     ("cinematic", ["cinematic", "dusk", "sunset", "dramatic", "moody"]),
-    ("graphic", ["graphic", "abstract", "symbolic", "poster", "cutout", "cut-out"]),
+    ("graphic", ["graphic", "abstract", "symbolic", "poster", "cutout", "cut-out", "masking", "type collision", "typography interaction", "shape-led", "shape led"]),
 ]
 
 NEGATIONS = [
@@ -86,6 +86,9 @@ def _festival_visual_scope(request: CompileRequest, content_job_id: str, lowered
     option = str(options.get("festivalVisualScope") or options.get("festival_visual_scope") or "auto")
     if option != "auto":
         return option
+    asks_no_building = any(term in lowered for term in ["not building-led", "not building led", "no building", "without building", "not architecture-led", "not architecture led", "brand only", "symbolic"] )
+    if asks_no_building:
+        return "brand_only" if not request.project_id else "project_supported"
     asks_building = bool(set(semantics) & {"building_exterior", "aerial", "entrance"}) or any(
         _positive(lowered, term) for term in ["show building", "use building", "use project image", "show tower", "project visual", "building led", "facade", "building"]
     )
@@ -197,7 +200,7 @@ def _creative_mode(request: CompileRequest, lowered: str, semantics: List[str]) 
         return "proof_led"
     if "interior" in semantics or "amenity" in semantics:
         return "lifestyle_led"
-    if any(_positive(lowered, term) for term in ["graphic", "abstract", "symbolic"]):
+    if any(_positive(lowered, term) for term in ["graphic", "abstract", "symbolic", "poster", "instagram", "canva", "not boxy", "cutout", "cut-out", "masking", "type interaction", "typography interaction", "shape-led", "shape led"]):
         return "graphic_led"
     return "auto"
 

@@ -17,7 +17,7 @@ export default function RunsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const topbarActions = useMemo(
-    () => <Link className="button button-primary" href="/studio/create">Start a run</Link>,
+    () => <Link className="button button-primary" href="/studio/create-v3">Start a run</Link>,
     []
   );
 
@@ -136,7 +136,7 @@ export default function RunsPage() {
             columns={tableColumns}
             defaultSort={{ columnId: "created", direction: "desc" }}
             emptyAction={
-              <Link className="button button-primary" href="/studio/create">
+              <Link className="button button-primary" href="/studio/create-v3">
                 Start first run
               </Link>
             }

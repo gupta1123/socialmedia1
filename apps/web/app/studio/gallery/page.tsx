@@ -36,7 +36,7 @@ export default function GalleryPage() {
         <Link className="button button-ghost" href="/studio/review">
           Open review
         </Link>
-        <Link className="button button-primary" href="/studio/create?mode=ad-hoc">
+        <Link className="button button-primary" href="/studio/create-v3?mode=ad-hoc">
           Generate more
         </Link>
       </div>
@@ -244,7 +244,7 @@ export default function GalleryPage() {
             <div className="empty-state-card">
               <h3>No generated images yet</h3>
               <p>Generate images from Create and they will appear here automatically.</p>
-              <Link className="button button-primary" href="/studio/create?mode=ad-hoc">
+              <Link className="button button-primary" href="/studio/create-v3?mode=ad-hoc">
                 Open Create
               </Link>
             </div>

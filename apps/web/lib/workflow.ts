@@ -7,7 +7,7 @@ export function getQueueNextActionHref(deliverableId: string, status: Deliverabl
     case "planned":
     case "brief_ready":
     case "generating":
-      return `/studio/create?deliverableId=${deliverableId}`;
+      return `/studio/create-v3?deliverableId=${deliverableId}`;
     case "review":
       return `/studio/review?deliverableId=${deliverableId}`;
     case "approved":

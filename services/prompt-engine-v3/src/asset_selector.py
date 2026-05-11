@@ -50,7 +50,7 @@ def select_registry_asset(request: CompileRequest, context: Dict[str, Any], cont
     return candidates[0] if candidates else {}
 
 
-def build_asset_decision(asset: Dict[str, Any], selection: Optional[Dict[str, Any]] = None) -> AssetDecision:
+def build_asset_decision(asset: Dict[str, Any], selection: Optional[Dict[str, Any]] = None, intent: Optional[CreativeIntent] = None) -> AssetDecision:
     profile = profile_asset(asset) if asset else AssetProfile()
     semantic = profile.semantic_type
     visual = profile.visual_analysis or {}
@@ -58,17 +58,19 @@ def build_asset_decision(asset: Dict[str, Any], selection: Optional[Dict[str, An
     unsupported.extend(profile.do_not_claim or [])
     if isinstance(visual.get("not_visible_or_not_supported"), list):
         unsupported.extend(str(item) for item in visual.get("not_visible_or_not_supported") if str(item).strip())
-    constraints = truth_constraints_for_semantic(semantic, asset)
+    reference_role = _reference_role_for_intent(intent, asset)
+    constraints = truth_constraints_for_semantic(semantic, asset, reference_role=reference_role)
     return AssetDecision(
         selected_asset_id=asset.get("asset_id"),
         semantic_type=semantic,
         confidence=float((selection or asset.get("selection") or {}).get("confidence") or 0.8),
         reason=str((selection or asset.get("selection") or {}).get("selection_reason") or (selection or asset.get("selection") or {}).get("source") or "deterministic_asset_selection"),
-        asset_use_plan=asset_use_plan_for_semantic(semantic, asset),
+        asset_use_plan=asset_use_plan_for_semantic(semantic, asset, reference_role=reference_role, intent=intent),
         truth_constraints=constraints,
         unsupported_details=_dedupe(unsupported),
         profile=profile,
         selection=selection or asset.get("selection") or {},
+        reference_role=reference_role,
     )
 
 
@@ -308,9 +310,16 @@ def score_brief_visual_constraints(asset: Dict[str, Any], brief: str) -> Tuple[f
     return score, reasons, penalties
 
 
-def asset_use_plan_for_semantic(semantic: Optional[str], asset: Dict[str, Any]) -> str:
+def asset_use_plan_for_semantic(semantic: Optional[str], asset: Dict[str, Any], *, reference_role: str = "hero_truth_anchor", intent: Optional[CreativeIntent] = None) -> str:
     label = asset.get("label") or "selected reference"
     description = asset.get("description") or ""
+    if reference_role == "context_grounding":
+        plan = getattr(intent, "brief_intent_plan", None) if intent else None
+        scene = getattr(plan, "scene_subject", "") or "the lifestyle scene requested in the brief"
+        return (
+            f"Use '{label}' only as project/context grounding for identity, visual credibility, architecture/township character, and factual constraints. "
+            f"Do not recreate it as the main hero visual. The hero visual must be the requested generated lifestyle scene: {scene}. {description}"
+        )
     if semantic == "interior":
         return f"Use '{label}' as an interior/lifestyle truth anchor. Preserve room layout, window geometry, furniture placement, material palette, and lighting direction. {description}"
     if semantic == "amenity":
@@ -328,8 +337,12 @@ def asset_use_plan_for_semantic(semantic: Optional[str], asset: Dict[str, Any]) 
     return f"Use '{label}' as a truthful project reference and adapt the poster around what the image actually shows. {description}"
 
 
-def truth_constraints_for_semantic(semantic: Optional[str], asset: Dict[str, Any]) -> List[str]:
+def truth_constraints_for_semantic(semantic: Optional[str], asset: Dict[str, Any], *, reference_role: str = "hero_truth_anchor") -> List[str]:
     common = ["Do not add facade signage or physical wordmarks unless already visible in the source asset."]
+    if reference_role == "context_grounding":
+        return common + [
+            "Use the selected reference for grounding only; do not force a facade-only, tower-crop, or static asset recreation when the brief asks for a generated lifestyle scene.",
+        ]
     if semantic == "interior":
         return common + ["Do not transform the interior into an exterior, lobby, or unrelated room."]
     if semantic == "amenity":
@@ -343,6 +356,13 @@ def truth_constraints_for_semantic(semantic: Optional[str], asset: Dict[str, Any
     if semantic == "construction":
         return common + ["Do not show a completed state if the selected asset is under construction."]
     return common
+
+
+def _reference_role_for_intent(intent: Optional[CreativeIntent], asset: Dict[str, Any]) -> str:
+    plan = getattr(intent, "brief_intent_plan", None) if intent else None
+    if plan and getattr(plan, "reference_role", "") == "context_grounding" and asset.get("asset_id"):
+        return "context_grounding"
+    return "hero_truth_anchor" if asset.get("asset_id") else "none"
 
 
 def _dedupe(items: List[Any]) -> List[str]:

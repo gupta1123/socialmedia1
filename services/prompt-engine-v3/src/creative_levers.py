@@ -301,6 +301,106 @@ LEVER_REGISTRY = {'style_family': ['swiss_grid_premium',
  'brand_visibility': ['whisper', 'elegant_signature', 'visible_brand_led', 'campaign_dominant'],
  'visual_mode': ['asset_faithful', 'editorialized_truth', 'graphic_led', 'concept_led', 'cutout_truth']}
 
+# Extra creative vocabulary for the route planner and DSPy planner. These are
+# intentionally route/mechanic oriented, not just taste adjectives. The image
+# model needs to know *how* it can create variety: type collision, route cues,
+# invitation surfaces, abstract poster worlds, festival symbolism, lifestyle
+# pathways, etc. Keep this registry broad but deterministic; sanitizers still
+# ensure unsupported factual claims are not introduced.
+EXTRA_LEVER_REGISTRY = {
+    'style_family': [
+        'social_poster_campaign', 'architectural_type_collision', 'shape_led_campaign',
+        'cinematic_rise', 'lifestyle_invite_warm', 'abstract_invitation',
+        'festival_symbolic_luxury', 'festival_lifestyle_warmth', 'grounded_symbolic',
+        'bold_shape_luxury', 'oversized_type_poster', 'luxury_gradient_world',
+        'high_contrast_campaign', 'soft_botanical_luxury', 'warm_human_editorial',
+        'township_lifestyle', 'arrival_invitation', 'appointment_card_premium',
+        'layered_campaign_system', 'type_mask_architecture', 'monogram_shape_premium',
+        'modern_bauhaus_luxury', 'deconstructed_editorial', 'aspirational_residential_story',
+        'airy_minimal_campaign', 'premium_festival_glow', 'cultural_pattern_premium',
+        'cinematic_lifestyle_gold', 'urban_poster_energy', 'serene_lifestyle_retreat',
+        'premium_surreal_metaphor', 'object_poster_luxury', 'luxury_collage_grid',
+        'destination_signal', 'refined_maximalist_realestate', 'architectural_shadow_play',
+        'editorial_invitation_system', 'residential_storytelling', 'symbolic_light_campaign',
+        'premium_event_invite', 'green_living_campaign', 'luxury_property_billboard',
+        'social_first_minimal_luxury', 'brand_world_poster', 'human_scale_luxury',
+    ],
+    'hero_presentation': [
+        'lifestyle_scene_hero', 'invitation_card_hero', 'human_arrival_scene',
+        'symbolic_festival_centerpiece', 'architectural_poster_object',
+        'contextual_township_scene', 'abstract_destination_marker', 'typography_hero',
+        'appointment_cue_hero', 'festival_lighting_context', 'supporting_truth_card',
+        'soft_background_truth_anchor', 'human_scale_pathway', 'masked_architecture_object',
+        'floating_proof_card', 'immersive_scene_hero', 'symbolic_light_hero',
+    ],
+    'layout_geometry': [
+        'type_collision_stack', 'dynamic_asymmetry', 'shape_world', 'cinematic_vertical_rise',
+        'invitation_card_layers', 'arrival_path_composition', 'threshold_frame',
+        'lifestyle_pathway_scene', 'festival_symbolic_center', 'community_moment_frame',
+        'full_bleed_social_poster', 'depth_layered_poster', 'diagonal_poster_flow',
+        'high_negative_space_poster', 'circular_focus_field', 'monogram_frame',
+        'route_signal_layout', 'human_scale_panorama', 'abstract_collage_field',
+        'foreground_background_depth', 'hero_object_overlap', 'floating_card_stack',
+        'editorial_invitation_flow', 'symbolic_center_stage', 'story_scene_with_cta',
+    ],
+    'graphic_layer': [
+        'route_lines', 'threshold_frame', 'invitation_tabs', 'appointment_marker',
+        'destination_marker', 'typographic_mask', 'kinetic_type', 'glow_field',
+        'festival_motif', 'rangoli_linework', 'kolam_linework', 'diya_light',
+        'lantern_glow', 'confetti_light_field', 'bokeh_depth', 'human_scale_shadow',
+        'botanical_overlay', 'township_path_cue', 'atmospheric_haze', 'luxury_gradient_mesh',
+        'glassmorphism_card', 'matte_card_layers', 'monogram_field', 'radial_focus',
+        'diagonal_motion_band', 'abstract_horizon', 'surreal_depth_layer',
+        'type_cut_through', 'building_shadow_depth', 'soft_arrival_glow',
+        'patterned_festival_border', 'symbolic_light_trail', 'floating_cta_tab',
+        'curved_brand_field', 'architectural_grid_texture', 'lifestyle_depth_blur',
+    ],
+    'type_voice': [
+        'high_impact_editorial', 'large_luxury_serif', 'condensed_campaign_sans',
+        'soft_humanist_sans', 'festive_refined_serif', 'invitation_serif_sans',
+        'poster_display_type', 'architectural_condensed', 'warm_lifestyle_sans',
+        'minimal_luxury_caps', 'expressive_typographic_luxury', 'legible_cta_sans',
+        'modern_devanagari_safe', 'multilingual_clean_sans', 'storytelling_serif',
+    ],
+    'text_architecture': [
+        'type_as_visual_object', 'headline_image_interlock', 'cta_as_appointment_tab',
+        'invitation_note_first', 'lifestyle_hook_first', 'festival_greeting_first',
+        'visual_metaphor_first', 'big_word_focus', 'split_headline_system',
+        'human_message_first', 'route_cta_last', 'footer_contact_approved',
+        'minimal_greeting_only', 'copy_led_poster_device', 'proof_as_visual_anchor',
+    ],
+    'mood_mode': [
+        'golden_hour_approachable', 'warm_township_evening', 'festival_glow_premium',
+        'symbolic_luxury_light', 'cinematic_vertical_atmosphere', 'calm_private_invitation',
+        'social_campaign_energy', 'lush_modern_residential', 'sahyadri_warm_haze',
+        'soft_green_lifestyle', 'deep_navy_gold_poster', 'cream_sage_editorial',
+        'warm_human_arrival', 'high_contrast_poster_luxury', 'minimal_ivory_campaign',
+        'premium_glass_and_shadow', 'urban_premium_daylight', 'festive_home_warmth',
+    ],
+    'density': ['poster_bold', 'visual_first', 'cta_clear', 'copy_light', 'festival_clean'],
+    'brand_visibility': ['brand_world_subtle', 'logo_as_signature', 'dual_logo_balanced', 'brand_system_visible'],
+    'visual_mode': [
+        'poster_device_led', 'grounded_abstract', 'lifestyle_generated_context',
+        'festival_symbolic', 'festival_lifestyle', 'invitation_metaphor',
+        'truth_anchor_supporting', 'typography_integrated', 'abstract_environment_grounded',
+        'human_experience_led', 'route_mechanic_led', 'style_reference_inspired',
+    ],
+}
+
+
+def _extend_lever_registry() -> None:
+    for key, values in EXTRA_LEVER_REGISTRY.items():
+        if key not in LEVER_REGISTRY:
+            LEVER_REGISTRY[key] = []
+        seen = set(LEVER_REGISTRY[key])
+        for value in values:
+            if value not in seen:
+                LEVER_REGISTRY[key].append(value)
+                seen.add(value)
+
+
+_extend_lever_registry()
+
 LEVER_COMPATIBILITY = {'pricing_ad': {'recommended': {'layout_geometry': ['bold_offer_centerpiece', 'split_grid', 'card_stack'],
                                 'text_architecture': ['hook_first', 'proposition_first', 'proof_second'],
                                 'hero_presentation': ['subtle_architecture_presence',
@@ -399,6 +499,73 @@ RECIPES = {'premium_price_anchor_ad_v1': {'recipe_id': 'premium_price_anchor_ad_
                                                  'visual_mode': 'graphic_led'},
                                    'required_inputs': ['verified_places', 'project_name'],
                                    'avoid': ['exact map visual', 'unverified distance claims']}}
+
+RECIPES.update({
+    'building_type_collision_poster_v1': {
+        'recipe_id': 'building_type_collision_poster_v1',
+        'name': 'Building Type Collision Poster',
+        'content_jobs': ['project_launch', 'site_visit', 'lifestyle_post'],
+        'lever_set': {'style_family': 'architectural_type_collision', 'hero_presentation': 'architectural_poster_object', 'layout_geometry': 'type_collision_stack', 'graphic_layer': ['typographic_mask', 'type_cut_through', 'building_shadow_depth'], 'type_voice': 'high_impact_editorial', 'text_architecture': 'type_as_visual_object', 'mood_mode': 'social_campaign_energy', 'density': 'poster_bold', 'brand_visibility': 'visible_brand_led', 'visual_mode': 'poster_device_led'},
+        'required_inputs': ['project_name', 'building_or_architecture_asset'],
+        'avoid': ['brochure layout', 'building-plus-text block', 'altered architecture'],
+    },
+    'building_shape_world_poster_v1': {
+        'recipe_id': 'building_shape_world_poster_v1',
+        'name': 'Building Shape World Poster',
+        'content_jobs': ['project_launch', 'site_visit', 'lifestyle_post'],
+        'lever_set': {'style_family': 'shape_led_campaign', 'hero_presentation': 'masked_architecture_object', 'layout_geometry': 'shape_world', 'graphic_layer': ['curved_brand_field', 'soft_shadow', 'luxury_gradient_mesh'], 'type_voice': 'condensed_campaign_sans', 'text_architecture': 'headline_image_interlock', 'mood_mode': 'deep_navy_gold_poster', 'density': 'visual_first', 'brand_visibility': 'visible_brand_led', 'visual_mode': 'poster_device_led'},
+        'required_inputs': ['project_name', 'building_or_architecture_asset'],
+        'avoid': ['literal invented scenery', 'cheap geometric blocks', 'fake facade signage'],
+    },
+    'site_visit_lifestyle_invite_v1': {
+        'recipe_id': 'site_visit_lifestyle_invite_v1',
+        'name': 'Site Visit Lifestyle Invite',
+        'content_jobs': ['site_visit'],
+        'lever_set': {'style_family': 'lifestyle_invite_warm', 'hero_presentation': 'human_arrival_scene', 'layout_geometry': 'lifestyle_pathway_scene', 'graphic_layer': ['township_path_cue', 'soft_arrival_glow', 'floating_cta_tab'], 'type_voice': 'warm_lifestyle_sans', 'text_architecture': 'lifestyle_hook_first', 'mood_mode': 'golden_hour_approachable', 'density': 'cta_clear', 'brand_visibility': 'elegant_signature', 'visual_mode': 'lifestyle_generated_context'},
+        'required_inputs': ['project_name', 'site_visit_cta'],
+        'avoid': ['facade-only hero', 'actual customer/testimonial implication', 'unsupported exact amenities'],
+    },
+    'site_visit_abstract_invitation_v1': {
+        'recipe_id': 'site_visit_abstract_invitation_v1',
+        'name': 'Site Visit Abstract Invitation',
+        'content_jobs': ['site_visit'],
+        'lever_set': {'style_family': 'abstract_invitation', 'hero_presentation': 'invitation_card_hero', 'layout_geometry': 'invitation_card_layers', 'graphic_layer': ['invitation_tabs', 'appointment_marker', 'matte_card_layers'], 'type_voice': 'invitation_serif_sans', 'text_architecture': 'cta_as_appointment_tab', 'mood_mode': 'calm_private_invitation', 'density': 'copy_light', 'brand_visibility': 'elegant_signature', 'visual_mode': 'invitation_metaphor'},
+        'required_inputs': ['project_name', 'cta'],
+        'avoid': ['literal map labels', 'fake directions', 'magazine-spread fallback'],
+    },
+    'festival_symbolic_premium_v1': {
+        'recipe_id': 'festival_symbolic_premium_v1',
+        'name': 'Festival Symbolic Premium',
+        'content_jobs': ['festive_greeting'],
+        'lever_set': {'style_family': 'festival_symbolic_luxury', 'hero_presentation': 'symbolic_festival_centerpiece', 'layout_geometry': 'festival_symbolic_center', 'graphic_layer': ['diya_light', 'rangoli_linework', 'glow_field'], 'type_voice': 'festive_refined_serif', 'text_architecture': 'festival_greeting_first', 'mood_mode': 'festival_glow_premium', 'density': 'festival_clean', 'brand_visibility': 'logo_as_signature', 'visual_mode': 'festival_symbolic'},
+        'required_inputs': ['festival_name', 'brand_or_project_name'],
+        'avoid': ['fake festival event', 'unsupported offer', 'building-sticker fallback'],
+    },
+    'festival_lifestyle_home_v1': {
+        'recipe_id': 'festival_lifestyle_home_v1',
+        'name': 'Festival Lifestyle Home Moment',
+        'content_jobs': ['festive_greeting'],
+        'lever_set': {'style_family': 'festival_lifestyle_warmth', 'hero_presentation': 'lifestyle_scene_hero', 'layout_geometry': 'community_moment_frame', 'graphic_layer': ['lantern_glow', 'festival_motif', 'bokeh_depth'], 'type_voice': 'warm_lifestyle_sans', 'text_architecture': 'festival_greeting_first', 'mood_mode': 'festive_home_warmth', 'density': 'festival_clean', 'brand_visibility': 'logo_as_signature', 'visual_mode': 'festival_lifestyle'},
+        'required_inputs': ['festival_name', 'brand_or_project_name'],
+        'avoid': ['actual customer implication', 'fake project-hosted event', 'overcrowded festive scene'],
+    },
+    'grounded_abstract_signal_v1': {
+        'recipe_id': 'grounded_abstract_signal_v1',
+        'name': 'Grounded Abstract Signal',
+        'content_jobs': ['project_launch', 'site_visit', 'location_advantage', 'educational_buyer_guide'],
+        'lever_set': {'style_family': 'grounded_symbolic', 'hero_presentation': 'abstract_destination_marker', 'layout_geometry': 'abstract_collage_field', 'graphic_layer': ['destination_marker', 'luxury_gradient_mesh', 'symbolic_light_trail'], 'type_voice': 'poster_display_type', 'text_architecture': 'visual_metaphor_first', 'mood_mode': 'symbolic_luxury_light', 'density': 'visual_first', 'brand_visibility': 'brand_world_subtle', 'visual_mode': 'grounded_abstract'},
+        'required_inputs': ['project_or_brand_name', 'message'],
+        'avoid': ['false factual feature', 'unverified view', 'fake location proof'],
+    },
+    'proof_claim_clean_poster_v1': {
+        'recipe_id': 'proof_claim_clean_poster_v1',
+        'name': 'Proof Claim Clean Poster',
+        'content_jobs': ['pricing_ad', 'location_advantage', 'construction_update'],
+        'lever_set': {'style_family': 'swiss_grid_premium', 'hero_presentation': 'proposition_box', 'layout_geometry': 'split_grid', 'graphic_layer': ['divider_lines', 'caption_grid', 'geometric_blocks'], 'type_voice': 'builder_readable', 'text_architecture': 'proof_second', 'mood_mode': 'crisp_daylight', 'density': 'medium', 'brand_visibility': 'visible_brand_led', 'visual_mode': 'graphic_led'},
+        'required_inputs': ['verified_claims'],
+        'avoid': ['unverified pricing', 'invented milestones', 'too many badges'],
+    },
+})
 
 VISUAL_TEMPLATES = {'project_launch.editorial_catalog.tower_hero.magazine_spread.v1': {'template_id': 'project_launch.editorial_catalog.tower_hero.magazine_spread.v1',
                                                                     'template_key': 'project_launch.editorial_catalog.tower_hero.magazine_spread.v1',
@@ -1251,6 +1418,14 @@ VARIANT_LEVER_PROFILES = [{'variation_label': 'Warm Editorial Launch',
                       'type_voice': 'modern_sans'},
   'copy_angle': 'calm premium living and refined design'}]
 
+VARIANT_LEVER_PROFILES.extend([
+    {'variation_label': 'Poster Device Bold', 'variation_axis': 'creative_route', 'lever_overrides': {'style_family': 'social_poster_campaign', 'layout_geometry': 'depth_layered_poster', 'graphic_layer': ['large_abstract_shape', 'typographic_mask', 'floating_cta_tab'], 'type_voice': 'high_impact_editorial', 'text_architecture': 'type_as_visual_object', 'mood_mode': 'social_campaign_energy', 'density': 'poster_bold', 'brand_visibility': 'visible_brand_led', 'visual_mode': 'poster_device_led'}, 'copy_angle': 'scroll-stopping campaign hook'},
+    {'variation_label': 'Private Invitation System', 'variation_axis': 'creative_route', 'lever_overrides': {'style_family': 'abstract_invitation', 'hero_presentation': 'invitation_card_hero', 'layout_geometry': 'invitation_card_layers', 'graphic_layer': ['invitation_tabs', 'appointment_marker', 'matte_card_layers'], 'type_voice': 'invitation_serif_sans', 'text_architecture': 'cta_as_appointment_tab', 'mood_mode': 'calm_private_invitation', 'density': 'copy_light', 'brand_visibility': 'elegant_signature', 'visual_mode': 'invitation_metaphor'}, 'copy_angle': 'private appointment and action'},
+    {'variation_label': 'Lifestyle Human Warmth', 'variation_axis': 'creative_route', 'lever_overrides': {'style_family': 'lifestyle_invite_warm', 'hero_presentation': 'human_arrival_scene', 'layout_geometry': 'lifestyle_pathway_scene', 'graphic_layer': ['township_path_cue', 'soft_arrival_glow', 'floating_cta_tab'], 'type_voice': 'warm_lifestyle_sans', 'text_architecture': 'lifestyle_hook_first', 'mood_mode': 'golden_hour_approachable', 'density': 'cta_clear', 'brand_visibility': 'elegant_signature', 'visual_mode': 'human_experience_led'}, 'copy_angle': 'warm lifestyle invitation'},
+    {'variation_label': 'Festival Symbolic Premium', 'variation_axis': 'creative_route', 'lever_overrides': {'style_family': 'festival_symbolic_luxury', 'hero_presentation': 'symbolic_festival_centerpiece', 'layout_geometry': 'festival_symbolic_center', 'graphic_layer': ['diya_light', 'rangoli_linework', 'glow_field'], 'type_voice': 'festive_refined_serif', 'text_architecture': 'festival_greeting_first', 'mood_mode': 'festival_glow_premium', 'density': 'festival_clean', 'brand_visibility': 'logo_as_signature', 'visual_mode': 'festival_symbolic'}, 'copy_angle': 'premium festive greeting'},
+    {'variation_label': 'Grounded Abstract Signal', 'variation_axis': 'creative_route', 'lever_overrides': {'style_family': 'grounded_symbolic', 'hero_presentation': 'abstract_destination_marker', 'layout_geometry': 'abstract_collage_field', 'graphic_layer': ['destination_marker', 'luxury_gradient_mesh', 'symbolic_light_trail'], 'type_voice': 'poster_display_type', 'text_architecture': 'visual_metaphor_first', 'mood_mode': 'symbolic_luxury_light', 'density': 'visual_first', 'brand_visibility': 'brand_world_subtle', 'visual_mode': 'grounded_abstract'}, 'copy_angle': 'symbolic grounded message'},
+])
+
 CAROUSEL_ARCHETYPES = {'premium_editorial_story': {'style_family': 'editorial_catalog',
                              'hero_presentation': 'facade_crop',
                              'layout_geometry': 'magazine_spread',
@@ -1360,6 +1535,50 @@ PROMPT_FACING_LEVER_LANGUAGE = {'campaign_adaptive_editorial': 'premium editoria
  'elegant_signature': 'subtle elegant brand signature',
  'campaign_dominant': 'campaign-led brand presence',
  'whisper': 'minimal quiet brand presence'}
+
+PROMPT_FACING_LEVER_LANGUAGE.update({
+    'architectural_type_collision': 'architecture-led poster style where truthful building imagery interacts with oversized typography',
+    'shape_led_campaign': 'shape-led campaign poster using one strong abstract brand form as the visual engine',
+    'cinematic_rise': 'cinematic vertical-rise campaign mood with height, atmosphere, and aspirational depth',
+    'lifestyle_invite_warm': 'warm lifestyle-led invitation style with people, arrival, and clear site-visit action',
+    'abstract_invitation': 'abstract private-invitation style using cards, route cues, access/arrival metaphors, and CTA-as-appointment design',
+    'festival_symbolic_luxury': 'premium symbolic festival style with respectful motifs, light, and cultural atmosphere',
+    'festival_lifestyle_warmth': 'festival lifestyle style led by family/community warmth and home emotion',
+    'grounded_symbolic': 'grounded symbolic campaign style that uses metaphor without implying unsupported facts',
+    'type_collision_stack': 'type-image collision poster stack',
+    'shape_world': 'abstract shape-led poster world',
+    'cinematic_vertical_rise': 'cinematic vertical-rise composition',
+    'invitation_card_layers': 'layered private-invitation card composition',
+    'arrival_path_composition': 'abstract arrival/path composition',
+    'threshold_frame': 'threshold or doorway-like frame',
+    'lifestyle_pathway_scene': 'human lifestyle pathway scene',
+    'festival_symbolic_center': 'centered symbolic festival motif composition',
+    'route_lines': 'abstract route/path linework',
+    'appointment_marker': 'appointment-marker CTA graphic',
+    'destination_marker': 'abstract destination marker',
+    'typographic_mask': 'typographic masking and type-image interaction',
+    'glow_field': 'soft premium light/glow field',
+    'rangoli_linework': 'rangoli-inspired geometric linework',
+    'kolam_linework': 'kolam-inspired geometric linework',
+    'diya_light': 'symbolic diya light',
+    'luxury_gradient_mesh': 'premium gradient mesh atmosphere',
+    'matte_card_layers': 'matte premium card layering',
+    'township_path_cue': 'subtle township path/arrival cue',
+    'golden_hour_approachable': 'warm golden-hour approachable premium mood',
+    'warm_township_evening': 'warm township evening lifestyle mood',
+    'festival_glow_premium': 'premium festive glow',
+    'calm_private_invitation': 'calm private-invitation mood',
+    'social_campaign_energy': 'social-first campaign energy',
+    'lush_modern_residential': 'lush modern residential lifestyle atmosphere',
+    'cream_sage_editorial': 'cream-and-sage soft editorial palette mood',
+    'poster_device_led': 'poster-device-led visual construction',
+    'grounded_abstract': 'grounded abstract treatment',
+    'lifestyle_generated_context': 'generated lifestyle context grounded by project facts',
+    'festival_symbolic': 'symbolic festival treatment',
+    'invitation_metaphor': 'invitation/access/arrival metaphor treatment',
+    'truth_anchor_supporting': 'supplied truth asset used as supporting credibility rather than always as hero',
+    'route_mechanic_led': 'route mechanic leads the final composition',
+})
 
 def normalize_format(value: str) -> str:
     return {"portrait": "4:5", "square": "1:1", "story": "9:16", "landscape": "16:9"}.get(value, value or "4:5")

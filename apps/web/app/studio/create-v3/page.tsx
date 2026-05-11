@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { BrandAssetRecord, FestivalRecord, PostTypeRecord, ProjectRecord } from "@image-lab/contracts";
 import {
   generateCreativeV3Async,
+  getDeliverable,
   getCreativeV3AsyncStatus,
   getCreativeV3BrandPresets,
   getCreativeV3VisualTemplates,
@@ -25,6 +26,15 @@ import { useStudio } from "../studio-context";
 type CopyMode = "auto" | "manual";
 type TextTreatment = "render_text" | "reserve_space";
 type CreativeMode = NonNullable<CreativeV3CompilePayload["creativeMode"]>;
+type CreateV3PaletteMode = "auto" | "brand" | "preset" | "curated" | "custom";
+type CreateV3PaletteStrength = "soft" | "hard";
+type CreateV3PromptFormat = "legacy" | "structured_v2";
+type CreateV3CuratedPalette = {
+  id: string;
+  name: string;
+  mood: string;
+  colors: string[];
+};
 type CreateV3SpeedTone = "green" | "amber" | "orange" | "red";
 type V3Variant = CreativeV3CompileResponse["result"]["variants"][number];
 type RefModalKind = "templates" | "all" | "exteriors" | "interiors" | "amenities" | "location" | "generated";
@@ -45,6 +55,7 @@ const formatOptions = [
 const createV3RenderPresetValues: CreativeV3RenderPreset[] = ["v1_low", "v1_high", "v2_low", "v2_medium", "v2_high"];
 const showCreateV3RenderPresetSelector = process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_CREATE_V3_SHOW_RENDER_PRESET === "1";
 const createV3DefaultRenderPreset = parseCreateV3RenderPreset(process.env.NEXT_PUBLIC_CREATE_V3_DEFAULT_RENDER_PRESET) ?? "v2_high";
+const createV3PromptFormat = parseCreateV3PromptFormat(process.env.NEXT_PUBLIC_CREATE_V3_PROMPT_FORMAT) ?? "structured_v2";
 const createV3RenderEngineOptions: Array<{
   group: string;
   options: Array<{
@@ -72,6 +83,66 @@ const createV3RenderEngineOptions: Array<{
 ];
 
 const contactOptions = ["phone", "email", "website", "whatsapp"] as const;
+const createV3PaletteModes: Array<{ value: CreateV3PaletteMode; label: string }> = [
+  { value: "auto", label: "Auto" },
+  { value: "brand", label: "Brand" },
+  { value: "preset", label: "Preset" },
+  { value: "curated", label: "Curated" },
+  { value: "custom", label: "Custom" }
+];
+const createV3DefaultCustomPalette = ["#111111", "#FFFFFF", "#102A4C", "#D6AE55"];
+const createV3CuratedPalettes: CreateV3CuratedPalette[] = [
+  { id: "editorial-ivory-navy", name: "Editorial Ivory Navy", mood: "Luxury real estate", colors: ["#F7F1E8", "#102A4C", "#D6AE55", "#111111", "#FFFFFF"] },
+  { id: "sandstone-olive", name: "Sandstone Olive", mood: "Organic premium", colors: ["#F4E7D3", "#8A8F49", "#3E4635", "#C6A15B", "#FFFFFF"] },
+  { id: "charcoal-cream-gold", name: "Charcoal Cream Gold", mood: "Classic premium", colors: ["#171717", "#F8F1E7", "#C9A35A", "#5E5347", "#FFFFFF"] },
+  { id: "sage-marble", name: "Sage Marble", mood: "Calm interiors", colors: ["#F5F4EE", "#A8B7A2", "#526B5B", "#D7CEC2", "#1E2A22"] },
+  { id: "cobalt-sand", name: "Cobalt Sand", mood: "Modern contrast", colors: ["#F1E6D2", "#123C69", "#2D7DD2", "#D9A441", "#0B172A"] },
+  { id: "terracotta-linen", name: "Terracotta Linen", mood: "Warm residential", colors: ["#F8EFE4", "#B8613B", "#7A3F2B", "#D8B28A", "#2D2019"] },
+  { id: "mist-blue-stone", name: "Mist Blue Stone", mood: "Clean architecture", colors: ["#EEF3F6", "#AFC5D3", "#456174", "#D3B88C", "#17212B"] },
+  { id: "forest-brass", name: "Forest Brass", mood: "Heritage luxury", colors: ["#12251C", "#2F5D45", "#BFA46A", "#F4EBDD", "#0B0F0C"] },
+  { id: "warm-mono", name: "Warm Mono", mood: "Minimal editorial", colors: ["#F7F2EB", "#D8D0C6", "#8F867B", "#3E3934", "#141210"] },
+  { id: "sunlit-concrete", name: "Sunlit Concrete", mood: "Daylight tower", colors: ["#F4F1EA", "#CFC7B8", "#9DA6A8", "#E0B15B", "#263238"] },
+  { id: "indigo-copper", name: "Indigo Copper", mood: "Evening premium", colors: ["#101A3A", "#293B78", "#C87941", "#F0E6DA", "#0D0D12"] },
+  { id: "olive-ink", name: "Olive Ink", mood: "Quiet confidence", colors: ["#EEF0E7", "#7B8544", "#2B3426", "#111827", "#BFA36B"] },
+  { id: "pearl-emerald", name: "Pearl Emerald", mood: "Upscale fresh", colors: ["#FAF7F0", "#0F5B4A", "#71A894", "#D6B56D", "#10201C"] },
+  { id: "desert-dusk", name: "Desert Dusk", mood: "Warm cinematic", colors: ["#F6E2C4", "#D28A5C", "#8F4C45", "#3B2A35", "#15121A"] },
+  { id: "graphite-sky", name: "Graphite Sky", mood: "Urban clean", colors: ["#F4F7F8", "#B8D7EA", "#556B7B", "#222831", "#FFFFFF"] },
+  { id: "champagne-plum", name: "Champagne Plum", mood: "Boutique luxury", colors: ["#F5E7D3", "#B99B6B", "#5A2A43", "#2C1824", "#FFFDF8"] },
+  { id: "clay-sage", name: "Clay Sage", mood: "Human and warm", colors: ["#F2E8DC", "#C9825B", "#9AA17A", "#58614A", "#27251F"] },
+  { id: "midnight-azure", name: "Midnight Azure", mood: "Sharp digital", colors: ["#070B1D", "#153E75", "#2C7BE5", "#E6EEF8", "#FFFFFF"] },
+  { id: "cream-burgundy", name: "Cream Burgundy", mood: "Prestige launch", colors: ["#FBF2E6", "#7A1E2C", "#C2A261", "#2A1C1F", "#FFFFFF"] },
+  { id: "stone-teal", name: "Stone Teal", mood: "Balanced modern", colors: ["#E8E3DA", "#6D7D7A", "#006D77", "#83C5BE", "#1C2B2D"] },
+  { id: "butter-charcoal", name: "Butter Charcoal", mood: "Soft premium", colors: ["#FFF2B8", "#F6E8C8", "#343434", "#909090", "#FFFFFF"] },
+  { id: "rosewood-cream", name: "Rosewood Cream", mood: "Warm affluent", colors: ["#FFF6EC", "#8A3A3A", "#B56B5E", "#D8B58A", "#251817"] },
+  { id: "ivory-cobalt-red", name: "Ivory Cobalt Red", mood: "Bold modern", colors: ["#F8F4EA", "#0047AB", "#C1121F", "#0B1320", "#FFFFFF"] },
+  { id: "sage-citrus", name: "Sage Citrus", mood: "Fresh lifestyle", colors: ["#F3F1E8", "#9CAF88", "#D6D84F", "#4F6F52", "#1B251C"] },
+  { id: "black-tan", name: "Black Tan", mood: "Premium monochrome", colors: ["#0E0E0E", "#C8A06A", "#F1E5D0", "#7A6A57", "#FFFFFF"] },
+  { id: "ocean-sand", name: "Ocean Sand", mood: "Coastal calm", colors: ["#EFF7F8", "#1B4965", "#5FA8D3", "#DCC7AA", "#112B3C"] },
+  { id: "muted-rainbow", name: "Muted Rainbow", mood: "Festive refined", colors: ["#D95D39", "#E9C46A", "#2A9D8F", "#457B9D", "#6D597A"] },
+  { id: "heritage-blue", name: "Heritage Blue", mood: "Institutional trust", colors: ["#F5F1E6", "#113B5D", "#2F5F8F", "#C9A66B", "#0C1D2B"] },
+  { id: "moss-cream", name: "Moss Cream", mood: "Nature-led", colors: ["#F8F5EC", "#6B7D47", "#3A4A2F", "#CBB994", "#FFFFFF"] },
+  { id: "soft-lilac-stone", name: "Soft Lilac Stone", mood: "Quiet lifestyle", colors: ["#F4F0F5", "#B7A8C7", "#7A6F8F", "#D5CEC4", "#2D2A35"] },
+  { id: "crimson-graphite", name: "Crimson Graphite", mood: "High impact", colors: ["#121212", "#C41E3A", "#F2E8D8", "#6B7280", "#FFFFFF"] },
+  { id: "golden-hour", name: "Golden Hour", mood: "Warm skyline", colors: ["#FFF0D4", "#F2B84B", "#C47A2C", "#344E41", "#101820"] },
+  { id: "aqua-ink", name: "Aqua Ink", mood: "Fresh digital", colors: ["#EAF7F7", "#00A6A6", "#05668D", "#172A3A", "#FFFFFF"] },
+  { id: "greige-bronze", name: "Greige Bronze", mood: "Luxury neutral", colors: ["#E7DED2", "#B8A38B", "#7C634E", "#B07845", "#231F1B"] },
+  { id: "olive-blush", name: "Olive Blush", mood: "Soft residential", colors: ["#F8ECE8", "#D8A7A7", "#7F8A5F", "#4D5539", "#2B211F"] },
+  { id: "blueprint", name: "Blueprint", mood: "Architecture proof", colors: ["#F4F7FB", "#0A2540", "#2F80ED", "#98A6B3", "#FFFFFF"] },
+  { id: "walnut-cream", name: "Walnut Cream", mood: "Interior premium", colors: ["#FBF2E8", "#6B4226", "#A66A3F", "#D7B98E", "#1C1410"] },
+  { id: "soft-brutalist", name: "Soft Brutalist", mood: "Graphic modern", colors: ["#F2F0EA", "#D9D4C7", "#1C1C1C", "#FF6B35", "#3A86FF"] },
+  { id: "jade-champagne", name: "Jade Champagne", mood: "Polished calm", colors: ["#F9F4E8", "#1B7F6B", "#83B8A2", "#D8B76A", "#10221E"] },
+  { id: "powder-navy", name: "Powder Navy", mood: "Clean premium", colors: ["#EEF6FB", "#9BC4E2", "#14365D", "#E7C77D", "#FFFFFF"] },
+  { id: "brick-olive", name: "Brick Olive", mood: "Grounded urban", colors: ["#F3E9DD", "#A54E37", "#6F7D45", "#2F3B2F", "#171717"] },
+  { id: "peach-charcoal", name: "Peach Charcoal", mood: "Friendly premium", colors: ["#FFE6D6", "#FFB089", "#2F2F32", "#8A8F98", "#FFFFFF"] },
+  { id: "deep-green-ivory", name: "Deep Green Ivory", mood: "Evergreen luxury", colors: ["#F7F3E8", "#0B3D2E", "#2E6F55", "#BFA56A", "#FFFFFF"] },
+  { id: "smoke-amber", name: "Smoke Amber", mood: "Moody refined", colors: ["#1C1F23", "#596168", "#D39C42", "#F1E7D0", "#FFFFFF"] },
+  { id: "white-space-red", name: "White Space Red", mood: "Minimal punch", colors: ["#FFFFFF", "#F4F4F2", "#111111", "#D72638", "#6B7280"] },
+  { id: "lavender-sage", name: "Lavender Sage", mood: "Soft aspirational", colors: ["#F6F1FA", "#B9A7D3", "#A1B99A", "#596B52", "#2A2630"] },
+  { id: "terrace-night", name: "Terrace Night", mood: "Night luxury", colors: ["#08111F", "#183B56", "#C79B45", "#EADDC8", "#FFFFFF"] },
+  { id: "marble-rust", name: "Marble Rust", mood: "Premium earthy", colors: ["#F7F4EF", "#C8C0B3", "#A24E2F", "#4A3A32", "#171412"] },
+  { id: "mint-graphite", name: "Mint Graphite", mood: "Contemporary fresh", colors: ["#E8F6F0", "#7BDCB5", "#2B3439", "#6D7A80", "#FFFFFF"] },
+  { id: "royal-cream", name: "Royal Cream", mood: "Formal premium", colors: ["#F8EDD8", "#1A2E5A", "#384E8A", "#C8A45D", "#0B1020"] }
+];
 const targetAudienceOptions = [
   "Homebuyers",
   "Investors",
@@ -132,6 +203,7 @@ const referenceFilterOptions: Array<{ value: RefModalKind; label: string; icon: 
 export default function CreateV3Page() {
   const searchParams = useSearchParams();
   const urlGenerationSessionId = searchParams.get("sessionId");
+  const urlDeliverableId = searchParams.get("deliverableId");
   const {
     loading: studioLoading,
     sessionToken,
@@ -139,6 +211,7 @@ export default function CreateV3Page() {
     activeBrandId,
     activeAssets,
     activeBrand,
+    setActiveBrandId,
     setMessage
   } = useStudio();
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
@@ -146,6 +219,7 @@ export default function CreateV3Page() {
   const [festivals, setFestivals] = useState<FestivalRecord[]>([]);
   const [brandPresets, setBrandPresets] = useState<CreativeV3BrandPreset[]>([]);
   const [visualTemplates, setVisualTemplates] = useState<CreativeV3VisualTemplate[]>([]);
+  const [sourceDeliverableId, setSourceDeliverableId] = useState(urlDeliverableId ?? "");
   const [projectId, setProjectId] = useState("");
   const [postTypeId, setPostTypeId] = useState("");
   const [festivalId, setFestivalId] = useState("");
@@ -162,6 +236,10 @@ export default function CreateV3Page() {
   const [copyMode, setCopyMode] = useState<CopyMode>("auto");
   const [textTreatment, setTextTreatment] = useState<TextTreatment>("render_text");
   const [copyLanguage, setCopyLanguage] = useState("en");
+  const [paletteMode, setPaletteMode] = useState<CreateV3PaletteMode>("auto");
+  const [paletteStrength, setPaletteStrength] = useState<CreateV3PaletteStrength>("soft");
+  const [curatedPaletteId, setCuratedPaletteId] = useState(createV3CuratedPalettes[0]?.id ?? "");
+  const [customPalette, setCustomPalette] = useState<string[]>(createV3DefaultCustomPalette);
   const [headline, setHeadline] = useState("");
   const [subheadline, setSubheadline] = useState("");
   const [cta, setCta] = useState("");
@@ -185,6 +263,7 @@ export default function CreateV3Page() {
   const [refModalKind, setRefModalKind] = useState<RefModalKind>("all");
   const [refModalProjectId, setRefModalProjectId] = useState<string>(projectId || "");
   const [refSearchQuery, setRefSearchQuery] = useState("");
+  const hydratedDeliverableIdRef = useRef<string | null>(null);
   const activeBrandReady = Boolean(
     !studioLoading &&
       sessionToken &&
@@ -217,6 +296,35 @@ export default function CreateV3Page() {
       cancelled = true;
     };
   }, [activeBrandId, activeBrandReady, sessionToken, setMessage]);
+
+  useEffect(() => {
+    if (!sessionToken || !urlDeliverableId || hydratedDeliverableIdRef.current === urlDeliverableId) {
+      return;
+    }
+    let cancelled = false;
+
+    async function loadDeliverable() {
+      const detail = await getDeliverable(sessionToken!, urlDeliverableId!);
+      if (cancelled) return;
+      const deliverable = detail.deliverable;
+      hydratedDeliverableIdRef.current = deliverable.id;
+      setSourceDeliverableId(deliverable.id);
+      if (deliverable.brandId !== activeBrandId) {
+        setActiveBrandId(deliverable.brandId);
+      }
+      setProjectId(deliverable.projectId ?? "");
+      setPostTypeId(deliverable.postTypeId);
+      setVisualTemplateId(deliverable.creativeTemplateId ?? "");
+      setBrief(createV3BriefFromDeliverable(deliverable.title, deliverable.briefText));
+      setCta(deliverable.ctaText ?? "");
+      setFormat(createV3FormatFromDeliverable(deliverable.placementCode, deliverable.contentFormat));
+    }
+
+    void loadDeliverable().catch((error) => setMessage(error instanceof Error ? error.message : "Failed to load post task into Create V3"));
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBrandId, sessionToken, setActiveBrandId, setMessage, urlDeliverableId]);
 
   useEffect(() => {
     if (!activeBrandReady || !sessionToken || !activeBrandId) {
@@ -254,6 +362,10 @@ export default function CreateV3Page() {
   const selectedBrandPreset = useMemo(
     () => eligibleBrandPresets.find((preset) => preset.preset_id === brandPresetId || preset.db_id === brandPresetId) ?? null,
     [brandPresetId, eligibleBrandPresets]
+  );
+  const selectedCuratedPalette = useMemo(
+    () => createV3CuratedPalettes.find((palette) => palette.id === curatedPaletteId) ?? createV3CuratedPalettes[0],
+    [curatedPaletteId]
   );
   useEffect(() => {
     if (brandPresetId && !selectedBrandPreset) {
@@ -428,6 +540,7 @@ export default function CreateV3Page() {
   function buildGeneratePayload(): CreativeV3CompilePayload {
     return {
       brandId: activeBrandId!,
+      deliverableId: sourceDeliverableId || null,
       projectId: projectId || null,
       postTypeId: postTypeId || null,
       brief,
@@ -457,7 +570,14 @@ export default function CreateV3Page() {
       contactItems: contactItems as Array<"phone" | "email" | "website" | "whatsapp">,
       options: {
         generationRunId: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
-        textTreatment
+        prompt_format: createV3PromptFormat,
+        textTreatment,
+        colorPalette: buildCreateV3ColorPaletteOption({
+          mode: paletteMode,
+          strength: paletteStrength,
+          curatedPalette: selectedCuratedPalette,
+          colors: customPalette
+        })
       }
     };
   }
@@ -472,7 +592,11 @@ export default function CreateV3Page() {
     try {
       const job = await generateCreativeV3Async(sessionToken, payload);
       setGenerationSessionId(job.jobId);
-      window.history.replaceState(null, "", `/studio/create-v3?sessionId=${encodeURIComponent(job.jobId)}`);
+      const nextParams = new URLSearchParams({ sessionId: job.jobId });
+      if (payload.deliverableId) {
+        nextParams.set("deliverableId", payload.deliverableId);
+      }
+      window.history.replaceState(null, "", `/studio/create-v3?${nextParams.toString()}`);
       setMessage("Generating V3 images...");
       setGenerationStatus("Compiling prompt and generating images...");
       const status = await pollGenerationJob(sessionToken, job.jobId, setGenerationStatus);
@@ -509,6 +633,7 @@ export default function CreateV3Page() {
 
   function hydrateFromGenerationInput(input?: CreativeV3CompilePayload) {
     if (!input) return;
+    setSourceDeliverableId(input.deliverableId ?? "");
     setProjectId(input.projectId ?? "");
     setPostTypeId(input.postTypeId ?? "");
     setFestivalId(input.festivalId ?? "");
@@ -522,6 +647,11 @@ export default function CreateV3Page() {
     setCopyMode(input.copyMode ?? "auto");
     setTextTreatment(input.options?.textTreatment === "reserve_space" ? "reserve_space" : "render_text");
     setCopyLanguage(input.copyLanguage ?? "en");
+    const hydratedPalette = parseCreateV3ColorPaletteOption(input.options?.colorPalette);
+    setPaletteMode(hydratedPalette.mode);
+    setPaletteStrength(hydratedPalette.strength);
+    setCuratedPaletteId(hydratedPalette.paletteId);
+    setCustomPalette(hydratedPalette.colors);
     setHeadline(input.copy?.headline ?? "");
     setSubheadline(input.copy?.subheadline ?? "");
     setCta(input.copy?.cta ?? "");
@@ -536,6 +666,10 @@ export default function CreateV3Page() {
 
   function toggleContact(item: string) {
     setContactItems((current) => current.includes(item) ? current.filter((value) => value !== item) : [...current, item]);
+  }
+
+  function updateCustomPaletteColor(index: number, value: string) {
+    setCustomPalette((current) => current.map((color, itemIndex) => itemIndex === index ? value : color));
   }
 
   function toggleAdditionalLogo(assetId: string) {
@@ -880,6 +1014,86 @@ export default function CreateV3Page() {
                 value={creativeMode}
               />
             </label>
+            <div className="create-v3-palette-card">
+              <div className="create-v3-palette-card-header">
+                <span>Color palette</span>
+                <div className="create-v3-palette-strength" aria-label="Palette strength">
+                  <button className={paletteStrength === "soft" ? "is-active" : ""} onClick={() => setPaletteStrength("soft")} type="button">Guide</button>
+                  <button className={paletteStrength === "hard" ? "is-active" : ""} onClick={() => setPaletteStrength("hard")} type="button">Lock</button>
+                </div>
+              </div>
+              <div className="create-v3-palette-modes" aria-label="Color palette source">
+                {createV3PaletteModes.map((item) => (
+                  <button
+                    className={paletteMode === item.value ? "is-active" : ""}
+                    key={item.value}
+                    onClick={() => setPaletteMode(item.value)}
+                    type="button"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              {paletteMode === "curated" ? (
+                <div className="create-v3-curated-palette">
+                  <CreateV3Dropdown
+                    onChange={setCuratedPaletteId}
+                    options={createV3CuratedPalettes.map((palette) => ({ value: palette.id, label: palette.name }))}
+                    value={selectedCuratedPalette?.id ?? ""}
+                  />
+                  <div className="create-v3-palette-preview is-curated">
+                    {(selectedCuratedPalette?.colors ?? []).map((color) => (
+                      <span key={color} style={{ backgroundColor: color }} />
+                    ))}
+                    <small>{selectedCuratedPalette?.mood ?? "Curated palette"}</small>
+                  </div>
+                </div>
+              ) : paletteMode === "custom" ? (
+                <div className="create-v3-custom-palette">
+                  {customPalette.map((color, index) => (
+                    <div className="create-v3-palette-color-row" key={`${index}-${color}`}>
+                      <input
+                        aria-label={`Palette color ${index + 1}`}
+                        className="create-v3-palette-color-input"
+                        onChange={(event) => updateCustomPaletteColor(index, event.target.value)}
+                        type="color"
+                        value={normalizeCreateV3HexColor(color) ?? "#111111"}
+                      />
+                      <input
+                        aria-label={`Palette hex ${index + 1}`}
+                        className="create-v3-palette-hex-input"
+                        onChange={(event) => updateCustomPaletteColor(index, event.target.value)}
+                        value={color}
+                      />
+                      <button
+                        aria-label={`Remove palette color ${index + 1}`}
+                        className="create-v3-palette-remove"
+                        disabled={customPalette.length <= 3}
+                        onClick={() => setCustomPalette((current) => current.length > 3 ? current.filter((_, itemIndex) => itemIndex !== index) : current)}
+                        type="button"
+                      >
+                        -
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    className="create-v3-palette-add"
+                    disabled={customPalette.length >= 6}
+                    onClick={() => setCustomPalette((current) => current.length >= 6 ? current : [...current, "#D6AE55"])}
+                    type="button"
+                  >
+                    Add color
+                  </button>
+                </div>
+              ) : (
+                <div className="create-v3-palette-preview">
+                  {getCreateV3PalettePreviewColors(paletteMode, selectedBrandPreset, activeBrand).map((color) => (
+                    <span key={color} style={{ backgroundColor: color }} />
+                  ))}
+                  <small>{getCreateV3PaletteModeLabel(paletteMode)}</small>
+                </div>
+              )}
+            </div>
             <div className="create-v3-advanced-row">
               <span>Copy</span>
               <div className="create-v3-segment">
@@ -1636,6 +1850,102 @@ function parseCreateV3RenderPreset(value: unknown): CreativeV3RenderPreset | nul
     : null;
 }
 
+function parseCreateV3PromptFormat(value: unknown): CreateV3PromptFormat | null {
+  return value === "legacy" || value === "structured_v2" ? value : null;
+}
+
+function normalizeCreateV3HexColor(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  const match = trimmed.match(/^#?([0-9a-fA-F]{6})$/);
+  const hex = match?.[1];
+  return hex ? `#${hex.toUpperCase()}` : null;
+}
+
+function buildCreateV3ColorPaletteOption(params: {
+  mode: CreateV3PaletteMode;
+  strength: CreateV3PaletteStrength;
+  curatedPalette?: CreateV3CuratedPalette | undefined;
+  colors: string[];
+}) {
+  const colors = params.colors.map(normalizeCreateV3HexColor).filter((color): color is string => Boolean(color));
+  const curatedColors = (params.curatedPalette?.colors ?? []).map(normalizeCreateV3HexColor).filter((color): color is string => Boolean(color));
+  return {
+    mode: params.mode,
+    strength: params.strength,
+    paletteId: params.mode === "curated" ? params.curatedPalette?.id ?? null : null,
+    paletteName: params.mode === "curated" ? params.curatedPalette?.name ?? null : null,
+    colors: params.mode === "custom" ? colors.slice(0, 6) : params.mode === "curated" ? curatedColors.slice(0, 6) : []
+  };
+}
+
+function parseCreateV3ColorPaletteOption(value: unknown): {
+  mode: CreateV3PaletteMode;
+  strength: CreateV3PaletteStrength;
+  paletteId: string;
+  colors: string[];
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { mode: "auto", strength: "soft", paletteId: createV3CuratedPalettes[0]?.id ?? "", colors: createV3DefaultCustomPalette };
+  }
+  const record = value as Record<string, unknown>;
+  const mode = createV3PaletteModes.some((item) => item.value === record.mode)
+    ? record.mode as CreateV3PaletteMode
+    : "auto";
+  const strength = record.strength === "hard" ? "hard" : "soft";
+  const paletteId = typeof record.paletteId === "string" && createV3CuratedPalettes.some((palette) => palette.id === record.paletteId)
+    ? record.paletteId
+    : createV3CuratedPalettes[0]?.id ?? "";
+  const colors = Array.isArray(record.colors)
+    ? record.colors.map(normalizeCreateV3HexColor).filter((color): color is string => Boolean(color)).slice(0, 6)
+    : [];
+  return {
+    mode,
+    strength,
+    paletteId,
+    colors: colors.length >= 3 ? colors : createV3DefaultCustomPalette
+  };
+}
+
+function getCreateV3PalettePreviewColors(
+  mode: CreateV3PaletteMode,
+  preset: CreativeV3BrandPreset | null,
+  brand: unknown
+) {
+  const brandRecord = brand && typeof brand === "object" && !Array.isArray(brand) ? brand as Record<string, unknown> : {};
+  if (mode === "preset") {
+    return collectCreateV3PaletteColors((preset?.preset_json as Record<string, unknown> | undefined)?.palette).slice(0, 5);
+  }
+  if (mode === "brand") {
+    return collectCreateV3PaletteColors(brandRecord.palette ?? brandRecord.colorPalette ?? brandRecord.colors).slice(0, 5);
+  }
+  if (mode === "curated") {
+    return createV3CuratedPalettes[0]?.colors ?? [];
+  }
+  return ["#111111", "#FFFFFF", "#D6AE55"];
+}
+
+function collectCreateV3PaletteColors(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map(normalizeCreateV3HexColor).filter((color): color is string => Boolean(color));
+  }
+  if (!value || typeof value !== "object") return [];
+  return Object.values(value as Record<string, unknown>).flatMap((item) => {
+    if (Array.isArray(item)) return collectCreateV3PaletteColors(item);
+    if (item && typeof item === "object") return collectCreateV3PaletteColors(item);
+    const color = normalizeCreateV3HexColor(item);
+    return color ? [color] : [];
+  });
+}
+
+function getCreateV3PaletteModeLabel(mode: CreateV3PaletteMode) {
+  if (mode === "brand") return "Uses brand colors";
+  if (mode === "preset") return "Uses preset colors";
+  if (mode === "curated") return "Uses curated colors";
+  if (mode === "custom") return "Uses selected colors";
+  return "AI chooses from brand context";
+}
+
 function summarizePreset(preset: CreativeV3BrandPreset) {
   const json = preset.preset_json as Record<string, any>;
   const parts: string[] = [];
@@ -1828,6 +2138,25 @@ function isReplaceableBrief(value: string) {
   if (!value) return true;
   if (defaultBriefValues.has(value)) return true;
   return /^create a premium .+ greeting that feels respectful, elegant, (?:occasion-led, )?and brand-safe\.$/i.test(value);
+}
+
+function createV3BriefFromDeliverable(title: string, briefText?: string | null) {
+  const brief = briefText?.trim();
+  if (brief && brief.length >= 10) {
+    return brief;
+  }
+  const trimmedTitle = title.trim();
+  if (trimmedTitle.length >= 10) {
+    return trimmedTitle;
+  }
+  return "Create a premium real-estate post from this planned post task.";
+}
+
+function createV3FormatFromDeliverable(placementCode?: string | null, contentFormat?: string | null) {
+  if (placementCode === "instagram-story" || contentFormat === "story") {
+    return "story";
+  }
+  return "portrait";
 }
 
 function wait(ms: number) {

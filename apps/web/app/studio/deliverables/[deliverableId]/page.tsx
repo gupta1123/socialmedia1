@@ -478,7 +478,7 @@ export default function DeliverableDetailPage() {
               <div className="empty-state">
                 <strong>No post versions yet</strong>
                 <p>Use Create to generate directions and finals, then promote a final into a post version.</p>
-                <Link className="button button-primary" href={`/studio/create?deliverableId=${deliverable.id}`}>
+                <Link className="button button-primary" href={`/studio/create-v3?deliverableId=${deliverable.id}`}>
                   Start creation
                 </Link>
               </div>
@@ -863,27 +863,27 @@ function getNextStepConfig(
       return {
         title: "Create post options",
         description: "This post task is ready to move into creation. Make a few options from the saved brief and context.",
-        primary: { kind: "link", label: "Create options", href: `/studio/create?deliverableId=${deliverableId}` }
+        primary: { kind: "link", label: "Create options", href: `/studio/create-v3?deliverableId=${deliverableId}` }
       };
     case "generating":
       return {
         title: "Check option progress",
         description: "Options are already being created for this post task. Open Create to watch them arrive.",
-        primary: { kind: "link", label: "Open create", href: `/studio/create?deliverableId=${deliverableId}` }
+        primary: { kind: "link", label: "Open create", href: `/studio/create-v3?deliverableId=${deliverableId}` }
       };
     case "review":
       return {
         title: "Review and choose an option",
         description: "This post task has options waiting for a decision before it can move to scheduling.",
         primary: { kind: "link", label: "Open review", href: `/studio/review?deliverableId=${deliverableId}` },
-        secondary: { kind: "link", label: "Make another option", href: `/studio/create?deliverableId=${deliverableId}` }
+        secondary: { kind: "link", label: "Make another option", href: `/studio/create-v3?deliverableId=${deliverableId}` }
       };
     case "approved":
       return {
         title: "Schedule this approved post",
         description: "The creative is approved. The next move is to assign its posting time and move it into the calendar.",
         primary: { kind: "button", label: "Schedule post", onClick: () => openEditor("schedule") },
-        secondary: { kind: "link", label: "Make another option", href: `/studio/create?deliverableId=${deliverableId}` }
+        secondary: { kind: "link", label: "Make another option", href: `/studio/create-v3?deliverableId=${deliverableId}` }
       };
     case "scheduled":
       return {
@@ -897,26 +897,26 @@ function getNextStepConfig(
         title: "Track the published deliverable",
         description: "This post has already moved past approval and scheduling. Use the calendar and publication records to verify where it went.",
         primary: { kind: "link", label: "Open calendar", href: "/studio/calendar" },
-        secondary: { kind: "link", label: "Make another option", href: `/studio/create?deliverableId=${deliverableId}` }
+        secondary: { kind: "link", label: "Make another option", href: `/studio/create-v3?deliverableId=${deliverableId}` }
       };
     case "archived":
       return {
         title: "Archived record",
         description: "This deliverable is no longer active. Reopen creation only if you need a fresh variation or replacement.",
-        primary: { kind: "link", label: "Make another option", href: `/studio/create?deliverableId=${deliverableId}` }
+        primary: { kind: "link", label: "Make another option", href: `/studio/create-v3?deliverableId=${deliverableId}` }
       };
     case "blocked":
       return {
         title: "Unblock the deliverable",
         description: "Something is preventing this deliverable from moving forward. Edit the planning details or brief, then generate again.",
         primary: { kind: "button", label: "Edit deliverable", onClick: () => openEditor() },
-        secondary: { kind: "link", label: "Make another option", href: `/studio/create?deliverableId=${deliverableId}` }
+        secondary: { kind: "link", label: "Make another option", href: `/studio/create-v3?deliverableId=${deliverableId}` }
       };
     default:
       return {
         title: "Continue the workflow",
         description: "Use the current deliverable state to decide whether to create, review, schedule, or publish next.",
-        primary: { kind: "link", label: "Create options", href: `/studio/create?deliverableId=${deliverableId}` }
+        primary: { kind: "link", label: "Create options", href: `/studio/create-v3?deliverableId=${deliverableId}` }
       };
   }
 }

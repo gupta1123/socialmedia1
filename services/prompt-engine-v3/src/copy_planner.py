@@ -88,6 +88,11 @@ def _headline(intent: CreativeIntent, strategy: CreativeStrategy, concept: Varia
     if intent.content_job_id == "festive_greeting":
         festival = _festival_name_from_goal(intent)
         return f"Happy {festival}" if festival else "Warm Festive Wishes"
+    if intent.content_job_id == "site_visit":
+        brief = " ".join([intent.brief_summary or "", intent.creative_goal or ""]).lower()
+        if "see it to believe" in brief or "see it" in brief:
+            return "See It To Believe It"
+        return "Experience It In Person"
     if intent.content_job_id == "pricing_ad":
         return "A Smarter Way To Move Up"
     if intent.content_job_id == "location_advantage":
@@ -114,6 +119,11 @@ def _subheadline(intent: CreativeIntent, strategy: CreativeStrategy, concept: Va
         return "Celebrating gratitude, abundance, and new beginnings."
     if intent.content_job_id == "construction_update":
         return f"A construction-stage visualization based on the approved project design, shown at approximately {intent.construction_progress_percent}% progress."
+    if intent.content_job_id == "site_visit":
+        brief = " ".join([intent.brief_summary or "", intent.creative_goal or ""]).lower()
+        if "this weekend" in brief:
+            return "Join us for an exclusive site visit this weekend."
+        return "Schedule a private walkthrough and experience the project context first-hand."
     location = fact_store.first_value("micro_location") or fact_store.first_value("city")
     config = fact_store.first_value("configuration") or fact_store.first_value("configurations")
     asset_language = (concept.asset_treatment + " " + semantic).lower()
@@ -174,6 +184,8 @@ def _cta(content_job_id: str, strategy: CreativeStrategy, production: Production
     if content_job_id == "festive_greeting":
         clean = subject.strip() or "the brand"
         return f"Warm wishes from {clean}"
+    if content_job_id == "site_visit":
+        return "Book Your Site Visit"
     if production.contact_plan.values and strategy.creative_mode in {"offer_led", "proof_led"}:
         return "Enquire Now"
     return CTA_BY_JOB.get(content_job_id, "Discover More")
@@ -229,7 +241,7 @@ def _project_specific_intro(subject: str) -> str:
 
 def _festival_name_from_goal(intent: CreativeIntent) -> str:
     text = " ".join([intent.brief_summary or "", intent.creative_goal or ""]).lower()
-    known = ["pongal", "diwali", "eid", "navratri", "christmas", "new year", "holi", "ganesh chaturthi", "onam", "raksha bandhan"]
+    known = ["pongal", "diwali", "deepavali", "eid", "ramadan", "navratri", "christmas", "new year", "holi", "ganesh chaturthi", "onam", "raksha bandhan", "makar sankranti", "akshaya tritiya", "gudi padwa", "dussehra", "dusshera"]
     for item in known:
         if item in text:
             return item.title()

@@ -102,7 +102,7 @@ async function main() {
 }
 
 async function callImageEditPlan({ token, brandId, prompt }) {
-  const response = await fetch(`${config.apiBase}/api/creative/image-edit-plan`, {
+  const response = await fetch(`${config.apiBase}/api/creative/image-edit-prompt-plan`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -120,10 +120,10 @@ async function callImageEditPlan({ token, brandId, prompt }) {
   const text = await response.text();
   const json = text ? JSON.parse(text) : null;
   if (!response.ok) {
-    throw new Error(`/api/creative/image-edit-plan ${response.status}: ${text}`);
+    throw new Error(`/api/creative/image-edit-prompt-plan ${response.status}: ${text}`);
   }
   if (!json?.protectedPrompt) {
-    throw new Error("/api/creative/image-edit-plan did not return a protectedPrompt.");
+    throw new Error("/api/creative/image-edit-prompt-plan did not return a protectedPrompt.");
   }
   return json;
 }

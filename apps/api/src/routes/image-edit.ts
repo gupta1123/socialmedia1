@@ -1719,7 +1719,7 @@ export async function registerImageEditRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post("/api/creative/image-edit-plan", { preHandler: app.authenticate }, async (request, reply) => {
+  app.post("/api/creative/image-edit-prompt-plan", { preHandler: app.authenticate }, async (request, reply) => {
     const viewer = request.viewer;
     if (!viewer) {
       return reply.unauthorized();

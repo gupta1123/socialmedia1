@@ -30,6 +30,33 @@ TextStrategy = Literal[
 ]
 
 
+class BriefIntentPlan(BaseModel):
+    primary_visual_goal: Literal[
+        "selected_asset_hero",
+        "generated_lifestyle_scene",
+        "generated_concept_scene",
+        "copy_led_layout",
+        "proof_led_layout",
+    ] = "selected_asset_hero"
+    reference_role: Literal[
+        "hero_truth_anchor",
+        "context_grounding",
+        "style_reference",
+        "supporting_reference",
+        "none",
+    ] = "hero_truth_anchor"
+    visual_priority: str = ""
+    scene_subject: str = ""
+    people_required: bool = False
+    environment_required: List[str] = Field(default_factory=list)
+    must_include: List[str] = Field(default_factory=list)
+    must_avoid: List[str] = Field(default_factory=list)
+    grounded_facts: List[str] = Field(default_factory=list)
+    copy_goal: str = ""
+    confidence: float = 0.0
+    source: str = "deterministic"
+
+
 class ContactIntent(BaseModel):
     requested_items: List[str] = Field(default_factory=list)
     blocked_items: List[str] = Field(default_factory=list)
@@ -62,6 +89,7 @@ class CreativeIntent(BaseModel):
     text_strategy: TextStrategy = "auto"
     negative_requests: List[str] = Field(default_factory=list)
     risk_claims: List[Dict[str, Any]] = Field(default_factory=list)
+    brief_intent_plan: BriefIntentPlan = Field(default_factory=BriefIntentPlan)
 
 
 class FactValue(BaseModel):
@@ -171,6 +199,7 @@ class AssetDecision(BaseModel):
     unsupported_details: List[str] = Field(default_factory=list)
     profile: Optional[AssetProfile] = None
     selection: Dict[str, Any] = Field(default_factory=dict)
+    reference_role: str = "hero_truth_anchor"
 
 
 class TemplateConstraint(BaseModel):

@@ -13,12 +13,18 @@ def plan_creative_strategy(
     template: Optional[TemplateConstraint] = None,
 ) -> CreativeStrategy:
     mode = production.creative_mode if production.creative_mode != "auto" else intent.creative_mode
+    brief_plan = intent.brief_intent_plan
+    if brief_plan.primary_visual_goal == "generated_lifestyle_scene":
+        mode = "lifestyle_led"
     if mode == "auto":
         mode = _infer_mode(intent, asset_decision)
     semantic = (asset_decision.semantic_type or "visual asset").replace("_", " ")
     primary = intent.creative_goal or f"Create a grounded {intent.content_job_id.replace('_', ' ')} post."
-    if intent.content_job_id == "festive_greeting" and intent.festival_visual_scope == "brand_only":
-        primary = "Create a brand/occasion-led festive greeting poster without project building imagery unless explicitly requested."
+    if intent.content_job_id == "festive_greeting":
+        if intent.festival_visual_scope == "building_led":
+            primary = "Create a festive greeting with project/architecture context while keeping festival symbolism respectful and truthful."
+        else:
+            primary = "Create a brand/occasion-led festive greeting poster; festival symbolism and mood lead, and building imagery is used only if explicitly requested by the brief."
     if intent.content_job_id == "construction_update" and intent.construction_visual_mode == "visualized_progress_from_project_truth":
         primary = f"Create a construction-stage visualization from the approved project architecture at approximately {intent.construction_progress_percent}% progress, without implying verified current site progress."
     if mode == "copy_led":
@@ -29,10 +35,25 @@ def plan_creative_strategy(
         hierarchy = ["offer/proposition", "project proof", "CTA", "contact"]
     elif mode == "proof_led":
         hierarchy = ["verified fact", "visual proof", "short explanation", "CTA"]
+    elif mode == "lifestyle_led":
+        hierarchy = ["generated lifestyle scene", "headline", "site visit CTA", "project context"]
     else:
         hierarchy = ["visual idea", "headline", "support copy", "CTA"]
-    asset_strategy = asset_decision.asset_use_plan or f"Use the selected {semantic} as the truthful visual anchor and adapt the design around what it actually contains."
+    if brief_plan.primary_visual_goal == "generated_lifestyle_scene":
+        asset_strategy = (
+            f"Generate the requested lifestyle scene as the hero visual: {brief_plan.scene_subject}. "
+            "Use selected references only for project/context grounding unless the user explicitly asks to use them as the hero."
+        )
+    else:
+        asset_strategy = asset_decision.asset_use_plan or f"Use the selected {semantic} as the truthful visual anchor and adapt the design around what it actually contains."
+        if mode == "graphic_led" and asset_decision.semantic_type in {"building_exterior", "exterior", "facade", "aerial", "tower"}:
+            asset_strategy = (
+                "Use the selected building as the architectural truth source, not merely as a rectangular photo. "
+                "Creative presentation may use crop, cutout, masking, scale, layered graphics, and type-image interaction while preserving architecture."
+            )
     template_strategy = template.adaptation_rule if template else "No fixed template is required; choose a strong composed poster layout."
+    if mode == "graphic_led":
+        template_strategy = "Use any selected template only as loose hierarchy guidance; the creative poster device and truth contract win over template geometry."
     copy_strategy = _copy_strategy(mode, intent)
     novelty = _novelty_requirement(intent, semantic)
     risk_notes = list(asset_decision.truth_constraints)
@@ -49,6 +70,11 @@ def plan_creative_strategy(
 
 
 def _infer_mode(intent: CreativeIntent, asset_decision: AssetDecision) -> str:
+    style_blob = " ".join(intent.requested_visual_style or []).lower()
+    if any(term in style_blob for term in ["bold campaign", "graphic", "poster", "instagram", "social", "not boxy", "canva"]):
+        return "graphic_led"
+    if intent.brief_intent_plan.primary_visual_goal == "generated_lifestyle_scene":
+        return "lifestyle_led"
     if intent.requested_asset_semantics and asset_decision.semantic_type in {"interior", "amenity", "lobby", "entrance"}:
         return "lifestyle_led"
     if intent.content_job_id in {"pricing_ad"}:

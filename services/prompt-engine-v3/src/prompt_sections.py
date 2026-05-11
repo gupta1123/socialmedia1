@@ -66,6 +66,36 @@ def _asset_safe_variant_label(label: str, asset_decision: AssetDecision, intent:
 
 
 def _brand_palette_section(context: Dict[str, Any]) -> str:
+    selected_palette = context.get("selected_color_palette") if isinstance(context.get("selected_color_palette"), dict) else {}
+    selected_mode = str(selected_palette.get("mode") or "auto").lower()
+    selected_strength = str(selected_palette.get("strength") or "soft").lower()
+    selected_colors = _extract_palette_colors(selected_palette.get("colors"))
+    if selected_mode in {"custom", "brand", "preset", "curated"}:
+        source_label = {
+            "custom": "selected custom palette",
+            "brand": "brand palette",
+            "preset": "selected preset palette",
+            "curated": str(selected_palette.get("palette_name") or "selected curated palette"),
+        }.get(selected_mode, "selected palette")
+        if selected_colors:
+            prefix = "Color palette lock" if selected_strength == "hard" else "Color palette direction"
+            action = "use only these colors for non-photographic design surfaces" if selected_strength == "hard" else "use these colors as the main design direction"
+            return (
+                f"{prefix}: {action} from the {source_label} — "
+                + ", ".join(selected_colors[:8])
+                + ". Apply the palette to backgrounds, graphic shapes, dividers, fine rules, typography accents, and editorial surfaces. Do not recolor supplied logos, people, realistic buildings, or reference photos."
+            )
+        if selected_mode == "preset":
+            return (
+                "Color palette direction: follow the selected preset's color rules where available; otherwise fall back to the brand palette. "
+                "Apply color only to design surfaces and typography accents. Do not recolor supplied logos, people, realistic buildings, or reference photos."
+            )
+        if selected_mode == "brand":
+            return (
+                "Color palette direction: use the brand profile colors as the visual color system. "
+                "Apply color only to design surfaces and typography accents. Do not recolor supplied logos, people, realistic buildings, or reference photos."
+            )
+
     brand = context.get("brand") if isinstance(context.get("brand"), dict) else {}
     profile = brand.get("profile") if isinstance(brand.get("profile"), dict) else {}
     candidates = [
@@ -112,7 +142,24 @@ def _brand_palette_section(context: Dict[str, Any]) -> str:
         + ". Apply it to background fields, graphic shapes, dividers, fine rules, accents, and editorial surfaces. Keep the palette restrained and premium; do not oversaturate or recolor the supplied logo."
     )
 
+def _extract_palette_colors(value: Any) -> List[str]:
+    if isinstance(value, str):
+        clean = value.strip()
+        return [clean] if clean.startswith("#") and len(clean) in {4, 7} else []
+    if isinstance(value, list):
+        colors: List[str] = []
+        for item in value:
+            colors.extend(_extract_palette_colors(item))
+        return list(dict.fromkeys(colors))
+    if isinstance(value, dict):
+        colors = []
+        for item in value.values():
+            colors.extend(_extract_palette_colors(item))
+        return list(dict.fromkeys(colors))
+    return []
+
 def _asset_section(asset_decision: AssetDecision, intent: CreativeIntent) -> str:
+    brief_plan = intent.brief_intent_plan
     if not asset_decision.selected_asset_id:
         if intent.content_job_id == "festive_greeting" and intent.festival_visual_scope == "brand_only":
             return (
@@ -121,6 +168,22 @@ def _asset_section(asset_decision: AssetDecision, intent: CreativeIntent) -> str
             )
         return "No supplied project image is required for this concept-led visual. Do not invent project-specific architecture, locations, amenities, or factual claims."
     semantic = (asset_decision.semantic_type or "project visual").replace("_", " ")
+    if brief_plan.primary_visual_goal == "generated_lifestyle_scene" and asset_decision.reference_role == "context_grounding":
+        environment = ", ".join(brief_plan.environment_required[:5])
+        include = ", ".join(brief_plan.must_include[:6])
+        base = (
+            f"Generate the requested lifestyle scene as the hero visual: {brief_plan.scene_subject}. "
+            f"Use the supplied {semantic} asset only as project/context grounding for identity, visual credibility, township/architecture character, and factual constraints. "
+            "Do not recreate the selected reference as the main image, facade crop, tower cutout, or static architecture poster."
+        )
+        if environment:
+            base += f" Required environment cues: {environment}."
+        if include:
+            base += f" Must include visually: {include}."
+        constraints = " ".join(asset_decision.truth_constraints)
+        if constraints:
+            base += f" Reference constraints: {constraints}"
+        return base
     if intent.content_job_id == "construction_update" and intent.construction_visual_mode == "visualized_progress_from_project_truth" and not _supports_actual_construction(asset_decision):
         base = (
             f"Use the supplied {semantic} asset as the approved architectural truth source, then visualize the same design at approximately {intent.construction_progress_percent}% construction progress. "
@@ -269,10 +332,13 @@ def _production_section(production: ProductionPlan) -> str:
 
 
 def _grounding_section(asset_decision: AssetDecision, allow_price_claims: bool, production: ProductionPlan) -> str:
+    allow_people = asset_decision.reference_role == "context_grounding"
     constraints = [
-        "Do not add facade signage, project or brand names physically installed on the building, fake logos, fake QR codes, fake contact details, extra towers, altered architecture, unsupported amenities, unsupported surroundings, ocean/water bodies, random people, template names, asset IDs, or system labels.",
+        "Do not add facade signage, project or brand names physically installed on the building, fake logos, fake QR codes, fake contact details, extra towers, altered architecture, unsupported amenities, unsupported surroundings, ocean/water bodies, template names, asset IDs, or system labels.",
         "Abstract, graphic, studio, paper, gradient, symbolic, cutout, typographic, and editorial treatments are allowed if they do not imply false physical surroundings or alter project truth.",
     ]
+    if not allow_people:
+        constraints[0] = constraints[0].replace("template names", "random people, template names")
     if not allow_price_claims:
         constraints.append("Do not include price, EMI, discount, offer, or booking amount claims.")
     if production.text_treatment == "reserve_space":

@@ -18,6 +18,7 @@ from .presets import (
     preset_rera_trigger_fact_types,
     preset_requires_logo,
     preset_requires_rera_qr,
+    preset_rera_is_disabled,
     selected_preset,
 )
 from .schemas import CompileRequest
@@ -50,7 +51,8 @@ def resolve_production_plan(
     )
     secondary_logo_plan = _secondary_logo_from_additional(additional_logos)
     rera_triggered_by_preset = _preset_triggers_rera_qr(preset, request, intent, fact_store)
-    include_rera = bool(request.include_rera_qr or wants_rera_qr(request) or preset_requires_rera_qr(preset) or rera_triggered_by_preset) and "qr" not in intent.negative_requests and "rera" not in intent.negative_requests
+    preset_disables_rera = preset_rera_is_disabled(preset)
+    include_rera = (not preset_disables_rera) and bool(request.include_rera_qr or wants_rera_qr(request) or preset_requires_rera_qr(preset) or rera_triggered_by_preset) and "qr" not in intent.negative_requests and "rera" not in intent.negative_requests
     contact_plan = resolve_contact_plan(
         intent=intent,
         fact_store=fact_store,

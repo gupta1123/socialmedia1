@@ -30,6 +30,7 @@ def compile_image_prompt(
     template_constraint: Any = None,
     concept: Any = None,
     copy_plan: Any = None,
+    prompt_format: str = "legacy",
 ) -> str:
     base = strip_internal_tokens(prompt or "")
     base = remove_unsafe_commercial_claims(base)
@@ -63,6 +64,7 @@ def compile_image_prompt(
         template_constraint=template_constraint,
         concept=concept,
         copy_plan=copy_plan,
+        prompt_format=prompt_format,
     )
 
 
@@ -87,38 +89,59 @@ def compile_final_provider_prompt(
     template_constraint: Any = None,
     concept: Any = None,
     copy_plan: Any = None,
+    prompt_format: str = "legacy",
 ) -> str:
     # New section-based compiler. The image model only sees this final text, so the
     # prompt must lead with brief intent, asset usage, concept, copy behavior, and
     # only then constraints. The old branch remains as fallback for direct calls.
     if intent is not None and strategy is not None and production is not None and asset_decision is not None and concept is not None and copy_plan is not None:
-        from .prompt_sections import assemble_prompt_sections
         from .template_resolver import resolve_template_constraint
 
         tc = template_constraint or resolve_template_constraint(template, asset_decision)
         clean_source = sanitize_optional_layer_language(source_prompt, include_logo, include_rera_qr, bool(contact_values))
         clean_source = strip_internal_tokens(clean_source)
-        sections = assemble_prompt_sections(
-            source_prompt=clean_source,
-            context=context,
-            intent=intent,
-            strategy=strategy,
-            production=production,
-            asset_decision=asset_decision,
-            template=tc,
-            concept=concept,
-            copy_plan=copy_plan,
-            creative_direction=creative_direction,
-            allow_price_claims=allow_price_claims,
-        )
-        prompt = " ".join(sentence_dedupe(sections))
+        if prompt_format == "structured_v2":
+            from .structured_prompt_formatter import compose_structured_provider_prompt
+
+            prompt = compose_structured_provider_prompt(
+                source_prompt=clean_source,
+                context=context,
+                intent=intent,
+                strategy=strategy,
+                production=production,
+                asset_decision=asset_decision,
+                template=tc,
+                concept=concept,
+                copy_plan=copy_plan,
+                allow_price_claims=allow_price_claims,
+            )
+        else:
+            from .prompt_sections import assemble_prompt_sections
+
+            sections = assemble_prompt_sections(
+                source_prompt=clean_source,
+                context=context,
+                intent=intent,
+                strategy=strategy,
+                production=production,
+                asset_decision=asset_decision,
+                template=tc,
+                concept=concept,
+                copy_plan=copy_plan,
+                creative_direction=creative_direction,
+                allow_price_claims=allow_price_claims,
+            )
+            prompt = " ".join(sentence_dedupe(sections))
         prompt = semantic_prompt_repair(prompt, context, asset, intent=intent)
         prompt = remove_unsafe_commercial_claims(prompt)
         prompt = repair_structural_change_requests(prompt, _intent_text(intent))
         prompt = sanitize_optional_layer_language(prompt, include_logo, include_rera_qr, bool(contact_values))
         if not allow_price_claims:
             prompt = remove_price_claims(prompt)
-        return truncate_on_sentence(prompt, max_chars)
+        route = context.get("creative_route") if isinstance(context, dict) else {}
+        route_key = str(route.get("key") if isinstance(route, dict) else "")
+        effective_max_chars = 4600 if route_key and route_key != "editorial_grounded_post" else max_chars
+        return truncate_on_sentence(prompt, effective_max_chars)
 
     is_festive = context.get("content_job", {}).get("content_job_id") == "festive_greeting"
     subject_name = brand_name(context) if is_festive and not context.get("project") else project_name(context)
@@ -137,7 +160,7 @@ def compile_final_provider_prompt(
     if has_visual_asset(asset):
         parts.append(asset_truth_sentence(asset, visual))
     else:
-        parts.append("Use a graphic-led composition; do not invent project-specific architecture or unsupported surroundings.")
+        parts.append("Use a graphic-led composition; do not invent project-specific architecture, factual surroundings, or unsupported claims. Abstract symbolic/graphic backgrounds are allowed when they do not imply false project facts.")
 
     template_instruction = template_provider_instruction(template)
     if template_instruction:
@@ -289,8 +312,7 @@ def ensure_construction_update_visual_instruction(prompt: str, asset: Dict[str, 
     else:
         instruction = (
             "Construction-update visual requirement: transform the approved project architecture into a believable under-construction visualization. "
-            "Preserve the tower massing, facade rhythm, proportions, and podium geometry from the supplied asset, but show tasteful work-in-progress cues such as partial facade completion, scaffold bands, safety netting, tower-crane silhouettes, temporary hoarding, and a controlled construction-site foreground. "
-            "This should look like a premium construction milestone poster, not a completed launch render."
+            "Preserve tower massing, facade rhythm, proportions, and podium geometry; use restrained cues such as scaffold bands, safety netting, crane silhouettes, temporary hoarding, and construction foreground."
         )
     if "construction-update visual requirement" in prompt.lower():
         return prompt
@@ -599,7 +621,7 @@ def semantic_prompt_repair(text: str, context: Dict[str, Any], asset: Dict[str, 
         }
         for pattern, repl in replacements.items():
             text = re.sub(pattern, repl, text, flags=re.I)
-        guard = "Brand-only festive rule: do not include any building, tower, facade, project render, construction scene, RERA, pricing, amenity, or real-estate claim unless explicitly requested."
+        guard = "Brand-only festive rule: do not include any building, tower, facade, project render, construction scene, pricing, amenity, or real-estate claim unless explicitly requested."
         if guard.lower() not in text.lower():
             text += " " + guard
     if content_job_id == "construction_update" and not asset_supports_construction_progress(asset):
